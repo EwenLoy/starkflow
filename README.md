@@ -1,8 +1,8 @@
 # StarkFlow — multiplayer for Construct 3 games on your own server
 
 [![CI](https://github.com/EwenLoy/starkflow/actions/workflows/ci.yml/badge.svg)](https://github.com/EwenLoy/starkflow/actions/workflows/ci.yml)
-[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
-[![Commercial license](https://img.shields.io/badge/license-commercial%20available-orange.svg)](LICENSE-COMMERCIAL.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Donate](https://img.shields.io/badge/donate-dalink.to%2Fewenloy-ff69b4.svg)](https://dalink.to/ewenloy)
 
 **EN** — StarkFlow adds multiplayer to Construct 3 games without a backend service: you run one Go binary
 on your own machine or VPS, and players connect straight to it over WebSocket.
@@ -38,10 +38,9 @@ Protocol summary in English: rooms are created with `room.join {create:true}` (a
 `player.*`, `event`, `err`. Client messages: `hello`, `room.join`, `room.leave`, `room.list`, `event`,
 `state.set/add/toggle`, `player.set`, `ping`. Details: `server/internal/proto/proto.go` and the Russian section below.
 
-Dual-licensed: **GNU GPL v3.0** (see [LICENSE](LICENSE)) — free, including for commercial use, as long as you
-comply with the GPL and publish the full source of your derivative work — **or** a one-time
-[commercial license](LICENSE-COMMERCIAL.md) for **$10 per developer** when GPL compliance is not an option
-(closed-source games, private servers).
+**MIT licensed** — use it for anything, including commercial games, no strings attached, just keep the copyright
+notice (see [LICENSE](LICENSE)). If StarkFlow saves you time, you can
+[support development](https://dalink.to/ewenloy) — completely optional and it changes nothing about the license.
 
 ---
 
@@ -157,12 +156,13 @@ URL: `ws(s)://host/ws?v=1&app=APPID`. Все кадры JSON с полем `t`.
 
 ## Лицензия
 
-StarkFlow распространяется по **двойной лицензии**:
+MIT — можно всё: личные и коммерческие проекты, правки, встраивание, продажа продуктов на его основе.
+Единственное условие — сохранить текст лицензии и копирайт. Полный текст: [LICENSE](LICENSE).
 
-- **GNU GPL v3.0** — бесплатно, в том числе для коммерческих проектов, но с условием: производная работа,
-  которую вы распространяете (сборка игры с плагином, изменённый сервер, который вы передаёте), должна идти
-  под GPL-совместимой лицензией с полным исходным кодом. Полный текст — [LICENSE](LICENSE).
-- **Коммерческая лицензия — 10 $ разово на разработчика** — для закрытых игр, приватных серверов и всего,
-  где условия GPL не подходят. Условия и порядок покупки — [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
+## Поддержать проект
 
-Коротко: хочешь открытый код — пользуйся бесплатно по GPL; не хочешь открывать свой — покупаешь коммерческую.
+Проект бесплатный и open source. Если он сэкономил тебе время — можно отправить донат:
+**https://dalink.to/ewenloy**
+
+Это добровольно и никак не влияет ни на лицензию, ни на приоритет поддержки: issues и pull request'ы
+принимаются одинаково от всех. Кнопка поддержки также есть в шапке репозитория (`.github/FUNDING.yml`).

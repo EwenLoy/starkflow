@@ -1,0 +1,102 @@
+# ---- OS ----
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# ---- IDE / редакторы ----
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.swp
+*~
+
+# ---- .NET / C# ----
+bin/
+obj/
+*.dll
+*.pdb
+*.exe
+*.nupkg
+project.lock.json
+
+# ---- C / C++ ----
+[Bb]uild/
+[Bb]uilds/
+[Oo]ut/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+*.o
+*.obj
+*.so
+*.dylib
+*.a
+*.lib
+*.ilk
+*.exp
+*.pch
+
+# ---- Rust ----
+target/
+
+# ---- Node / JS / TS ----
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# ---- Unity / Unreal / Godot ----
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]in/
+Logs/
+UserSettings/
+DerivedDataCache/
+Intermediate/
+Saved/
+*.unitypackage
+*.apk
+*.aab
+.godot/
+.mono/
+
+# ---- Логи и временные файлы ----
+*.log
+*.pid
+*.cache
+*.tmp
+
+# ---- Секреты и локальные конфиги ----
+.env
+.env.*
+!.env.example
+*.local
+secrets.json
+appsettings.Development.json
+certs/
+*.pem
+*.key

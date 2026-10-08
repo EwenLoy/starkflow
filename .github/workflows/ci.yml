@@ -66,6 +66,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Validate the compose files
+        env:
+          STARKFLOW_SECRET: ci
+          SF_DOMAIN: game.example.com
+          CF_TUNNEL_TOKEN: ci
+        run: |
+          docker compose config -q
+          docker compose -f docker-compose.tls.yml --profile caddy --profile cfdomain config -q
+
       - name: Build the image
         run: docker build -t starkflow:ci .
       - name: Run the container
@@ -82,6 +91,22 @@ jobs:
           SF_BASE: http://127.0.0.1:8099
           SF_WS: ws://127.0.0.1:8099/ws
         run: node tests/server-smoke.mjs
+      - name: Check the PORT variable and the healthcheck (hosting platforms pass the port this way)
+        run: |
+          docker run -d --name starkflow-port -p 8098:3000 -e PORT=3000 -e STARKFLOW_SECRET=ci starkflow:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8098/health; then break; fi
+            sleep 1
+          done
+          if ! curl -fsS http://127.0.0.1:8098/health; then docker logs starkflow-port; docker rm -f starkflow-port; exit 1; fi
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' starkflow-port)
+            if [ "$status" = healthy ]; then echo "healthcheck reports healthy"; docker rm -f starkflow-port; exit 0; fi
+            sleep 3
+          done
+          docker logs starkflow-port; docker rm -f starkflow-port; echo "healthcheck never reported healthy"; exit 1
+
+
       - name: Container logs
         if: always()
         run: docker logs starkflow

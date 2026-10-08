@@ -63,6 +63,13 @@ func Load() Config {
 	}
 	if v := os.Getenv("STARKFLOW_ADDR"); v != "" {
 		c.Addr = v
+	} else if v := os.Getenv("PORT"); v != "" {
+		// Хостинги (в том числе Bothost) передают порт в PORT и ждут, что
+		// приложение слушает 0.0.0.0 именно на нём.
+		if !strings.HasPrefix(v, ":") {
+			v = ":" + v
+		}
+		c.Addr = v
 	}
 	if v := os.Getenv("STARKFLOW_ORIGINS"); v != "" {
 		for _, o := range strings.Split(v, ",") {

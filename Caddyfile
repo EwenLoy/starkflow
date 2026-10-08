@@ -1,0 +1,8 @@
+# Caddy для StarkFlow: сам получает и продлевает сертификат Let's Encrypt,
+# сам проксирует WebSocket (никаких дополнительных заголовков не нужно).
+# Домен берётся из переменной SF_DOMAIN, см. docker-compose.tls.yml.
+{$SF_DOMAIN} {
+	log
+	encode zstd gzip
+	reverse_proxy starkflow:8080
+}

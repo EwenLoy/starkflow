@@ -15,6 +15,7 @@ RUN adduser -D -H -u 10001 starkflow
 COPY --from=build /out/starkflow /usr/local/bin/starkflow
 USER 10001
 EXPOSE 8080
-# тестовая страница вшита в бинарник, /health отвечает "ok"
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s CMD wget -q -O- http://127.0.0.1:8080/health || exit 1
+# тестовая страница вшита в бинарник, /health отвечает "ok".
+# Порт берётся из PORT, если платформа его передаёт (Bothost и подобные), иначе 8080.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s CMD wget -q -O- "http://127.0.0.1:${PORT:-8080}/health" || exit 1
 ENTRYPOINT ["/usr/local/bin/starkflow"]

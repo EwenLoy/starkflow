@@ -19,8 +19,10 @@ on your own machine or VPS, and players connect straight to it over WebSocket.
   (shared HP with `add` rules) and cursor synchronisation (per-player state + events).
 - **Construct 3 plugin** `EwenLoy_StarkFlow`: 14 actions, 20 conditions, 30 expressions — install
   `dist/starkflow.c3addon` via C3 → View → Addon Manager. Full ACE list: `plugin/aces.json`.
-- **Docker**: `docker compose up -d --build` runs the server in a container; add `--profile tunnel` to get a
-  public https/wss address (Cloudflare Tunnel) without opening any ports — handy when the game page is served over https.
+- **Docker**: `docker compose up -d --build` runs the server in a container; `--profile tunnel` adds a temporary
+  public https/wss address, and `docker-compose.tls.yml` gives a permanent `wss://` on your own domain (Caddy with
+  automatic Let's Encrypt, or a Cloudflare Tunnel with your token — no open ports needed). The server also honours
+  the `PORT` variable that bot-hosting platforms pass, so it works behind such platforms out of the box.
 
 Quick start:
 
@@ -87,6 +89,7 @@ go run ./cmd/starkflow
 Настройки через переменные окружения:
 
 - `STARKFLOW_ADDR`: адрес, по умолчанию `:8080`
+- `PORT`: порт от хостинг-платформы (Bothost и подобные передают его сами). Используется, только если `STARKFLOW_ADDR` не задан, и приложение всё равно слушает `0.0.0.0`
 - `STARKFLOW_SECRET`: секрет подписи токенов игроков. Если не задан, при каждом запуске берётся случайный, и токены старых игроков перестают работать (плагин сам получит новый)
 - `STARKFLOW_ORIGINS`: разрешённые Origin через запятую. Пусто = разрешено всё (только для разработки)
 - `STARKFLOW_ROOM_NAME_MAX`: максимальная длина названия комнаты в символах (любой язык, включая эмодзи), по умолчанию `32`. Лимит приходит клиенту в `welcome`
@@ -118,12 +121,65 @@ docker compose --profile tunnel up -d
 docker compose logs tunnel | grep trycloudflare     # получишь адрес вида https://xxxx.trycloudflare.com
 ```
 
-В свойствах плагина тогда указывай `wss://xxxx.trycloudflare.com/ws`. Туннель `trycloudflare` — тестовый:
-адрес живёт, пока живёт контейнер, у бесплатного варианта есть лимиты. Для постоянного адреса нужен свой домен
-(Cloudflare Tunnel с токеном или Caddy с автоматическим Let's Encrypt) — скажи, добавлю отдельный compose-файл.
+В свойствах плагина тогда указывай `wss://xxxx.trycloudflare.com/ws`. Туннель `trycloudflare` — тестовый: адрес
+меняется после каждого перезапуска контейнера. Для постоянного адреса на своём домене есть отдельный
+`docker-compose.tls.yml` — см. следующий раздел.
 
 Проверки: образ собирается и проверяется в CI (job `docker`: сборка, запуск, ожидание `/health`, затем smoke-тест
 внутри контейнера), а состояние контейнера видно через `docker compose ps` — healthcheck стучит в `/health`.
+
+## Свой домен и https (постоянный адрес)
+
+`docker-compose.tls.yml` даёт `wss://` на твоём домене двумя способами. Оба читают `.env`: скопируй
+`.env.example` в `.env` и заполни `STARKFLOW_SECRET` и `SF_DOMAIN`.
+
+**Вариант 1 — Caddy на том же сервере.** Нужны открытые порты 80 и 443 и A-запись домена на IP сервера:
+
+```bash
+cp .env.example .env     # STARKFLOW_SECRET и SF_DOMAIN=game.example.com
+docker compose -f docker-compose.tls.yml --profile caddy up -d --build
+docker compose -f docker-compose.tls.yml logs -f caddy   # здесь видно, что сертификат получен
+```
+
+Caddy сам получает и продлевает сертификат Let's Encrypt и сам проксирует WebSocket — весь конфиг это файл
+`Caddyfile`. Адрес для плагина C3: `wss://game.example.com/ws`. Проверка: открой `https://game.example.com`,
+страница сама подставит `wss://` и покажет «подключено».
+
+**Вариант 2 — туннель Cloudflare, порты можно вообще не открывать.** В Cloudflare Zero Trust → Networks →
+Tunnels создай туннель, добавь публичный хостнейм `game.example.com` → `http://starkflow:8080` и скопируй токен:
+
+```bash
+CF_TUNNEL_TOKEN=eyJhIjoi... docker compose -f docker-compose.tls.yml --profile cfdomain up -d --build
+```
+
+DNS-запись и сертификат Cloudflare сделает сам. Адрес для плагина тот же: `wss://game.example.com/ws`.
+
+Оба файла проверяются в CI командой `docker compose config -q`, так что синтаксис и переменные заведомо валидны.
+
+Если домен на Cloudflare и включён оранжевый прокси, для варианта 1 поставь SSL-режим **Full (strict)**: иначе
+получится петля редиректов между Cloudflare и Caddy.
+
+## Хостинг ботов вместо VPS (Bothost и подобные)
+
+Такие платформы сделаны под Telegram-ботов, но этому серверу подходят: он слушает `0.0.0.0`, длительное
+соединение держится за счёт `ping` каждые 15 с (прокси не рвёт его по таймауту), а состояние нигде не хранится —
+перезапуск контейнера означает лишь то, что игроки переподключатся по своим токенам.
+
+- **Dockerfile** уже лежит в корне репозитория: включи «Использовать собственный Dockerfile».
+- **Порт**: платформа передаёт порт в переменной `PORT` и требует слушать `0.0.0.0` — сервер делает это сам,
+  поле «Порт» в панели можно не менять, `STARKFLOW_ADDR` задавать не нужно.
+- **Домен и https**: включи «Включить веб-интерфейс / админку / webhook» — платформа выдаст адрес и сертификат
+  (на бесплатном тарифе недоступно, на Базовом доступно). Свой домен тоже можно. Открой выданный адрес в
+  браузере: страница подставит `wss://` сама, и если статус «подключено» — WebSocket через их прокси проходит.
+- **Переменные окружения** (в панели): `STARKFLOW_SECRET` — обязательно, иначе токены игроков слетают при каждом
+  перезапуске контейнера; при желании `STARKFLOW_ORIGINS=https://твой-домен` и `STARKFLOW_ROOM_NAME_MAX`.
+- **Память**: серверу хватает 64–128 МБ. Если на тарифе мало памяти даже для сборки — собери образ локально и
+  залей готовый: `docker save starkflow | gzip > starkflow.tgz`, на платформе `docker load`.
+
+Единственное, что в документации Botohost не описано, — проксирование WebSocket. Поэтому после деплоя проверь
+браузером именно свой домен: если соединение не поднимается, значит апгрейд не проходит, и остаются VPS
+(`docker-compose.yml`) или вариант 2 из предыдущего раздела.
+
 
 ## Тесты
 

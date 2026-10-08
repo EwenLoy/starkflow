@@ -1,0 +1,64 @@
+# StarkFlow за твоим доменом с настоящим https (wss://) — постоянный адрес, не временный туннель.
+#
+# Вариант 1, Caddy на этом же сервере (нужны открытые порты 80 и 443):
+#   cp .env.example .env      # заполни STARKFLOW_SECRET, SF_DOMAIN
+#   docker compose -f docker-compose.tls.yml --profile caddy up -d --build
+#   DNS: A-запись game.example.com -> IP сервера. Сертификат Caddy получит и продлит сам.
+#   Адрес для плагина C3: wss://game.example.com/ws
+#
+# Вариант 2, порты открывать нельзя (домен на Cloudflare, туннель с токеном):
+#   Cloudflare Zero Trust -> Networks -> Tunnels -> создать туннель,
+#   публичный хостнейм game.example.com -> http://starkflow:8080, скопировать токен:
+#   CF_TUNNEL_TOKEN=... docker compose -f docker-compose.tls.yml --profile cfdomain up -d --build
+#   DNS-запись создастся сама. Адрес для плагина C3 тот же: wss://game.example.com/ws
+services:
+  starkflow:
+    build: .
+    image: starkflow:latest
+    restart: unless-stopped
+    environment:
+      STARKFLOW_ADDR: ":8080"
+      STARKFLOW_SECRET: "${STARKFLOW_SECRET:?set STARKFLOW_SECRET in .env}"
+      # Если ограничиваешь Origin, свой домен обязан быть в списке:
+      # STARKFLOW_ORIGINS: "https://game.example.com"
+      # STARKFLOW_ROOM_NAME_MAX: "32"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # Вариант 1: https на своём домене без ручных сертификатов.
+  caddy:
+    profiles: ["caddy"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SF_DOMAIN: "${SF_DOMAIN:?set SF_DOMAIN in .env, for example game.example.com}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - starkflow
+
+  # Вариант 2: https на своём домене через туннель Cloudflare, порты остаются закрытыми.
+  cloudflared:
+    profiles: ["cfdomain"]
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN}
+    depends_on:
+      - starkflow
+
+volumes:
+  caddy_data:
+  caddy_config:

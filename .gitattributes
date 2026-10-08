@@ -1,0 +1,4 @@
+# Нормализация переводов строк: в репозитории всегда LF
+* text=auto eol=lf
+*.zip binary
+*.c3addon binary

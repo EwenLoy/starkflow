@@ -3,10 +3,10 @@
 	"fileDescription": "Strings for StarkFlow.",
 	"text": {
 		"plugins": {
-			"starkflow": {
+			"ewenloy_starkflow": {
 				"name": "StarkFlow",
 				"description": "Simple multiplayer: rooms, events and shared room state with atomic add.",
-				"help-url": "https://example.com/starkflow",
+				"help-url": "https://github.com/EwenLoy/starkflow",
 				"properties": {
 					"server-url": {
 						"name": "Server URL",

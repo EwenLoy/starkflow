@@ -3,7 +3,7 @@
 {
 	const C3 = globalThis.C3;
 
-	C3.Plugins.StarkFlow = class StarkFlowPlugin extends globalThis.ISDKPluginBase
+	C3.Plugins.EwenLoy_StarkFlow = class StarkFlowPlugin extends globalThis.ISDKPluginBase
 	{
 		constructor()
 		{

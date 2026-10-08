@@ -3,7 +3,7 @@
 {
 	const C3 = globalThis.C3;
 
-	C3.Plugins.StarkFlow.Cnds =
+	C3.Plugins.EwenLoy_StarkFlow.Cnds =
 	{
 		// connection
 		OnConnected() { return true; },

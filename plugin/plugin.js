@@ -3,10 +3,10 @@
 {
 	const SDK = globalThis.SDK;
 
-	const PLUGIN_ID = "StarkFlow";
+	const PLUGIN_ID = "EwenLoy_StarkFlow";
 	const PLUGIN_CATEGORY = "web";
 
-	const PLUGIN_CLASS = SDK.Plugins.StarkFlow = class StarkFlowPlugin extends SDK.IPluginBase
+	const PLUGIN_CLASS = SDK.Plugins.EwenLoy_StarkFlow = class StarkFlowPlugin extends SDK.IPluginBase
 	{
 		constructor()
 		{
@@ -17,7 +17,7 @@
 			this._info.SetName(lang(".name"));
 			this._info.SetDescription(lang(".description"));
 			this._info.SetCategory(PLUGIN_CATEGORY);
-			this._info.SetAuthor("StarkFlow");
+			this._info.SetAuthor("EwenLoy");
 			this._info.SetHelpUrl(lang(".help-url"));
 			this._info.SetIcon("icon.svg", "image/svg+xml");
 			this._info.SetIsSingleGlobal(true);

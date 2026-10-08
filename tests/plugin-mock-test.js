@@ -27,13 +27,13 @@ globalThis.WebSocket = FakeWS;
 for (const f of ["plugin", "type", "instance", "actions", "conditions", "expressions"])
 	require(path + "c3runtime/" + f + ".js");
 
-const P = globalThis.C3.Plugins.StarkFlow;
+const P = globalThis.C3.Plugins.EwenLoy_StarkFlow;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fired = (inst, name) => inst.triggered.includes(P.Cnds[name]);
 
 // ---- 1. every ACE in aces.json exists in the runtime with the right arity ----
 const aces = require(path + "aces.json");
-const lang = require(path + "lang/en-US.json").text.plugins.starkflow;
+const lang = require(path + "lang/en-US.json").text.plugins.ewenloy_starkflow;
 let n = 0;
 for (const cat of Object.values(aces)) {
 	for (const [kind, table, key] of [["conditions", P.Cnds, "scriptName"], ["actions", P.Acts, "scriptName"], ["expressions", P.Exps, "expressionName"]]) {

@@ -3,7 +3,7 @@
 {
 	const SDK = globalThis.SDK;
 
-	const PLUGIN_CLASS = SDK.Plugins.StarkFlow;
+	const PLUGIN_CLASS = SDK.Plugins.EwenLoy_StarkFlow;
 
 	PLUGIN_CLASS.Instance = class StarkFlowInstance extends SDK.IInstanceBase
 	{

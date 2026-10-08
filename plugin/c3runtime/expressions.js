@@ -3,7 +3,7 @@
 {
 	const C3 = globalThis.C3;
 
-	C3.Plugins.StarkFlow.Exps =
+	C3.Plugins.EwenLoy_StarkFlow.Exps =
 	{
 		// connection
 		AuthToken() { return this._token; },

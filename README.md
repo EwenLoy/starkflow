@@ -1,3 +1,46 @@
+# StarkFlow — multiplayer for Construct 3 games on your own server
+
+[![CI](https://github.com/EwenLoy/starkflow/actions/workflows/ci.yml/badge.svg)](https://github.com/EwenLoy/starkflow/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+**EN** — StarkFlow adds multiplayer to Construct 3 games without a backend service: you run one Go binary
+on your own machine or VPS, and players connect straight to it over WebSocket.
+
+- **Rooms** have a short id and a display name in **any language** (length limit is configurable, 32 characters by
+  default). Duplicate names are allowed — the id is what identifies a room.
+- **Shared room state** with atomic `add` and per-key rules (`mode`, `min`/`max`, `maxDelta`, `reject`) —
+  the server clamps or rejects, and never trusts the client.
+- **Signed player tokens** (HMAC-SHA256, nothing stored on the server): after a connection drop the player returns
+  to the same room with the same id and the same state.
+- **Relay events** (to all / others / one player), **per-player state** (cursor positions, ready flags, colours),
+  host tracking, players kept as *suspended* for 30 s.
+- **Test client** built into the server binary: open http://localhost:8080. Two demo modes: boss fight
+  (shared HP with `add` rules) and cursor synchronisation (per-player state + events).
+- **Construct 3 plugin** `EwenLoy_StarkFlow`: 14 actions, 20 conditions, 30 expressions — install
+  `dist/starkflow.c3addon` via C3 → View → Addon Manager. Full ACE list: `plugin/aces.json`.
+
+Quick start:
+
+```
+cd server
+go mod tidy
+go test ./...
+go run ./cmd/starkflow     # test client at http://localhost:8080
+```
+
+Tests: `go test ./...` (room state, tokens), `node tests/plugin-mock-test.js` (every ACE exists in the runtime
+with the right arity + plugin behaviour on a WebSocket stub), `node tests/server-smoke.mjs` (54 live protocol
+checks against a running server). Minimum: Go 1.22+, Node 22+ for the JS tests.
+
+Protocol summary in English: rooms are created with `room.join {create:true}` (always a new room), joined with
+`room.join {room:"<id-or-name>", create:false}`; the server answers with `welcome`, `room.joined`, `state.changed`,
+`player.*`, `event`, `err`. Client messages: `hello`, `room.join`, `room.leave`, `room.list`, `event`,
+`state.set/add/toggle`, `player.set`, `ping`. Details: `server/internal/proto/proto.go` and the Russian section below.
+
+MIT licensed — see [LICENSE](LICENSE).
+
+---
+
 # StarkFlow M0-M2: сервер на Go и плагин для Construct 3
 
 Простой мультиплеер для игр на C3: **комнаты, события, общий стейт комнаты** (с атомарным `add`).
@@ -6,10 +49,10 @@
 
 | Часть | Статус |
 |---|---|
-| Плагин (рантайм), 64 действия, условия и выражения | Проверен тестом на заглушке WebSocket (`node tests/plugin-mock-test.js`): подключение, комната, события, стейт, реконнект с автоматическим повторным входом, ошибки |
+| Плагин (рантайм), 64 ACE (14 действий, 20 условий, 30 выражений) | Проверен тестом на заглушке WebSocket (`node tests/plugin-mock-test.js`): подключение, комната, события, стейт, реконнект с автоматическим повторным входом, ошибки |
 | Сверка `aces.json`, языкового файла и кода | Проверена скриптом: каждое ACE есть в коде с нужным числом параметров |
-| Тестовая страница сервера | Скрипт проверен на синтаксис |
-| **Сервер на Go** | Собран и прогнан на Go 1.26.1: `go mod tidy`, `go build ./...`, `go vet ./...`, `go test ./...` — без ошибок и правок; плюс живой smoke-тест `node tests/server-smoke.mjs` (42 проверки) против запущенного сервера — всё зелёное |
+| Тестовая страница сервера | Проверена в реальном браузере (headless Chrome через DevTools Protocol): 40 проверок отрисовки курсоров, настроек частоты и сглаживания |
+| **Сервер на Go** | Собран и прогнан на Go 1.26.1: `go mod tidy`, `go build ./...`, `go vet ./...`, `go test ./...` — без ошибок и правок; плюс живой smoke-тест `node tests/server-smoke.mjs` (54 проверки) против запущенного сервера — всё зелёное |
 | **Загрузка плагина в Construct 3** | **Не проверялась**: формат файлов сверен с документацией Addon SDK v2, но в самом C3 его не запускали |
 
 ## Запуск сервера
@@ -57,7 +100,7 @@ node tests/plugin-mock-test.js      # плагин: сверка ACE и пове
 ```
 cd server && go build -o starkflow.exe ./cmd/starkflow
 $env:STARKFLOW_SECRET='devsecret'; ./starkflow.exe    # отдельное окно
-node tests/server-smoke.mjs                            # 42 проверки протокола
+node tests/server-smoke.mjs                            # 54 проверки протокола
 ```
 
 Он проверяет вручную то, что не покрыто unit-тестами: `welcome`, создание комнаты и `room.joined`,
@@ -71,13 +114,16 @@ node tests/server-smoke.mjs                            # 42 проверки п�
 
 ## Плагин
 
-1. Construct 3: меню, View, Addon Manager, Install new addon, выбери `starkflow.c3addon`, перезапусти C3.
+1. Construct 3: меню, View, Addon Manager, Install new addon, выбери `dist/starkflow.c3addon`, перезапусти C3.
 2. Добавь объект StarkFlow (single-global) в проект и впиши Server URL и App ID.
 3. Пример для босса: при старте `Connect`, на `On connected` вызови `Join or create room "boss1"`. Удар: `Add -10 to state "boss_hp"`. Показывай `StarkFlow.State("boss_hp")`, обновляй на `On state "boss_hp" changed`.
 
 Токен игрока плагин сам кладёт в `localStorage`. В worker-режиме C3 `localStorage` недоступен, тогда сохраняй `AuthToken` сам (например, в LocalStorage-плагин) и передавай в `Connect` или `SetAuthToken`.
 
-Перед публикацией замени в `plugin/addon.json` поля `id`, `author`, `website`, `documentation`: `id` должен быть уникальным среди всех аддонов C3 (например, `ТвойНик_StarkFlow`), и он должен совпадать в `plugin/plugin.js` (константа `PLUGIN_ID`).
+Аддон зарегистрирован под уникальным id `EwenLoy_StarkFlow`. Он должен совпадать в трёх местах:
+`plugin/addon.json` (`id`), `plugin/plugin.js` (константа `PLUGIN_ID`) и ключ языка в
+`plugin/lang/en-US.json` (`text.plugins.ewenloy_starkflow`). Если делаешь форк — поменяй id на свой
+(`ТвойНик_StarkFlow`), иначе C3 посчитает оба аддона одним и тем же.
 
 ## Протокол (кратко)
 
@@ -104,3 +150,7 @@ URL: `ws(s)://host/ws?v=1&app=APPID`. Все кадры JSON с полем `t`.
 - Возврат в комнату после обрыва идёт по подписанному `userId`, а не по отдельному `resumeKey`: токен уже подписан, второй ключ не нужен.
 - Не сделано: режимы комнат locked и allowlist, шаблоны, админ-API, `appId` с отдельными секретами, `redirect` и Redis (это M5-M8). Задел есть: ключ комнаты уже `appId:имя`.
 - `Shutdown` сервера пока не закрывает открытые WebSocket-соединения аккуратно.
+
+## Лицензия
+
+MIT — см. [LICENSE](LICENSE).

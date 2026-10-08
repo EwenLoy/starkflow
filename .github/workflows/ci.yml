@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  server:
+    name: Go server (fmt, vet, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: server/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build ./...
+
+  plugin:
+    name: Construct 3 plugin (ACE + behaviour on a WebSocket stub)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tests/plugin-mock-test.js
+
+  protocol:
+    name: Live protocol smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: server/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build the server
+        run: cd server && go build -o "$RUNNER_TEMP/starkflow" ./cmd/starkflow
+      - name: Start the server and run the smoke test
+        env:
+          SF_BASE: http://127.0.0.1:8099
+          SF_WS: ws://127.0.0.1:8099/ws
+        run: |
+          STARKFLOW_ADDR=:8099 STARKFLOW_SECRET=ci "$RUNNER_TEMP/starkflow" &
+          sleep 1
+          node tests/server-smoke.mjs

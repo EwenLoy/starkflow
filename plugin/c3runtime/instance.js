@@ -6,7 +6,7 @@
 	const PROTO_VERSION = 1;
 	const LOG_LEVELS = ["debug", "info", "warn", "error", "off"];
 
-	C3.Plugins.StarkFlow.Instance = class StarkFlowInstance extends globalThis.ISDKInstanceBase
+	C3.Plugins.EwenLoy_StarkFlow.Instance = class StarkFlowInstance extends globalThis.ISDKInstanceBase
 	{
 		constructor()
 		{
@@ -84,7 +84,7 @@
 
 		_cnd(name)
 		{
-			return C3.Plugins.StarkFlow.Cnds[name];
+			return C3.Plugins.EwenLoy_StarkFlow.Cnds[name];
 		}
 
 		_buildUrl()

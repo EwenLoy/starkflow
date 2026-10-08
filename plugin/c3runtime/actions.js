@@ -3,7 +3,7 @@
 {
 	const C3 = globalThis.C3;
 
-	C3.Plugins.StarkFlow.Acts =
+	C3.Plugins.EwenLoy_StarkFlow.Acts =
 	{
 		Connect(url, token) { this._connect(url, token); },
 		Disconnect() { this._disconnect(false); },

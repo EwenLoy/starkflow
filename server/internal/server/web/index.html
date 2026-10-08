@@ -60,7 +60,9 @@
   #stage { position:relative; height:360px; border-radius:var(--r); border:1px dashed var(--line); overflow:hidden;
            background:radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0) 0 0/22px 22px, var(--card2);
            cursor:crosshair; touch-action:none; }
-  .cursor { position:absolute; pointer-events:none; transition:left .08s linear, top .08s linear; }
+  .cursor { position:absolute; left:0; top:0; margin:-2px 0 0 -2px; pointer-events:none; will-change:transform; }
+  .cursor.remote { transition:transform .11s linear; }
+  .cursor.local { transition:none; }
   .cursor svg { display:block; filter:drop-shadow(0 1px 2px #0006); }
   .cursor span { position:absolute; left:13px; top:16px; padding:2px 8px; border-radius:999px;
                  font-size:11px; font-weight:600; white-space:nowrap; color:#0b0d10; }
@@ -419,6 +421,11 @@ function onJoined(m) {
   $("cursorPane").classList.toggle("hidden", S.room.mode !== "cursor");
   renderPlayers();
   renderState();
+  if (S.room.mode === "cursor") {
+    const p = ownNext || [500, 500];   // сразу показываем свой курсор и сообщаем позицию остальным
+    setCursorPos(S.room.you, p[0], p[1]);
+    queueCursor(p[0], p[1]);
+  }
   syncUI();
 }
 function renderPlayers() {
@@ -455,7 +462,21 @@ function updateBoss() {
 }
 
 // ---- режим «курсоры» --------------------------------------------------------
+// Свой курсор рисуем сами по requestAnimationFrame и БЕЗ CSS-перехода: иначе
+// transition перезапускается на каждом pointermove (их сотни в секунду), не успевает
+// доехать и курсор дёргается. Чужой курсор приходит из сети пачками (~15 раз в секунду),
+// поэтому его как раз нужно сглаживать переходом по transform, а не двигать left/top.
 const stage = () => $("stage");
+const cursorNodes = new Map();      // id -> DOM-узел
+const cursorText = new Map();       // id -> последняя подпись, чтобы не переписывать её на каждый кадр
+const cursorPos = new Map();        // id -> [x, y] в 0..1000, чтобы перерисовать после изменения размера
+let stageW = 1, stageH = 1;
+
+function stageSize() {
+  const r = stage().getBoundingClientRect();
+  stageW = r.width || 1;
+  stageH = r.height || 1;
+}
 function stagePos(ev) {
   const r = stage().getBoundingClientRect();
   return [
@@ -464,49 +485,71 @@ function stagePos(ev) {
   ];
 }
 function cursorEl(id) {
-  let el = stage().querySelector('.cursor[data-id="' + id + '"]');
-  if (!el) {
-    el = document.createElement("div");
-    el.className = "cursor";
-    el.dataset.id = id;
-    el.innerHTML = '<svg width="17" height="23" viewBox="0 0 18 24">' +
-      '<path d="M2 2 L2 19 L6.5 14.5 L9.5 21.5 L12.5 20 L9.5 13 L16 13 Z" fill="currentColor" ' +
-      'stroke="rgba(0,0,0,.45)" stroke-width="1"/></svg><span></span>';
-    stage().appendChild(el);
-  }
+  let el = cursorNodes.get(id);
+  if (el && el.isConnected) return el;
+  el = document.createElement("div");
+  el.className = "cursor " + (S.room && id === S.room.you ? "local" : "remote");
+  el.dataset.id = id;
+  el.style.color = color(id);
+  el.innerHTML = '<svg width="17" height="23" viewBox="0 0 18 24">' +
+    '<path d="M2 2 L2 19 L6.5 14.5 L9.5 21.5 L12.5 20 L9.5 13 L16 13 Z" fill="currentColor" ' +
+    'stroke="rgba(0,0,0,.45)" stroke-width="1"/></svg><span></span>';
+  el.querySelector("span").style.background = color(id);
+  cursorNodes.set(id, el);
+  cursorText.set(id, "");
+  stage().appendChild(el);
   return el;
 }
-function drawCursor(id, x, y) {
-  const me = S.room && id === S.room.you;
+function setCursorPos(id, x, y) {
+  const isLocal = S.room && id === S.room.you;
   const el = cursorEl(id);
   el.style.display = "";
-  el.style.color = color(id);
-  el.style.left = (x / 10) + "%";
-  el.style.top = (y / 10) + "%";
-  const label = el.querySelector("span");
-  label.style.background = color(id);
-  label.textContent = nameOf(id) + (me ? " (вы)" : "");
+  el.style.transform = "translate3d(" + ((x / 1000) * stageW).toFixed(1) + "px," +
+    ((y / 1000) * stageH).toFixed(1) + "px,0)";
+  const text = nameOf(id) + (isLocal ? " (вы)" : "");
+  if (cursorText.get(id) !== text) {
+    cursorText.set(id, text);
+    el.querySelector("span").textContent = text;
+  }
+  cursorPos.set(id, [x, y]);
 }
 function removeCursor(id, hard) {
-  const el = stage().querySelector('.cursor[data-id="' + id + '"]');
+  const el = cursorNodes.get(id);
+  cursorPos.delete(id);
   if (!el) return;
-  if (hard) el.remove();
-  else el.style.display = "none";
+  if (hard) {
+    el.remove();
+    cursorNodes.delete(id);
+    cursorText.delete(id);
+  } else {
+    el.style.display = "none";
+  }
 }
 function moveCursor(id, value) {
   if (!S.room || id === S.room.you) return;
   const parts = String(value === null || value === undefined ? "" : value).split(",");
   const x = Number(parts[0]), y = Number(parts[1]);
   if (!Number.isFinite(x) || !Number.isFinite(y)) { removeCursor(id, true); return; }
-  drawCursor(id, x, y);
+  setCursorPos(id, x, y);
 }
 function renderCursors() {
-  stage().innerHTML = "";
+  for (const el of cursorNodes.values()) el.remove();
+  cursorNodes.clear();
+  cursorText.clear();
+  cursorPos.clear();
+  if (cursorTimer) { clearTimeout(cursorTimer); cursorTimer = null; }
+  cursorPending = null;
+  cursorSent = "";
+  stageSize();
   if (!S.room) return;
   for (const k of Object.keys(S.st)) {
     const m = /^cursor_(\d+)$/.exec(k);
     if (m) moveCursor(Number(m[1]), S.st[k]);
   }
+}
+function redrawCursors() {
+  stageSize();
+  for (const [id, p] of cursorPos) setCursorPos(id, p[0], p[1]);
 }
 function ripple(x, y, col) {
   const d = document.createElement("div");
@@ -517,16 +560,21 @@ function ripple(x, y, col) {
   stage().appendChild(d);
   setTimeout(() => d.remove(), 650);
 }
-let cursorTimer = null, cursorPending = null, cursorSent = "";
+let cursorTimer = null, cursorPending = null, cursorSent = "", ownFrame = 0, ownNext = null;
+
+// В сеть отправляем не чаще 60 мс: у сервера лимит 20 записей стейта в секунду на игрока.
 function queueCursor(x, y) {
-  cursorPending = x + "," + y;
-  if (cursorPending === cursorSent || cursorTimer) return;
+  cursorPending = [x, y];
+  if (cursorTimer) return;
   cursorTimer = setTimeout(() => {
     cursorTimer = null;
-    if (!S.room || S.room.mode !== "cursor") return;
-    cursorSent = cursorPending;
-    send({ t: "state.set", key: "cursor_" + S.room.you, value: cursorPending });   // без id: ответ ok не нужен
-  }, 80);
+    if (!S.room || S.room.mode !== "cursor" || !cursorPending) return;
+    const v = cursorPending[0] + "," + cursorPending[1];
+    cursorPending = null;
+    if (v === cursorSent) return;
+    cursorSent = v;
+    send({ t: "state.set", key: "cursor_" + S.room.you, value: v });   // без id: ответ ok не нужен
+  }, 60);
 }
 function sweepCursors() {
   if (!S.room || S.room.mode !== "cursor" || S.room.hostId !== S.room.you) return;
@@ -539,9 +587,15 @@ function sweepCursors() {
 }
 stage().addEventListener("pointermove", (ev) => {
   if (!S.room || S.room.mode !== "cursor") return;
-  const [x, y] = stagePos(ev);
-  drawCursor(S.room.you, x, y);
-  queueCursor(x, y);
+  ownNext = stagePos(ev);
+  if (ownFrame) return;
+  ownFrame = requestAnimationFrame(() => {      // свой курсор двигаем максимум раз в кадр и без перехода
+    ownFrame = 0;
+    if (!ownNext || !S.room || S.room.mode !== "cursor") return;
+    const p = ownNext;
+    setCursorPos(S.room.you, p[0], p[1]);
+    queueCursor(p[0], p[1]);
+  });
 });
 stage().addEventListener("pointerdown", (ev) => {
   if (!S.room || S.room.mode !== "cursor") return;
@@ -549,6 +603,8 @@ stage().addEventListener("pointerdown", (ev) => {
   ripple(x, y, color(S.room.you));
   send({ t: "event", code: 2, data: { x: x, y: y }, to: "others" });
 });
+window.addEventListener("resize", redrawCursors);
+if (typeof ResizeObserver !== "undefined") new ResizeObserver(redrawCursors).observe(stage());
 // ---- сообщения сервера ------------------------------------------------------
 function onMsg(m) {
   switch (m.t) {

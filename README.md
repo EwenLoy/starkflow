@@ -1,111 +1,113 @@
 # StarkFlow
 
-Мультиплеер для игр на Construct 3 на своём сервере: комнаты, события, общий стейт комнаты. Один Go-бинарник,
-без внешних сервисов, регистраций и подписок.
+Multiplayer for Construct 3 games on your own server: rooms, events, shared room state. One Go binary, no external
+services, no sign-ups, no subscriptions.
 
-**EN** — a small Go server that adds multiplayer to Construct 3 games over WebSocket. Fully self-hosted: you run one
-binary (or one container), players connect straight to it. English overview: [docs/OVERVIEW.en.md](docs/OVERVIEW.en.md).
+**English** · [Русский](README.ru.md)
 
 [![CI](https://github.com/EwenLoy/starkflow/actions/workflows/ci.yml/badge.svg)](https://github.com/EwenLoy/starkflow/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Donate](https://img.shields.io/badge/donate-dalink.to%2Fewenloy-ff69b4.svg)](https://dalink.to/ewenloy)
 
-## Что это
+## What it is
 
-- **Комнаты** — короткий id плюс имя на любом языке (по умолчанию до 32 символов), одинаковые имена разрешены.
-- **Общий стейт комнаты** с правилами ключей: `add` атомарный, `min`/`max`/`maxDelta` зажимает сервер.
-- **События** — всем, остальным или одному игроку.
-- **Стейт игрока** — курсоры, флаги, цвет: пишет только сам игрок, чужие значения не подделать.
-- **Токены игроков** (подписанные, на сервере ничего не хранится): после обрыва игрок возвращается в ту же комнату.
-- **В комплекте** встроенный тестовый клиент и плагин для Construct 3.
+- **Rooms** — a short id plus a display name in any language (32 characters by default), duplicate names are allowed.
+- **Shared room state** with per-key rules: `add` is atomic, `min`/`max`/`maxDelta` are clamped by the server.
+- **Relay events** — to all players, to others, or to a single player.
+- **Per-player state** — cursors, ready flags, colours: only the player itself can write, nobody can spoof it.
+- **Player tokens** (signed, nothing stored on the server): after a dropped connection the player returns to the same
+  room with the same identity and state.
+- **Batteries included** — a test client built into the server and a Construct 3 plugin in this repository.
 
-## Быстрый старт
+Wire protocol: `ws(s)://host/ws?v=1&app=APP_ID`, JSON frames.
 
-Нужен Go 1.22+. Настраивать ничего не надо:
+## Quick start
+
+Go 1.22+ and nothing to configure:
 
 ```bash
 cd server
 go run ./cmd/starkflow
 ```
 
-Открой http://localhost:8080 — это тестовый клиент сервера с двумя режимами: бой с боссом (общий HP) и
-синхронизация курсоров. Чтобы поиграть вдвоём, открой ту же страницу во втором браузере или в приватном окне.
+Open http://localhost:8080 — that is the built-in test client with two demo modes: boss fight (shared HP) and cursor
+synchronisation. To play with a friend, open the same page in a second browser or in a private window.
 
-## Быстрый тест с другом за пару минут (Docker)
+## Quick test with a friend (Docker)
 
 ```bash
-git clone https://github.com/EwenLoy/starkflow.git && cd starkflow
+git clone https://github.com/EwenLoy/starkflow.git
+cd starkflow
 docker compose up -d --build
 ```
 
-Дальше ничего не нужно: сервер сам слушает `0.0.0.0` на порту 8080, сам поднимается после перезапуска машины,
-у контейнера есть healthcheck (`docker compose ps` показывает `healthy`). Открыть в панели сервера надо только
-порт 8080. Друг заходит на `http://<IP-сервера>:8080` и играет.
+That is all: the server listens on `0.0.0.0:8080` by itself, comes back up after a reboot and the container has a
+healthcheck (`docker compose ps` shows `healthy`). You only need to open port 8080 in your provider's firewall. Your
+friend opens `http://<server-ip>:8080` and plays.
 
-Если публичного IP нет или не хочется открывать порты — тот же compose-файл даёт временный адрес с https:
+No public IP, or you do not want to open ports? The same compose file gives you a temporary https address:
 
 ```bash
 docker compose --profile tunnel up -d
-docker compose logs tunnel | grep trycloudflare    # получишь адрес вида https://xxxx.trycloudflare.com
+docker compose logs tunnel | grep trycloudflare    # prints an address like https://xxxx.trycloudflare.com
 ```
 
-## Свой домен и https
+## Your own domain and https
 
-Домен ставится одной командой: Caddy сам получит и продлит сертификат Let's Encrypt и сам проксирует
-WebSocket, вручную настраивать нечего.
+One command: Caddy obtains and renews the Let's Encrypt certificate and proxies WebSocket on its own, there is nothing
+to configure by hand.
 
 ```bash
-cp .env.example .env     # впиши STARKFLOW_SECRET и SF_DOMAIN, например game.example.com
+cp .env.example .env     # set STARKFLOW_SECRET and SF_DOMAIN, for example game.example.com
 docker compose -f docker-compose.tls.yml --profile caddy up -d --build
 ```
 
-Остаётся направить A-запись домена на IP сервера. Адрес для плагина C3 получается `wss://game.example.com/ws`.
+Then point an A record of your domain at the server. The plugin talks to `wss://game.example.com/ws`.
 
-Если порты 80/443 открыть нельзя (или домен живёт на Cloudflare) — второй профиль в том же файле поднимает
-туннель Cloudflare с твоим токеном, DNS-запись создастся сама. Оба варианта описаны в шапке
+If ports 80/443 are not available (or the domain lives on Cloudflare), the second profile in the same file runs a
+Cloudflare Tunnel with your token and creates the DNS record for you. Both options are documented at the top of
 `docker-compose.tls.yml`.
 
-## Требования
+## Requirements
 
-| Что | Зачем |
+| What | For |
 |---|---|
-| Go 1.22+ | запустить сервер без Docker |
-| Docker + Compose | деплой на сервер (рекомендуемый путь) |
-| Node 22+ | только для тестов из `tests/` |
-| Construct 3 | аддон `dist/starkflow.c3addon` (в самом C3 пока не проверялся) |
+| Go 1.22+ | running the server without Docker |
+| Docker + Compose | deploying to a server (recommended) |
+| Node 22+ | the tests in `tests/` only |
+| Construct 3 | the `dist/starkflow.c3addon` addon (not yet verified inside C3 itself) |
 
-## Тесты
+## Tests
 
 ```bash
-cd server && go test ./...       # стейт комнаты и токены
-node tests/plugin-mock-test.js   # плагин: 64 ACE и поведение на заглушке WebSocket
-node tests/server-smoke.mjs      # 54 проверки протокола против запущенного сервера
+cd server && go test ./...       # room state and tokens
+node tests/plugin-mock-test.js   # plugin: 64 ACE and behaviour on a WebSocket stub
+node tests/server-smoke.mjs      # 54 protocol checks against a running server
 ```
 
-Всё это работает в CI на каждый push: 4 задачи (сервер, плагин, живой smoke-тест, сборка Docker-образа).
+All of it runs in CI on every push: 4 jobs (server, plugin, live smoke test, Docker image build).
 
-## Технические детали
+## Technical details
 
-| Файл / папка | Что внутри |
+| File / folder | What is inside |
 |---|---|
-| `server/` | сервер на Go: комнаты, стейт, токены, встроенная тестовая страница (`internal/server/web/`) |
-| `plugin/` | исходники аддона C3: `addon.json`, `c3runtime/`, ACE, языковые файлы |
-| `dist/starkflow.c3addon` | собранный аддон: C3 → View → Addon Manager → Install new addon |
-| `Dockerfile`, `docker-compose.yml` | контейнер и запуск на сервере (плюс профиль туннеля) |
-| `docker-compose.tls.yml`, `Caddyfile` | https на своём домене: Caddy или туннель Cloudflare |
-| `tests/` | тесты: unit-тесты Go, проверка ACE, живой smoke-тест протокола |
-| `docs/` | подробная документация |
+| `server/` | the Go server: rooms, state, tokens, the built-in test page (`internal/server/web/`) |
+| `plugin/` | Construct 3 addon sources: `addon.json`, `c3runtime/`, ACE, language files |
+| `dist/starkflow.c3addon` | the built addon: C3 → View → Addon Manager → Install new addon |
+| `Dockerfile`, `docker-compose.yml` | the container and server deployment (includes a tunnel profile) |
+| `docker-compose.tls.yml`, `Caddyfile` | https on your own domain: Caddy or a Cloudflare Tunnel |
+| `tests/` | Go unit tests, ACE reference check, live protocol smoke test |
+| `docs/` | the detailed documentation (currently in Russian) |
 
-Документация:
+Documentation (Russian):
 
-- [docs/DEPLOY.md](docs/DEPLOY.md) — деплой: VPS, свой домен и https, туннели, хостинг ботов, переменные окружения
-- [docs/PROTOCOL.md](docs/PROTOCOL.md) — протокол: сообщения, комнаты, правила ключей стейта, два хранилища
-- [docs/PLUGIN.md](docs/PLUGIN.md) — установка плагина и первый пример в C3
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — локальный запуск, тестовый клиент, тесты, CI, что проверено и что нет
-- [docs/OVERVIEW.en.md](docs/OVERVIEW.en.md) — то же самое коротко по-английски
+- [docs/DEPLOY.md](docs/DEPLOY.md) — deployment: VPS, own domain and https, tunnels, bot hosting, environment variables
+- [docs/PROTOCOL.md](docs/PROTOCOL.md) — protocol: messages, rooms, state key rules, the two storages
+- [docs/PLUGIN.md](docs/PLUGIN.md) — installing the plugin and a first example in C3
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — local run, test client, tests, CI, what is verified and what is not
 
-## Лицензия и поддержка
+## License and support
 
-MIT: можно всё, включая коммерческие игры, условие одно — сохранить текст [LICENSE](LICENSE) и копирайт.
-Если проект сэкономил тебе время, можно [поддержать разработку](https://dalink.to/ewenloy) — это добровольно и
-никак не влияет ни на лицензию, ни на приоритет ответов в issues.
+MIT: do anything you want, commercial games included; the only condition is keeping the [LICENSE](LICENSE) text and
+the copyright notice. If the project saved you time, you can [support development](https://dalink.to/ewenloy) — it is
+voluntary and changes nothing about the license or how fast issues are answered.

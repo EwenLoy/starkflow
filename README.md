@@ -40,7 +40,7 @@ cd server && go test ./...          # unit-тесты: стейт (лимиты,
 node tests/plugin-mock-test.js      # плагин: сверка ACE и поведение на заглушке WebSocket
 ```
 
-Живой end-to-end тест против запущенного сервера (нужен Node 20+, встроенный `WebSocket`):
+Живой end-to-end тест против запущенного сервера (нужен Node 22+ со встроенным `WebSocket`):
 
 ```
 cd server && go build -o starkflow.exe ./cmd/starkflow

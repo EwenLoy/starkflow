@@ -17,6 +17,9 @@ $RECYCLE.BIN/
 *.swp
 *~
 
+# ---- AI-агенты ----
+.clinerules
+
 # ---- .NET / C# ----
 bin/
 obj/

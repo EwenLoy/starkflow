@@ -61,7 +61,7 @@
            background:radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0) 0 0/22px 22px, var(--card2);
            cursor:crosshair; touch-action:none; }
   .cursor { position:absolute; left:0; top:0; margin:-2px 0 0 -2px; pointer-events:none; will-change:transform; }
-  .cursor.remote { transition:transform .11s linear; }
+  .cursor.remote { transition:transform var(--remote-ms, 110ms) linear; }
   .cursor.local { transition:none; }
   .cursor svg { display:block; filter:drop-shadow(0 1px 2px #0006); }
   .cursor span { position:absolute; left:13px; top:16px; padding:2px 8px; border-radius:999px;
@@ -173,8 +173,14 @@
 
       <div id="cursorPane" class="hidden">
         <div id="stage" style="margin:12px 0"></div>
-        <p class="hint">Веди мышь по полю — своя позиция уходит в стейт комнаты и другие видят твой курсор с ником.
-          Клик по полю отправляет событие: у остальных в этом месте вспыхивает кружок. Рамка вокруг ника — это ты.</p>
+        <div class="row" style="margin-bottom:6px">
+          <label class="f" style="margin:0" for="rate">Частота отправки позиции</label>
+          <input id="rate" type="number" min="1" max="50" step="1" value="20" style="width:84px">
+          <span class="hint" style="margin:0" id="rateHint">кадров/с</span>
+        </div>
+        <p class="hint">Веди мышь по полю — своя позиция уходит в <b>стейт игрока</b> (<code>player.set</code>), поэтому
+          перезаписать чужой курсор нельзя, а лимит ключей комнаты не расходуется. Клик по полю отправляет событие:
+          у остальных в этом месте вспыхивает кружок. Рамка вокруг ника — это ты.</p>
       </div>
     </section>
   </div>
@@ -525,8 +531,11 @@ function removeCursor(id, hard) {
     el.style.display = "none";
   }
 }
-function moveCursor(id, value) {
-  if (!S.room || id === S.room.you) return;
+// Курсор игрока живёт в стейте игрока (player.props, ключ "cursor"), а не в общем стейте
+// комнаты: перезаписать чужой курсор нельзя, ключи не тратят лимит комнаты, а вышедший
+// игрок уносит свой курсор с собой — призрачных курсоров не остаётся.
+function onCursorProp(id, value) {
+  if (!S.room || S.room.mode !== "cursor" || id === S.room.you) return;
   const parts = String(value === null || value === undefined ? "" : value).split(",");
   const x = Number(parts[0]), y = Number(parts[1]);
   if (!Number.isFinite(x) || !Number.isFinite(y)) { removeCursor(id, true); return; }
@@ -542,9 +551,9 @@ function renderCursors() {
   cursorSent = "";
   stageSize();
   if (!S.room) return;
-  for (const k of Object.keys(S.st)) {
-    const m = /^cursor_(\d+)$/.exec(k);
-    if (m) moveCursor(Number(m[1]), S.st[k]);
+  for (const p of S.players.values()) {
+    const v = p.props && p.props.cursor;
+    if (v) onCursorProp(p.id, v);      // вошедшему позиции приходят в players[].props
   }
 }
 function redrawCursors() {
@@ -562,7 +571,33 @@ function ripple(x, y, col) {
 }
 let cursorTimer = null, cursorPending = null, cursorSent = "", ownFrame = 0, ownNext = null;
 
-// В сеть отправляем не чаще 60 мс: у сервера лимит 20 записей стейта в секунду на игрока.
+// ---- частота отправки --------------------------------------------------------
+// У стейта игрока (player.set) нет отдельного лимита на игрока, поэтому потолок — общий
+// лимит соединения: 60 сообщений/с (config.MsgRatePerSec), в него же идут ping и прочее.
+const RATE_DEFAULT = 20, RATE_MAX = 50;
+function cursorRate() {
+  const v = Math.round(Number($("rate").value));
+  return Math.max(1, Math.min(RATE_MAX, Number.isFinite(v) ? v : RATE_DEFAULT));
+}
+function cursorInterval() { return Math.round(1000 / cursorRate()); }
+// Сглаживание чужого курсора подстраиваем под частоту: примерно полтора интервала отправки.
+// Редко шлём — сильнее сглаживаем, часто — сглаживание почти не нужно.
+function applyRate(save) {
+  const rate = cursorRate();
+  $("rate").value = rate;
+  const ms = Math.max(70, Math.min(300, Math.round((1000 / rate) * 1.4)));
+  stage().style.setProperty("--remote-ms", ms + "ms");
+  $("rateHint").textContent = "кадров/с — интервал " + cursorInterval() + " мс, сглаживание чужого курсора " + ms + " мс" +
+    (rate >= RATE_MAX ? ". Выше нельзя: сервер режет больше 60 сообщений/с на соединение" : "");
+  cursorSent = "";
+  if (save !== false) { try { localStorage.setItem("starkflow:rate", String(rate)); } catch (e) { /* закрытый режим */ } }
+}
+function loadRate() {
+  try {
+    const v = Number(localStorage.getItem("starkflow:rate"));
+    if (Number.isFinite(v) && v > 0) $("rate").value = String(v);
+  } catch (e) { /* закрытый режим */ }
+}
 function queueCursor(x, y) {
   cursorPending = [x, y];
   if (cursorTimer) return;
@@ -571,19 +606,10 @@ function queueCursor(x, y) {
     if (!S.room || S.room.mode !== "cursor" || !cursorPending) return;
     const v = cursorPending[0] + "," + cursorPending[1];
     cursorPending = null;
-    if (v === cursorSent) return;
+    if (v === cursorSent) return;                      // отправляем только изменения
     cursorSent = v;
-    send({ t: "state.set", key: "cursor_" + S.room.you, value: v });   // без id: ответ ok не нужен
-  }, 60);
-}
-function sweepCursors() {
-  if (!S.room || S.room.mode !== "cursor" || S.room.hostId !== S.room.you) return;
-  for (const k of Object.keys(S.st)) {
-    const m = /^cursor_(\d+)$/.exec(k);
-    if (m && Number(m[1]) !== S.room.you && !S.players.has(Number(m[1]))) {
-      send({ t: "state.set", key: k, value: "" });   // ушедший игрок: пустое значение = курсор убрать
-    }
-  }
+    send({ t: "player.set", key: "cursor", value: v }); // стейт игрока, а не комнаты
+  }, cursorInterval());
 }
 stage().addEventListener("pointermove", (ev) => {
   if (!S.room || S.room.mode !== "cursor") return;
@@ -654,26 +680,23 @@ function onMsg(m) {
       S.players.delete(m.id);
       removeCursor(m.id, true);
       renderPlayers();
-      sweepCursors();
       break;
 
     case "host.changed":
       if (S.room) { S.room.hostId = m.hostId; renderPlayers(); }
       log("sys", "хост комнаты теперь #" + m.hostId + (S.room && S.room.hostId === S.room.you ? " — это вы" : ""));
-      sweepCursors();
       break;
 
     case "state.changed": {
       S.st[m.key] = m.value;
       if (m.key === "boss_hp" || m.key === "boss_max_hp") updateBoss();
-      const cm = /^cursor_(\d+)$/.exec(m.key);
-      if (cm) moveCursor(Number(cm[1]), m.value);
       break;
     }
 
     case "player.props": {
       const p = S.players.get(m.id);
       if (p) p.props = Object.assign({}, p.props, { [m.key]: m.value });
+      if (m.key === "cursor") onCursorProp(m.id, m.value);
       break;
     }
 
@@ -704,6 +727,8 @@ function onMsg(m) {
         if (!S.room) refreshRooms();
       }
       if (m.code === 301) refreshRooms();
+      if (m.code === 500) log("sys", "это лимит частоты сообщений: уменьшите «Частота отправки позиции» " +
+        "(сервер принимает 60 сообщений/с на соединение)");
       break;
     }
 
@@ -747,9 +772,12 @@ $("bEvent").onclick = () => req("event", { code: 1, data: "привет", to: "o
 $("bToggle").onclick = () => req("state.toggle", { key: "flag" });
 $("bClear").onclick = () => { $("log").innerHTML = ""; };
 $("app").onchange = () => { S.token = loadToken(); syncUI(); };
+$("rate").oninput = () => applyRate();
 
 // ---- старт ------------------------------------------------------------------
 $("url").value = (location.protocol === "https:" ? "wss://" : "ws://") + (location.host || "localhost:8080") + "/ws";
+loadRate();
+applyRate(false);
 renderRooms();
 syncUI();
 log("sys", "Это тестовый клиент сервера. Подключитесь, создайте комнату (режим «бой с боссом» " +

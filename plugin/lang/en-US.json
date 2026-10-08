@@ -1,0 +1,520 @@
+{
+	"languageTag": "en-US",
+	"fileDescription": "Strings for StarkFlow.",
+	"text": {
+		"plugins": {
+			"starkflow": {
+				"name": "StarkFlow",
+				"description": "Simple multiplayer: rooms, events and shared room state with atomic add.",
+				"help-url": "https://example.com/starkflow",
+				"properties": {
+					"server-url": {
+						"name": "Server URL",
+						"desc": "WebSocket address of your StarkFlow server, for example ws://localhost:8080/ws"
+					},
+					"app-id": {
+						"name": "App ID",
+						"desc": "Name of your game on the server. Rooms of different app ids never mix."
+					},
+					"log-level": {
+						"name": "Log level",
+						"desc": "What the plugin writes to the browser console.",
+						"items": {
+							"debug": "Debug",
+							"info": "Info",
+							"warn": "Warnings",
+							"error": "Errors",
+							"off": "Off"
+						}
+					},
+					"auto-reconnect": {
+						"name": "Auto reconnect",
+						"desc": "Reconnect and rejoin the room automatically after a connection loss."
+					}
+				},
+				"aceCategories": {
+					"connection": "Connection",
+					"room": "Room",
+					"players": "Players",
+					"events": "Events",
+					"state": "Room state",
+					"errors": "Errors"
+				},
+				"conditions": {
+					"on-connected": {
+						"list-name": "On connected",
+						"display-text": "On connected",
+						"description": "Triggered when the server accepted the connection (also after an automatic reconnect)."
+					},
+					"on-disconnected": {
+						"list-name": "On disconnected",
+						"display-text": "On disconnected",
+						"description": "Triggered when the connection is closed for good."
+					},
+					"on-reconnecting": {
+						"list-name": "On reconnecting",
+						"display-text": "On reconnecting",
+						"description": "Triggered each time the plugin schedules a reconnect attempt."
+					},
+					"is-connected": {
+						"list-name": "Is connected",
+						"display-text": "Is connected",
+						"description": "True while connected to the server."
+					},
+					"on-joined-room": {
+						"list-name": "On joined room",
+						"display-text": "On joined room",
+						"description": "Triggered when you entered a room (also after a rejoin; see Resumed)."
+					},
+					"on-left-room": {
+						"list-name": "On left room",
+						"display-text": "On left room",
+						"description": "Triggered after you left a room."
+					},
+					"on-room-list": {
+						"list-name": "On room list received",
+						"display-text": "On room list received",
+						"description": "Triggered when the room list arrived."
+					},
+					"is-in-room": {
+						"list-name": "Is in room",
+						"display-text": "Is in room",
+						"description": "True while you are in a room."
+					},
+					"is-host": {
+						"list-name": "Is host",
+						"display-text": "Is host",
+						"description": "True if you are the host (the oldest active player) of the room."
+					},
+					"on-player-joined": {
+						"list-name": "On player joined",
+						"display-text": "On player joined",
+						"description": "Triggered when another player entered the room. Read LastPlayerId."
+					},
+					"on-player-left": {
+						"list-name": "On player left",
+						"display-text": "On player left",
+						"description": "Triggered when a player left for good. Read LastPlayerId."
+					},
+					"on-player-suspended": {
+						"list-name": "On player connection lost",
+						"display-text": "On player connection lost",
+						"description": "Triggered when a player lost the connection. The place is kept for a while. Read LastPlayerId."
+					},
+					"on-player-resumed": {
+						"list-name": "On player returned",
+						"display-text": "On player returned",
+						"description": "Triggered when a player with a lost connection came back. Read LastPlayerId."
+					},
+					"on-host-changed": {
+						"list-name": "On host changed",
+						"display-text": "On host changed",
+						"description": "Triggered when another player became the host. Read HostId."
+					},
+					"on-player-prop-changed": {
+						"list-name": "On player property changed",
+						"display-text": "On player property [i]{0}[/i] changed",
+						"description": "Triggered when a player property changed. Read LastPlayerId.",
+						"params": {
+							"key": {
+								"name": "Key",
+								"desc": "Property name."
+							}
+						}
+					},
+					"on-event": {
+						"list-name": "On event",
+						"display-text": "On event [i]{0}[/i]",
+						"description": "Triggered when an event with this code arrived. Read EventData and EventFrom.",
+						"params": {
+							"code": {
+								"name": "Code",
+								"desc": "Event code."
+							}
+						}
+					},
+					"on-any-event": {
+						"list-name": "On any event",
+						"display-text": "On any event",
+						"description": "Triggered for every event that arrived."
+					},
+					"on-state-changed": {
+						"list-name": "On state changed",
+						"display-text": "On state [i]{0}[/i] changed",
+						"description": "Triggered when this state key changed.",
+						"params": {
+							"key": {
+								"name": "Key",
+								"desc": "State key."
+							}
+						}
+					},
+					"on-any-state-changed": {
+						"list-name": "On any state changed",
+						"display-text": "On any state changed",
+						"description": "Triggered for every state change."
+					},
+					"on-error": {
+						"list-name": "On error",
+						"display-text": "On error",
+						"description": "Triggered when the server sent an error. Read ErrorCode and ErrorMsg."
+					}
+				},
+				"actions": {
+					"connect": {
+						"list-name": "Connect",
+						"display-text": "Connect to [i]{0}[/i] (token [i]{1}[/i])",
+						"description": "Connect to the server. Leave both empty to use the project properties and the saved token.",
+						"params": {
+							"url": {
+								"name": "URL",
+								"desc": "Server URL, empty = from properties."
+							},
+							"token": {
+								"name": "Token",
+								"desc": "Saved token, empty = automatic."
+							}
+						}
+					},
+					"disconnect": {
+						"list-name": "Disconnect",
+						"display-text": "Disconnect",
+						"description": "Close the connection."
+					},
+					"set-auth-token": {
+						"list-name": "Set auth token",
+						"display-text": "Set auth token to [i]{0}[/i]",
+						"description": "Use a token you saved yourself (for example in the cloud save) at the next Connect.",
+						"params": {
+							"token": {
+								"name": "Token",
+								"desc": "Token."
+							}
+						}
+					},
+					"set-name": {
+						"list-name": "Set player name",
+						"display-text": "Set player name to [i]{0}[/i]",
+						"description": "Name sent to the server at the next Connect.",
+						"params": {
+							"name": {
+								"name": "Name",
+								"desc": "Player name."
+							}
+						}
+					},
+					"join-room": {
+						"list-name": "Join room",
+						"display-text": "Join room [i]{0}[/i]",
+						"description": "Enter an existing room.",
+						"params": {
+							"room": {
+								"name": "Room",
+								"desc": "Room name."
+							}
+						}
+					},
+					"join-or-create": {
+						"list-name": "Join or create room",
+						"display-text": "Join or create room [i]{0}[/i] (max players [i]{1}[/i], delete when empty after [i]{2}[/i] s)",
+						"description": "Enter the room, create it if it does not exist. Max players 0 = server default. Delete time -1 = server default, 0 = at once.",
+						"params": {
+							"room": {
+								"name": "Room",
+								"desc": "Room name."
+							},
+							"max-players": {
+								"name": "Max players",
+								"desc": "0 = server default."
+							},
+							"empty-ttl": {
+								"name": "Delete when empty (s)",
+								"desc": "-1 = server default."
+							}
+						}
+					},
+					"leave-room": {
+						"list-name": "Leave room",
+						"display-text": "Leave room",
+						"description": "Leave the current room."
+					},
+					"request-rooms": {
+						"list-name": "Request room list",
+						"display-text": "Request room list",
+						"description": "Ask the server for the list of rooms."
+					},
+					"send-event": {
+						"list-name": "Send event",
+						"display-text": "Send event [i]{0}[/i] with data [i]{1}[/i] to [i]{2}[/i]",
+						"description": "Send an event to the room. Target: others, all, or a player id.",
+						"params": {
+							"code": {
+								"name": "Code",
+								"desc": "Event code."
+							},
+							"data": {
+								"name": "Data",
+								"desc": "Text data (you build the format, for example x,y,angle)."
+							},
+							"to": {
+								"name": "To",
+								"desc": "others, all or a player id."
+							}
+						}
+					},
+					"set-state": {
+						"list-name": "Set state",
+						"display-text": "Set state [i]{0}[/i] to [i]{1}[/i]",
+						"description": "Write a number or a text to the shared room state.",
+						"params": {
+							"key": {
+								"name": "Key",
+								"desc": "State key."
+							},
+							"value": {
+								"name": "Value",
+								"desc": "Number or text."
+							}
+						}
+					},
+					"set-state-bool": {
+						"list-name": "Set state (yes/no)",
+						"display-text": "Set state [i]{0}[/i] to [i]{1}[/i] (1 = true, 0 = false)",
+						"description": "Write a boolean to the shared room state.",
+						"params": {
+							"key": {
+								"name": "Key",
+								"desc": "State key."
+							},
+							"value": {
+								"name": "Value",
+								"desc": "1 or 0."
+							}
+						}
+					},
+					"add-state": {
+						"list-name": "Add to state",
+						"display-text": "Add [i]{1}[/i] to state [i]{0}[/i]",
+						"description": "Atomically add a number (can be negative) to a state key. The server applies it in order, so nothing is lost.",
+						"params": {
+							"key": {
+								"name": "Key",
+								"desc": "State key."
+							},
+							"delta": {
+								"name": "Delta",
+								"desc": "Number to add."
+							}
+						}
+					},
+					"toggle-state": {
+						"list-name": "Toggle state",
+						"display-text": "Toggle state [i]{0}[/i]",
+						"description": "Flip a boolean state key.",
+						"params": {
+							"key": {
+								"name": "Key",
+								"desc": "State key."
+							}
+						}
+					},
+					"set-player-prop": {
+						"list-name": "Set my property",
+						"display-text": "Set my property [i]{0}[/i] to [i]{1}[/i]",
+						"description": "Set a property of your player that everybody sees (ready flag, color...).",
+						"params": {
+							"key": {
+								"name": "Key",
+								"desc": "Property name."
+							},
+							"value": {
+								"name": "Value",
+								"desc": "Number or text."
+							}
+						}
+					}
+				},
+				"expressions": {
+					"auth-token": {
+						"translated-name": "AuthToken",
+						"description": "Your signed token. Save it to keep the same identity on this device."
+					},
+					"my-user-id": {
+						"translated-name": "MyUserId",
+						"description": "Your permanent user id."
+					},
+					"ping": {
+						"translated-name": "Ping",
+						"description": "Round trip time to the server in milliseconds."
+					},
+					"server-time": {
+						"translated-name": "ServerTime",
+						"description": "Server time in milliseconds (corrected for the clock offset)."
+					},
+					"status": {
+						"translated-name": "StatusString",
+						"description": "disconnected, connecting, connected, in-room or reconnecting."
+					},
+					"room-name": {
+						"translated-name": "RoomName",
+						"description": "Name of the current room."
+					},
+					"my-id": {
+						"translated-name": "MyId",
+						"description": "Your player id inside the room."
+					},
+					"host-id": {
+						"translated-name": "HostId",
+						"description": "Player id of the host."
+					},
+					"resumed": {
+						"translated-name": "Resumed",
+						"description": "1 if the last room join was a return to a room you were already in."
+					},
+					"room-count": {
+						"translated-name": "RoomCount",
+						"description": "Number of rooms in the last room list."
+					},
+					"room-name-at": {
+						"translated-name": "RoomNameAt",
+						"description": "Name of the room at index.",
+						"params": {
+							"index": {
+								"name": "Index",
+								"desc": "0-based."
+							}
+						}
+					},
+					"room-players-at": {
+						"translated-name": "RoomPlayersAt",
+						"description": "Players in the room at index.",
+						"params": {
+							"index": {
+								"name": "Index",
+								"desc": "0-based."
+							}
+						}
+					},
+					"room-max-at": {
+						"translated-name": "RoomMaxAt",
+						"description": "Max players of the room at index.",
+						"params": {
+							"index": {
+								"name": "Index",
+								"desc": "0-based."
+							}
+						}
+					},
+					"player-count": {
+						"translated-name": "PlayerCount",
+						"description": "Number of players in the room."
+					},
+					"player-id-at": {
+						"translated-name": "PlayerIdAt",
+						"description": "Player id at index (sorted by id).",
+						"params": {
+							"index": {
+								"name": "Index",
+								"desc": "0-based."
+							}
+						}
+					},
+					"player-name": {
+						"translated-name": "PlayerName",
+						"description": "Name of a player.",
+						"params": {
+							"id": {
+								"name": "Id",
+								"desc": "Player id."
+							}
+						}
+					},
+					"player-user-id": {
+						"translated-name": "PlayerUserId",
+						"description": "Permanent user id of a player.",
+						"params": {
+							"id": {
+								"name": "Id",
+								"desc": "Player id."
+							}
+						}
+					},
+					"player-status": {
+						"translated-name": "PlayerStatus",
+						"description": "active or suspended.",
+						"params": {
+							"id": {
+								"name": "Id",
+								"desc": "Player id."
+							}
+						}
+					},
+					"player-prop": {
+						"translated-name": "PlayerProp",
+						"description": "A property of a player (booleans are 1 or 0).",
+						"params": {
+							"id": {
+								"name": "Id",
+								"desc": "Player id."
+							},
+							"key": {
+								"name": "Key",
+								"desc": "Property name."
+							}
+						}
+					},
+					"last-player-id": {
+						"translated-name": "LastPlayerId",
+						"description": "Player id from the last player trigger."
+					},
+					"event-code": {
+						"translated-name": "EventCode",
+						"description": "Code of the last event."
+					},
+					"event-data": {
+						"translated-name": "EventData",
+						"description": "Data of the last event."
+					},
+					"event-from": {
+						"translated-name": "EventFrom",
+						"description": "Player id that sent the last event."
+					},
+					"state": {
+						"translated-name": "State",
+						"description": "Value of a state key (booleans are 1 or 0, missing = 0).",
+						"params": {
+							"key": {
+								"name": "Key",
+								"desc": "State key."
+							}
+						}
+					},
+					"changed-key": {
+						"translated-name": "ChangedKey",
+						"description": "Key of the last state change."
+					},
+					"changed-value": {
+						"translated-name": "ChangedValue",
+						"description": "New value of the last state change."
+					},
+					"changed-old": {
+						"translated-name": "ChangedOld",
+						"description": "Previous value of the last state change."
+					},
+					"changed-by": {
+						"translated-name": "ChangedBy",
+						"description": "Player id that made the last state change."
+					},
+					"error-code": {
+						"translated-name": "ErrorCode",
+						"description": "Code of the last error."
+					},
+					"error-msg": {
+						"translated-name": "ErrorMsg",
+						"description": "Text of the last error."
+					}
+				}
+			}
+		}
+	}
+}

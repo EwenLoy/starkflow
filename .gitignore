@@ -48,8 +48,6 @@ target/
 
 # ---- Node / JS / TS ----
 node_modules/
-dist/
-build/
 .next/
 out/
 coverage/

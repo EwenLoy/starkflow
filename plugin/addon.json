@@ -1,0 +1,33 @@
+{
+	"is-c3-addon": true,
+	"sdk-version": 2,
+	"type": "plugin",
+	"name": "StarkFlow",
+	"id": "StarkFlow",
+	"version": "0.1.0.0",
+	"author": "StarkFlow",
+	"website": "https://example.com/starkflow",
+	"documentation": "https://example.com/starkflow",
+	"description": "Simple multiplayer: rooms, events and shared room state with atomic add.",
+	"supports-worker-mode": true,
+	"editor-scripts": [
+		"plugin.js",
+		"type.js",
+		"instance.js"
+	],
+	"file-list": [
+		"addon.json",
+		"aces.json",
+		"icon.svg",
+		"lang/en-US.json",
+		"plugin.js",
+		"type.js",
+		"instance.js",
+		"c3runtime/plugin.js",
+		"c3runtime/type.js",
+		"c3runtime/instance.js",
+		"c3runtime/actions.js",
+		"c3runtime/conditions.js",
+		"c3runtime/expressions.js"
+	]
+}

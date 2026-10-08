@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StarkFlow test client</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { max-width: 720px; margin: 0 auto; padding: 12px; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  input, button { font: inherit; padding: 6px 10px; }
+  input { flex: 1 1 140px; min-width: 0; }
+  #log { height: 320px; overflow: auto; border: 1px solid #8888; padding: 6px; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; }
+  .in { color: #2a7; } .out { color: #58f; } .err { color: #e44; }
+  #status { font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>StarkFlow test client <small id="status">disconnected</small></h1>
+<div class="row">
+  <input id="url" placeholder="ws url">
+  <input id="app" value="default" placeholder="app id">
+  <input id="name" value="Player" placeholder="name">
+</div>
+<div class="row">
+  <button id="bConnect">Connect</button>
+  <button id="bDisconnect">Disconnect</button>
+  <button id="bReset">Forget token</button>
+</div>
+<div class="row">
+  <input id="room" value="boss1" placeholder="room">
+  <button id="bJoin">Join or create (boss demo)</button>
+  <button id="bLeave">Leave</button>
+</div>
+<div class="row">
+  <button id="bEvent">Send event 1 to others</button>
+  <button id="bHit">Hit boss -10</button>
+  <button id="bBadSet">Try set boss_hp (must fail)</button>
+  <button id="bToggle">Toggle flag</button>
+  <button id="bList">List rooms</button>
+</div>
+<div id="log"></div>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let ws = null;
+let seq = 0;
+
+$("url").value = (location.protocol === "https:" ? "wss://" : "ws://") + (location.host || "localhost:8080") + "/ws";
+
+function log(cls, text) {
+  const el = $("log");
+  const line = document.createElement("div");
+  line.className = cls;
+  line.textContent = new Date().toLocaleTimeString() + "  " + text;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+function tokenKey() { return "starkflow:" + $("app").value + ":token"; }
+function send(obj) {
+  if (!ws || ws.readyState !== 1) { log("err", "not connected"); return; }
+  const s = JSON.stringify(obj);
+  log("out", s);
+  ws.send(s);
+}
+
+$("bConnect").onclick = () => {
+  if (ws) ws.close();
+  const url = $("url").value + "?v=1&app=" + encodeURIComponent($("app").value);
+  ws = new WebSocket(url);
+  $("status").textContent = "connecting";
+  ws.onopen = () => {
+    $("status").textContent = "connected";
+    send({ t: "hello", token: localStorage.getItem(tokenKey()) || "", name: $("name").value });
+  };
+  ws.onmessage = (ev) => {
+    log("in", ev.data);
+    let m = null;
+    try { m = JSON.parse(ev.data); } catch (e) { return; }
+    if (m.t === "welcome") localStorage.setItem(tokenKey(), m.token);
+    if (m.t === "err" && m.code === 200) { localStorage.removeItem(tokenKey()); log("err", "token rejected and cleared, press Connect again"); }
+  };
+  ws.onclose = (ev) => { $("status").textContent = "disconnected (" + ev.code + ")"; };
+};
+$("bDisconnect").onclick = () => { if (ws) ws.close(); };
+$("bReset").onclick = () => { localStorage.removeItem(tokenKey()); log("err", "token forgotten"); };
+
+$("bJoin").onclick = () => send({
+  t: "room.join", id: ++seq, room: $("room").value, create: true, maxPlayers: 4, emptyTTL: 30,
+  schema: {
+    boss_hp:     { kind: "num", mode: "add", min: 0, max: 1000, maxDelta: 50 },
+    boss_max_hp: { kind: "num", mode: "const" }
+  },
+  init: { boss_hp: 1000, boss_max_hp: 1000 }
+});
+$("bLeave").onclick = () => send({ t: "room.leave", id: ++seq });
+$("bEvent").onclick = () => send({ t: "event", code: 1, data: "hello", to: "others" });
+$("bHit").onclick = () => send({ t: "state.add", id: ++seq, key: "boss_hp", value: -10 });
+$("bBadSet").onclick = () => send({ t: "state.set", id: ++seq, key: "boss_hp", value: 5 });
+$("bToggle").onclick = () => send({ t: "state.toggle", id: ++seq, key: "flag" });
+$("bList").onclick = () => send({ t: "room.list", id: ++seq });
+</script>
+</body>
+</html>

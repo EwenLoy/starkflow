@@ -1,0 +1,553 @@
+{
+	"connection": {
+		"conditions": [
+			{
+				"id": "on-connected",
+				"scriptName": "OnConnected",
+				"isTrigger": true
+			},
+			{
+				"id": "on-disconnected",
+				"scriptName": "OnDisconnected",
+				"isTrigger": true
+			},
+			{
+				"id": "on-reconnecting",
+				"scriptName": "OnReconnecting",
+				"isTrigger": true
+			},
+			{
+				"id": "is-connected",
+				"scriptName": "IsConnected"
+			}
+		],
+		"actions": [
+			{
+				"id": "connect",
+				"scriptName": "Connect",
+				"params": [
+					{
+						"id": "url",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "token",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "disconnect",
+				"scriptName": "Disconnect"
+			},
+			{
+				"id": "set-auth-token",
+				"scriptName": "SetAuthToken",
+				"params": [
+					{
+						"id": "token",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "set-name",
+				"scriptName": "SetName",
+				"params": [
+					{
+						"id": "name",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			}
+		],
+		"expressions": [
+			{
+				"id": "auth-token",
+				"expressionName": "AuthToken",
+				"returnType": "string"
+			},
+			{
+				"id": "my-user-id",
+				"expressionName": "MyUserId",
+				"returnType": "string"
+			},
+			{
+				"id": "ping",
+				"expressionName": "Ping",
+				"returnType": "number"
+			},
+			{
+				"id": "server-time",
+				"expressionName": "ServerTime",
+				"returnType": "number"
+			},
+			{
+				"id": "status",
+				"expressionName": "StatusString",
+				"returnType": "string"
+			}
+		]
+	},
+	"room": {
+		"conditions": [
+			{
+				"id": "on-joined-room",
+				"scriptName": "OnJoinedRoom",
+				"isTrigger": true
+			},
+			{
+				"id": "on-left-room",
+				"scriptName": "OnLeftRoom",
+				"isTrigger": true
+			},
+			{
+				"id": "on-room-list",
+				"scriptName": "OnRoomList",
+				"isTrigger": true
+			},
+			{
+				"id": "is-in-room",
+				"scriptName": "IsInRoom"
+			},
+			{
+				"id": "is-host",
+				"scriptName": "IsHost"
+			}
+		],
+		"actions": [
+			{
+				"id": "join-room",
+				"scriptName": "JoinRoom",
+				"params": [
+					{
+						"id": "room",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "join-or-create",
+				"scriptName": "JoinOrCreateRoom",
+				"params": [
+					{
+						"id": "room",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "max-players",
+						"type": "number",
+						"initialValue": "0"
+					},
+					{
+						"id": "empty-ttl",
+						"type": "number",
+						"initialValue": "-1"
+					}
+				]
+			},
+			{
+				"id": "leave-room",
+				"scriptName": "LeaveRoom"
+			},
+			{
+				"id": "request-rooms",
+				"scriptName": "RequestRooms"
+			}
+		],
+		"expressions": [
+			{
+				"id": "room-name",
+				"expressionName": "RoomName",
+				"returnType": "string"
+			},
+			{
+				"id": "my-id",
+				"expressionName": "MyId",
+				"returnType": "number"
+			},
+			{
+				"id": "host-id",
+				"expressionName": "HostId",
+				"returnType": "number"
+			},
+			{
+				"id": "resumed",
+				"expressionName": "Resumed",
+				"returnType": "number"
+			},
+			{
+				"id": "room-count",
+				"expressionName": "RoomCount",
+				"returnType": "number"
+			},
+			{
+				"id": "room-name-at",
+				"expressionName": "RoomNameAt",
+				"returnType": "string",
+				"params": [
+					{
+						"id": "index",
+						"type": "number"
+					}
+				]
+			},
+			{
+				"id": "room-players-at",
+				"expressionName": "RoomPlayersAt",
+				"returnType": "number",
+				"params": [
+					{
+						"id": "index",
+						"type": "number"
+					}
+				]
+			},
+			{
+				"id": "room-max-at",
+				"expressionName": "RoomMaxAt",
+				"returnType": "number",
+				"params": [
+					{
+						"id": "index",
+						"type": "number"
+					}
+				]
+			}
+		]
+	},
+	"players": {
+		"conditions": [
+			{
+				"id": "on-player-joined",
+				"scriptName": "OnPlayerJoined",
+				"isTrigger": true
+			},
+			{
+				"id": "on-player-left",
+				"scriptName": "OnPlayerLeft",
+				"isTrigger": true
+			},
+			{
+				"id": "on-player-suspended",
+				"scriptName": "OnPlayerSuspended",
+				"isTrigger": true
+			},
+			{
+				"id": "on-player-resumed",
+				"scriptName": "OnPlayerResumed",
+				"isTrigger": true
+			},
+			{
+				"id": "on-host-changed",
+				"scriptName": "OnHostChanged",
+				"isTrigger": true
+			},
+			{
+				"id": "on-player-prop-changed",
+				"scriptName": "OnPlayerPropChanged",
+				"isTrigger": true,
+				"params": [
+					{
+						"id": "key",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			}
+		],
+		"actions": [
+			{
+				"id": "set-player-prop",
+				"scriptName": "SetPlayerProp",
+				"params": [
+					{
+						"id": "key",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "value",
+						"type": "any",
+						"initialValue": "\"\""
+					}
+				]
+			}
+		],
+		"expressions": [
+			{
+				"id": "player-count",
+				"expressionName": "PlayerCount",
+				"returnType": "number"
+			},
+			{
+				"id": "player-id-at",
+				"expressionName": "PlayerIdAt",
+				"returnType": "number",
+				"params": [
+					{
+						"id": "index",
+						"type": "number"
+					}
+				]
+			},
+			{
+				"id": "player-name",
+				"expressionName": "PlayerName",
+				"returnType": "string",
+				"params": [
+					{
+						"id": "id",
+						"type": "number"
+					}
+				]
+			},
+			{
+				"id": "player-user-id",
+				"expressionName": "PlayerUserId",
+				"returnType": "string",
+				"params": [
+					{
+						"id": "id",
+						"type": "number"
+					}
+				]
+			},
+			{
+				"id": "player-status",
+				"expressionName": "PlayerStatus",
+				"returnType": "string",
+				"params": [
+					{
+						"id": "id",
+						"type": "number"
+					}
+				]
+			},
+			{
+				"id": "player-prop",
+				"expressionName": "PlayerProp",
+				"returnType": "any",
+				"params": [
+					{
+						"id": "id",
+						"type": "number"
+					},
+					{
+						"id": "key",
+						"type": "string"
+					}
+				]
+			},
+			{
+				"id": "last-player-id",
+				"expressionName": "LastPlayerId",
+				"returnType": "number"
+			}
+		]
+	},
+	"events": {
+		"conditions": [
+			{
+				"id": "on-event",
+				"scriptName": "OnEvent",
+				"isTrigger": true,
+				"params": [
+					{
+						"id": "code",
+						"type": "number",
+						"initialValue": "0"
+					}
+				]
+			},
+			{
+				"id": "on-any-event",
+				"scriptName": "OnAnyEvent",
+				"isTrigger": true
+			}
+		],
+		"actions": [
+			{
+				"id": "send-event",
+				"scriptName": "SendEvent",
+				"params": [
+					{
+						"id": "code",
+						"type": "number",
+						"initialValue": "0"
+					},
+					{
+						"id": "data",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "to",
+						"type": "string",
+						"initialValue": "\"others\""
+					}
+				]
+			}
+		],
+		"expressions": [
+			{
+				"id": "event-code",
+				"expressionName": "EventCode",
+				"returnType": "number"
+			},
+			{
+				"id": "event-data",
+				"expressionName": "EventData",
+				"returnType": "string"
+			},
+			{
+				"id": "event-from",
+				"expressionName": "EventFrom",
+				"returnType": "number"
+			}
+		]
+	},
+	"state": {
+		"conditions": [
+			{
+				"id": "on-state-changed",
+				"scriptName": "OnStateChanged",
+				"isTrigger": true,
+				"params": [
+					{
+						"id": "key",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "on-any-state-changed",
+				"scriptName": "OnAnyStateChanged",
+				"isTrigger": true
+			}
+		],
+		"actions": [
+			{
+				"id": "set-state",
+				"scriptName": "SetState",
+				"params": [
+					{
+						"id": "key",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "value",
+						"type": "any",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "set-state-bool",
+				"scriptName": "SetStateBool",
+				"params": [
+					{
+						"id": "key",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "value",
+						"type": "number",
+						"initialValue": "1"
+					}
+				]
+			},
+			{
+				"id": "add-state",
+				"scriptName": "AddState",
+				"params": [
+					{
+						"id": "key",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "delta",
+						"type": "number",
+						"initialValue": "1"
+					}
+				]
+			},
+			{
+				"id": "toggle-state",
+				"scriptName": "ToggleState",
+				"params": [
+					{
+						"id": "key",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			}
+		],
+		"expressions": [
+			{
+				"id": "state",
+				"expressionName": "State",
+				"returnType": "any",
+				"params": [
+					{
+						"id": "key",
+						"type": "string"
+					}
+				]
+			},
+			{
+				"id": "changed-key",
+				"expressionName": "ChangedKey",
+				"returnType": "string"
+			},
+			{
+				"id": "changed-value",
+				"expressionName": "ChangedValue",
+				"returnType": "any"
+			},
+			{
+				"id": "changed-old",
+				"expressionName": "ChangedOld",
+				"returnType": "any"
+			},
+			{
+				"id": "changed-by",
+				"expressionName": "ChangedBy",
+				"returnType": "number"
+			}
+		]
+	},
+	"errors": {
+		"conditions": [
+			{
+				"id": "on-error",
+				"scriptName": "OnError",
+				"isTrigger": true
+			}
+		],
+		"actions": [],
+		"expressions": [
+			{
+				"id": "error-code",
+				"expressionName": "ErrorCode",
+				"returnType": "number"
+			},
+			{
+				"id": "error-msg",
+				"expressionName": "ErrorMsg",
+				"returnType": "string"
+			}
+		]
+	}
+}

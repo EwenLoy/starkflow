@@ -156,10 +156,14 @@
 		_openSocket()
 		{
 			this._status = this._attempt > 0 ? "reconnecting" : "connecting";
+			const url = this._buildUrl();
+			this._log("info", "connecting to", url);
+			if (!/^wss?:\/\//i.test(this._url))
+				this._log("error", "Server URL must start with ws:// or wss:// — got " + JSON.stringify(this._url));
 			let ws;
 			try
 			{
-				ws = new WebSocket(this._buildUrl());
+				ws = new WebSocket(url);
 			}
 			catch (e)
 			{
@@ -226,7 +230,10 @@
 			this._ws = null;
 			if (!this._intentional && this._autoReconnect && !this._noReconnect)
 			{
-				this._log("warn", "connection lost (" + (ev && ev.code) + "), will retry");
+				const why = ev && ev.code === 1006
+					? " — nothing listening at that address (is the server running?)"
+					: "";
+				this._log("warn", "connection lost (" + (ev && ev.code) + "), will retry" + why);
 				this._scheduleReconnect();
 				return;
 			}

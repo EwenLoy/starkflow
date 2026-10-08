@@ -34,6 +34,11 @@ jobs:
         with:
           node-version: '22'
       - run: node tests/plugin-mock-test.js
+      - name: Build the addon
+        run: |
+          pwsh -NoProfile -File tools/build-addon.ps1
+          unzip -l dist/starkflow.c3addon | grep -q 'addon.json'
+
 
   protocol:
     name: Live protocol smoke test

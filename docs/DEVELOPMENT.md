@@ -27,6 +27,18 @@ go run ./cmd/starkflow
 Страница вшита в бинарник сервера (`//go:embed web/index.html`), поэтому после её правки сервер надо перезапустить: иначе он продолжит отдавать старую версию, и в браузере будет не то, что лежит в `server/internal/server/web/index.html`.
 
 
+## Сборка аддона
+
+`dist/starkflow.c3addon` — это zip, в корне которого лежит `addon.json`. Собирать заново после любой правки в `plugin/`:
+
+```
+powershell -ExecutionPolicy Bypass -File tools/build-addon.ps1
+```
+
+В C3 после пересборки аддон надо переустановить: View → Addon Manager → Install new addon. Если плагин уже стоял,
+старую версию лучше удалить, иначе C3 может держать её в кэше.
+
+
 ## Тесты
 
 ```

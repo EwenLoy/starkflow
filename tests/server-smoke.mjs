@@ -1,7 +1,12 @@
 // Живой smoke-тест StarkFlow: проверяет реальный сервер по протоколу (Node 24+, global WebSocket).
 const BASE = process.env.SF_BASE || 'http://127.0.0.1:8080';
 const WS = process.env.SF_WS || 'ws://127.0.0.1:8080/ws';
-const wsUrl = (q = 'v=1&app=smoke') => `${WS}?${q}`;
+// Уникальные app и комната на каждый запуск: иначе повторный прогон подряд попадёт
+// в живую комнату прошлого прогона (emptyTTL по умолчанию 60 с) и тест упадёт.
+const APP = 'smoke-' + Date.now().toString(36);
+const ROOM = 'boss-' + Date.now().toString(36);
+
+const wsUrl = (q = `v=1&app=${APP}`) => `${WS}?${q}`;
 
 let passed = 0, failed = 0;
 const ok = (n, x = '') => { passed++; console.log(`  ok   ${n}${x ? '  ' + x : ''}`); };
@@ -78,7 +83,7 @@ const schema = {
 
     // --- A: создание комнаты ---
     A.send({
-      t: 'room.join', id: 1, room: 'smoke1', create: true, maxPlayers: 4, strict: true,
+      t: 'room.join', id: 1, room: ROOM, create: true, maxPlayers: 4, strict: true,
       schema, init: { boss_hp: 100, motd: 'hi', ready: false },
     });
     const jA = await A.nextT('room.joined');
@@ -99,7 +104,7 @@ const schema = {
     const B = await open(wsUrl());
     B.send({ t: 'hello', name: 'Bob' });
     const wB = await B.nextT('welcome');
-    B.send({ t: 'room.join', id: 1, room: 'smoke1' });
+    B.send({ t: 'room.join', id: 1, room: ROOM });
     const jB = await B.nextT('room.joined');
     eq('B: resumed = false, you = 2', [jB.resumed, jB.you], [false, 2]);
     eq('B видит текущий стейт', jB.state.boss_hp, 90);
@@ -151,7 +156,7 @@ const schema = {
     B2.send({ t: 'hello', token: wB.token, name: 'Bob' });
     const wB2 = await B2.nextT('welcome');
     eq('rejoin: тот же userId', wB2.userId, wB.userId);
-    B2.send({ t: 'room.join', id: 1, room: 'smoke1' });
+    B2.send({ t: 'room.join', id: 1, room: ROOM });
     const jB2 = await B2.nextT('room.joined');
     eq('rejoin: resumed = true, тот же id 2', [jB2.resumed, jB2.you], [true, 2]);
     eq('rejoin: стейт сохранился', jB2.state, { boss_hp: 0, motd: 'hi', ready: true });
@@ -172,7 +177,7 @@ const schema = {
     // --- список комнат ---
     A.send({ t: 'room.list', id: 30 });
     const rl = await A.nextT('room.list.result');
-    eq('room.list.result', rl.rooms.map(r => [r.room, r.players, r.maxPlayers]), [['smoke1', 2, 4]]);
+    eq('room.list.result', rl.rooms.map(r => [r.room, r.players, r.maxPlayers]), [[ROOM, 2, 4]]);
     eq('room.list.result: id запроса вернулся', rl.id, 30);
 
     // --- комната не найдена ---

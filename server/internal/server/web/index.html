@@ -175,7 +175,7 @@
         <div id="stage" style="margin:12px 0"></div>
         <div class="row" style="margin-bottom:6px">
           <label class="f" style="margin:0" for="rate">Частота отправки позиции</label>
-          <input id="rate" type="number" min="1" max="50" step="1" value="20" style="width:84px">
+          <input id="rate" type="number" min="1" max="60" step="1" value="20" style="width:84px">
           <span class="hint" style="margin:0" id="rateHint">кадров/с</span>
         </div>
         <div class="row" style="margin-bottom:6px">
@@ -554,7 +554,7 @@ function renderCursors() {
   cursorNodes.clear();
   cursorText.clear();
   cursorPos.clear();
-  if (cursorTimer) { clearTimeout(cursorTimer); cursorTimer = null; }
+  if (cursorTimer) { clearInterval(cursorTimer); cursorTimer = null; }
   cursorPending = null;
   cursorSent = "";
   stageSize();
@@ -582,14 +582,16 @@ let cursorTimer = null, cursorPending = null, cursorSent = "", ownFrame = 0, own
 // ---- частота отправки и сглаживание -----------------------------------------
 // У стейта игрока (player.set) нет отдельного лимита на игрока, поэтому потолок — общий
 // лимит соединения: 60 сообщений/с (config.MsgRatePerSec), в него же идут ping и прочее.
-const RATE_DEFAULT = 20, RATE_MAX = 50;
+const RATE_DEFAULT = 20, RATE_MAX = 60;   // 60 = ровно потолок сервера (config.MsgRatePerSec)
 const SMOOTH_MAX = 500;   // мс; 0 = сглаживания нет, чужой курсор прыгает так же резко, как свой
 const smoothAutoMs = () => Math.max(70, Math.min(300, Math.round((1000 / cursorRate()) * 1.4)));
 function cursorRate() {
   const v = Math.round(Number($("rate").value));
   return Math.max(1, Math.min(RATE_MAX, Number.isFinite(v) ? v : RATE_DEFAULT));
 }
-function cursorInterval() { return Math.round(1000 / cursorRate()); }
+// Интервал округляем вверх: на 60 кадрах/с это 17 мс вместо 16.67, зато гарантированно
+// не улетаем за серверный лимит 60 сообщений/с на соединение (иначе придёт ошибка 500).
+function cursorInterval() { return Math.ceil(1000 / cursorRate()); }
 function smoothOn() { return $("smoothAuto").checked; }
 function smoothMs() {
   if (smoothOn()) return smoothAutoMs();
@@ -612,9 +614,11 @@ function applyRate(save) {
   const rate = cursorRate();
   $("rate").value = rate;
   $("rateHint").textContent = "кадров/с — интервал " + cursorInterval() + " мс" +
-    (rate >= RATE_MAX ? ". Выше нельзя: сервер режет больше 60 сообщений/с на соединение" : "");
+    (rate >= RATE_MAX ? ". Это потолок сервера (60 сообщений/с на соединение), интервал округлён вверх — фактически ~" +
+      Math.floor(1000 / cursorInterval()) + " кадров/с, зато без ошибок 500" : "");
   cursorSent = "";                     // после смены настроек отправим позицию сразу
   applySmoothing(save);
+  restartCursorPump();                 // такт отправки пересчитываем сразу, не дожидаясь движения
   if (save !== false) store("starkflow:rate", rate);
 }
 function loadSettings() {
@@ -630,18 +634,27 @@ function loadSettings() {
     }
   } catch (e) { /* закрытый режим */ }
 }
+// Отправляем по фиксированному такту, а не «через интервал после появления движения»: иначе
+// к интервалу добавляется ожидание следующего события мыши и реальная частота проседает вдвое.
+function startCursorPump() {
+  if (cursorTimer) return;
+  cursorTimer = setInterval(sendCursorTick, cursorInterval());
+}
+function restartCursorPump() {
+  const running = !!cursorTimer;
+  if (cursorTimer) { clearInterval(cursorTimer); cursorTimer = null; }
+  if (running) startCursorPump();
+}
+function sendCursorTick() {
+  if (!S.room || S.room.mode !== "cursor" || !cursorPending) return;
+  const v = cursorPending[0] + "," + cursorPending[1];
+  if (v === cursorSent) return;                       // позиция не менялась — трафик не тратим
+  cursorSent = v;
+  send({ t: "player.set", key: "cursor", value: v }); // стейт игрока, а не комнаты
+}
 function queueCursor(x, y) {
   cursorPending = [x, y];
-  if (cursorTimer) return;
-  cursorTimer = setTimeout(() => {
-    cursorTimer = null;
-    if (!S.room || S.room.mode !== "cursor" || !cursorPending) return;
-    const v = cursorPending[0] + "," + cursorPending[1];
-    cursorPending = null;
-    if (v === cursorSent) return;                      // отправляем только изменения
-    cursorSent = v;
-    send({ t: "player.set", key: "cursor", value: v }); // стейт игрока, а не комнаты
-  }, cursorInterval());
+  startCursorPump();
 }
 stage().addEventListener("pointermove", (ev) => {
   if (!S.room || S.room.mode !== "cursor") return;

@@ -1,7 +1,8 @@
 # StarkFlow — multiplayer for Construct 3 games on your own server
 
 [![CI](https://github.com/EwenLoy/starkflow/actions/workflows/ci.yml/badge.svg)](https://github.com/EwenLoy/starkflow/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
+[![Commercial license](https://img.shields.io/badge/license-commercial%20available-orange.svg)](LICENSE-COMMERCIAL.md)
 
 **EN** — StarkFlow adds multiplayer to Construct 3 games without a backend service: you run one Go binary
 on your own machine or VPS, and players connect straight to it over WebSocket.
@@ -37,7 +38,10 @@ Protocol summary in English: rooms are created with `room.join {create:true}` (a
 `player.*`, `event`, `err`. Client messages: `hello`, `room.join`, `room.leave`, `room.list`, `event`,
 `state.set/add/toggle`, `player.set`, `ping`. Details: `server/internal/proto/proto.go` and the Russian section below.
 
-MIT licensed — see [LICENSE](LICENSE).
+Dual-licensed: **GNU GPL v3.0** (see [LICENSE](LICENSE)) — free, including for commercial use, as long as you
+comply with the GPL and publish the full source of your derivative work — **or** a one-time
+[commercial license](LICENSE-COMMERCIAL.md) for **$10 per developer** when GPL compliance is not an option
+(closed-source games, private servers).
 
 ---
 
@@ -153,4 +157,12 @@ URL: `ws(s)://host/ws?v=1&app=APPID`. Все кадры JSON с полем `t`.
 
 ## Лицензия
 
-MIT — см. [LICENSE](LICENSE).
+StarkFlow распространяется по **двойной лицензии**:
+
+- **GNU GPL v3.0** — бесплатно, в том числе для коммерческих проектов, но с условием: производная работа,
+  которую вы распространяете (сборка игры с плагином, изменённый сервер, который вы передаёте), должна идти
+  под GPL-совместимой лицензией с полным исходным кодом. Полный текст — [LICENSE](LICENSE).
+- **Коммерческая лицензия — 10 $ разово на разработчика** — для закрытых игр, приватных серверов и всего,
+  где условия GPL не подходят. Условия и порядок покупки — [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
+
+Коротко: хочешь открытый код — пользуйся бесплатно по GPL; не хочешь открывать свой — покупаешь коммерческую.

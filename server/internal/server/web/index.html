@@ -1,105 +1,703 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>StarkFlow test client</title>
+<title>StarkFlow — тестовый клиент</title>
 <style>
-  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-  body { max-width: 720px; margin: 0 auto; padding: 12px; }
-  h1 { font-size: 20px; margin: 0 0 8px; }
-  .row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
-  input, button { font: inherit; padding: 6px 10px; }
-  input { flex: 1 1 140px; min-width: 0; }
-  #log { height: 320px; overflow: auto; border: 1px solid #8888; padding: 6px; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; }
-  .in { color: #2a7; } .out { color: #58f; } .err { color: #e44; }
-  #status { font-weight: 600; }
+  :root {
+    color-scheme: dark light;
+    --bg:#0e1116; --card:#161a21; --card2:#1d222c; --line:#2b323f;
+    --fg:#e9edf4; --dim:#96a1b4; --acc:#4f8cff; --ok:#38d67a; --warn:#ffb020; --err:#ff6161;
+    --r:12px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f3f5fa; --card:#fff; --card2:#eef2f8; --line:#dbe2ec; --fg:#131922; --dim:#5c687b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg);
+         font:15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  h1 { font-size:19px; margin:0; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.09em; color:var(--dim); margin:0 0 10px; }
+  .wrap { max-width:1020px; margin:0 auto; display:grid; gap:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:14px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .grow { flex:1 1 170px; min-width:0; }
+  label.f { color:var(--dim); font-size:12px; display:block; margin-bottom:4px; }
+  input, select, button { font:inherit; padding:8px 10px; border-radius:9px;
+                          border:1px solid var(--line); background:var(--card2); color:var(--fg); }
+  input, select { width:100%; }
+  input[type=checkbox] { width:auto; }
+  input:focus-visible, select:focus-visible, button:focus-visible { outline:2px solid var(--acc); outline-offset:1px; }
+  button { width:auto; cursor:pointer; transition:filter .15s ease, transform .05s ease; }
+  button:hover:not(:disabled) { filter:brightness(1.18); }
+  button:active:not(:disabled) { transform:translateY(1px); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .primary { background:var(--acc); border-color:transparent; color:#fff; font-weight:600; }
+  .ghost { background:transparent; }
+  .danger { color:var(--err); border-color:#ff616155; }
+  .pill { display:inline-flex; align-items:center; gap:7px; padding:4px 11px; border-radius:999px;
+          background:var(--card2); border:1px solid var(--line); font-size:12px; color:var(--dim); }
+  .pill b { color:var(--fg); font-weight:600; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--dim); flex:0 0 auto; }
+  .dot.on { background:var(--ok); } .dot.wait { background:var(--warn); } .dot.off { background:var(--err); }
+  .hint { color:var(--dim); font-size:12px; margin:8px 0 0; }
+  ul.rooms { list-style:none; margin:8px 0 0; padding:0; display:grid; gap:6px; max-height:230px; overflow:auto; }
+  ul.rooms li { display:flex; align-items:center; gap:10px; background:var(--card2);
+                border:1px solid var(--line); border-radius:9px; padding:7px 10px; }
+  ul.rooms .name { font-weight:600; }
+  ul.rooms .meta { color:var(--dim); font-size:12px; margin-left:auto; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px;
+          background:var(--card2); border:1px solid var(--line); font-size:13px; }
+  .chip.susp { opacity:.5; }
+  .chip.me { box-shadow:inset 0 0 0 2px var(--acc); }
+  .chip .role { color:var(--dim); font-size:11px; }
+  .hpbar { height:22px; border-radius:999px; background:var(--card2); border:1px solid var(--line); overflow:hidden; }
+  .hpfill { height:100%; width:100%; background:linear-gradient(90deg,var(--ok),var(--warn) 60%,var(--err));
+            transition:width .15s ease; }
+  .hptext { display:flex; justify-content:space-between; font-size:12px; color:var(--dim); margin-top:5px; }
+  #stage { position:relative; height:360px; border-radius:var(--r); border:1px dashed var(--line); overflow:hidden;
+           background:radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0) 0 0/22px 22px, var(--card2);
+           cursor:crosshair; touch-action:none; }
+  .cursor { position:absolute; pointer-events:none; transition:left .08s linear, top .08s linear; }
+  .cursor svg { display:block; filter:drop-shadow(0 1px 2px #0006); }
+  .cursor span { position:absolute; left:13px; top:16px; padding:2px 8px; border-radius:999px;
+                 font-size:11px; font-weight:600; white-space:nowrap; color:#0b0d10; }
+  .ripple { position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%;
+            border:2px solid currentColor; pointer-events:none; animation:rip .6s ease-out forwards; }
+  @keyframes rip { from { transform:scale(.3); opacity:.9 } to { transform:scale(3.2); opacity:0 } }
+  #log { height:210px; overflow:auto; background:var(--card2); border:1px solid var(--line); border-radius:9px;
+         padding:8px; font:12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; }
+  .in { color:#41c98a } .out { color:#7aa2ff } .err { color:#ff6b6b } .sys { color:var(--dim) }
+  details > summary { cursor:pointer; color:var(--dim); font-size:13px; }
+  .hidden { display:none !important; }
+  .grid2 { display:grid; gap:14px; }
+  @media (min-width:820px) { .grid2 { grid-template-columns:minmax(0,1.05fr) minmax(0,1fr); align-items:start; } }
 </style>
 </head>
 <body>
-<h1>StarkFlow test client <small id="status">disconnected</small></h1>
-<div class="row">
-  <input id="url" placeholder="ws url">
-  <input id="app" value="default" placeholder="app id">
-  <input id="name" value="Player" placeholder="name">
+<div class="wrap">
+
+  <div class="row" style="gap:12px">
+    <h1>StarkFlow — тестовый клиент</h1>
+    <span class="pill"><span id="dot" class="dot off"></span><span id="status">не подключён</span></span>
+    <span class="pill hidden" id="mePill">вы: <b id="meId">—</b></span>
+  </div>
+
+  <section class="card">
+    <h2>1. Подключение</h2>
+    <div class="grid2">
+      <div>
+        <div class="grow" style="margin-bottom:8px">
+          <label class="f" for="name">Ваше имя — его увидят другие игроки</label>
+          <input id="name" value="Игрок" maxlength="32" placeholder="никнейм" autocomplete="off">
+        </div>
+        <div class="grow">
+          <label class="f" for="app">App ID — разделяет разные игры на одном сервере</label>
+          <input id="app" value="default" autocomplete="off">
+        </div>
+      </div>
+      <div>
+        <div class="grow" style="margin-bottom:8px">
+          <label class="f" for="url">Адрес сервера (WebSocket)</label>
+          <input id="url" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="row">
+          <button id="bConnect" class="primary">Подключиться</button>
+          <button id="bDisconnect" class="ghost" disabled>Отключиться</button>
+          <button id="bForget" class="ghost danger">Забыть токен</button>
+        </div>
+      </div>
+    </div>
+    <label class="hint row" style="gap:7px; margin-top:10px">
+      <input id="autoRe" type="checkbox" checked>
+      автоматически переподключаться и возвращаться в свою комнату после обрыва
+    </label>
+    <p class="hint" id="tokenInfo">Токен: —</p>
+  </section>
+
+  <div class="grid2">
+    <section class="card" id="lobbyCard">
+      <h2>2. Комнаты на сервере</h2>
+      <div class="grow">
+        <label class="f" for="newRoom">Имя новой комнаты (буквы, цифры, <b>.</b> <b>_</b> <b>-</b> <b>:</b>, до 64 символов)</label>
+        <input id="newRoom" value="boss1" maxlength="64" autocomplete="off">
+      </div>
+      <div class="grow" style="margin-top:8px">
+        <label class="f" for="mode">Режим новой комнаты</label>
+        <select id="mode">
+          <option value="boss">Бой с боссом — общий HP, удары всех игроков</option>
+          <option value="cursor">Синхронизация курсоров — видно чужие курсоры и ники</option>
+        </select>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="bCreate" class="primary" disabled>Создать комнату</button>
+        <button id="bRandom" disabled>Войти в случайную</button>
+        <button id="bRefresh" class="ghost" disabled>Обновить список</button>
+      </div>
+      <ul class="rooms" id="roomList"></ul>
+      <p class="hint" id="lobbyHint">Подключитесь, чтобы увидеть комнаты сервера и войти в них.</p>
+    </section>
+
+    <section class="card hidden" id="roomCard">
+      <h2>3. Комната</h2>
+      <div class="row">
+        <span class="pill">комната: <b id="rName">—</b></span>
+        <span class="pill">игрок: <b id="rMe">—</b></span>
+        <span class="pill" id="hostPill">хост: <b id="rHost">—</b></span>
+        <span class="pill">режим: <b id="rMode">—</b></span>
+        <button id="bLeave" class="ghost" style="margin-left:auto">Выйти из комнаты</button>
+      </div>
+      <div class="chips" id="players" style="margin-top:10px"></div>
+
+      <div id="bossPane" class="hidden">
+        <div style="margin:12px 0">
+          <div class="hpbar"><div class="hpfill" id="hpFill"></div></div>
+          <div class="hptext"><span>HP босса</span><span id="hpText">— / —</span></div>
+        </div>
+        <div class="row">
+          <button id="bHit10" class="primary">Ударить −10</button>
+          <button id="bHit50">Ударить −50</button>
+          <button id="bHeal">Лечить +10</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="bBadSet" class="ghost danger">Попытка set boss_hp — ожидаем ошибку 402</button>
+        </div>
+        <p class="hint">HP общий: удар любого игрока меняет его у всех сразу. Ключ <b>boss_hp</b> создан в режиме
+          <b>add</b> с границами 0…1000 и <b>maxDelta 50</b>, поэтому <b>set</b> запрещён (402), дельта больше 50 отбивается (403),
+          а значение зажимается в границах. Значения пишет сервер, клиенты не могут их подделать.</p>
+      </div>
+
+      <div id="cursorPane" class="hidden">
+        <div id="stage" style="margin:12px 0"></div>
+        <p class="hint">Веди мышь по полю — своя позиция уходит в стейт комнаты и другие видят твой курсор с ником.
+          Клик по полю отправляет событие: у остальных в этом месте вспыхивает кружок. Рамка вокруг ника — это ты.</p>
+      </div>
+    </section>
+  </div>
+
+  <section class="card">
+    <details>
+      <summary>Лог протокола и отладочные кнопки</summary>
+      <div class="row" style="margin:10px 0 8px">
+        <button id="bPing" class="ghost" disabled>Ping</button>
+        <button id="bList" class="ghost" disabled>Запросить список комнат</button>
+        <button id="bEvent" class="ghost" disabled>Событие «привет» другим</button>
+        <button id="bToggle" class="ghost" disabled>Переключить flag</button>
+        <button id="bClear" class="ghost">Очистить лог</button>
+      </div>
+      <div id="log"></div>
+    </details>
+  </section>
 </div>
-<div class="row">
-  <button id="bConnect">Connect</button>
-  <button id="bDisconnect">Disconnect</button>
-  <button id="bReset">Forget token</button>
-</div>
-<div class="row">
-  <input id="room" value="boss1" placeholder="room">
-  <button id="bJoin">Join or create (boss demo)</button>
-  <button id="bLeave">Leave</button>
-</div>
-<div class="row">
-  <button id="bEvent">Send event 1 to others</button>
-  <button id="bHit">Hit boss -10</button>
-  <button id="bBadSet">Try set boss_hp (must fail)</button>
-  <button id="bToggle">Toggle flag</button>
-  <button id="bList">List rooms</button>
-</div>
-<div id="log"></div>
 <script>
 "use strict";
+
+// ---- коды ошибок сервера (server/internal/proto/proto.go) ------------------
+const ERRLABEL = {
+  100: "версия протокола", 101: "плохой кадр", 102: "сначала hello", 200: "неверный токен",
+  300: "комнаты нет", 301: "комната полна", 302: "комната закрыта", 303: "уже в комнате",
+  305: "не в комнате", 306: "плохое имя комнаты", 400: "неизвестный ключ", 401: "неверный тип",
+  402: "запрещено правилом ключа", 403: "дельта больше maxDelta", 404: "вне границ",
+  500: "слишком часто", 501: "кадр слишком большой", 502: "сервер занят"
+};
+
+// ---- режимы комнаты: схема стейта, которую задаёт создатель -----------------
+const MODE_NAME = { boss: "бой с боссом", cursor: "курсоры" };
+const MODE_DEFS = {
+  boss: {
+    maxPlayers: 8, emptyTTL: 300, strict: false,
+    schema: {
+      mode:        { kind: "str", mode: "const" },
+      boss_hp:     { kind: "num", mode: "add", min: 0, max: 1000, maxDelta: 50 },
+      boss_max_hp: { kind: "num", mode: "const" }
+    },
+    init: { mode: "boss", boss_hp: 1000, boss_max_hp: 1000 }
+  },
+  cursor: {
+    maxPlayers: 16, emptyTTL: 300, strict: false,
+    schema: { mode: { kind: "str", mode: "const" } },
+    init: { mode: "cursor" }
+  }
+};
+
+const S = {
+  ws: null, url: "", seq: 0, status: "off",
+  token: "", userId: "",
+  room: null, wantRoom: null,        // текущая комната и комната для возврата после обрыва
+  players: new Map(), st: {}, rooms: [],
+  intentional: false, noRetry: false, retry: 0, lobbyTimer: null
+};
+
 const $ = (id) => document.getElementById(id);
-let ws = null;
-let seq = 0;
-
-$("url").value = (location.protocol === "https:" ? "wss://" : "ws://") + (location.host || "localhost:8080") + "/ws";
-
-function log(cls, text) {
-  const el = $("log");
-  const line = document.createElement("div");
-  line.className = cls;
-  line.textContent = new Date().toLocaleTimeString() + "  " + text;
-  el.appendChild(line);
-  el.scrollTop = el.scrollHeight;
-}
-function tokenKey() { return "starkflow:" + $("app").value + ":token"; }
-function send(obj) {
-  if (!ws || ws.readyState !== 1) { log("err", "not connected"); return; }
-  const s = JSON.stringify(obj);
+const log = (cls, text) => {
+  const d = document.createElement("div");
+  d.className = cls;
+  d.textContent = new Date().toLocaleTimeString() + "  " + text;
+  $("log").appendChild(d);
+  $("log").scrollTop = $("log").scrollHeight;
+};
+const tokenKey = () => "starkflow:" + ($("app").value.trim() || "default") + ":token";
+function loadToken() { try { return localStorage.getItem(tokenKey()) || ""; } catch (e) { return ""; } }
+function saveToken(t) { try { t ? localStorage.setItem(tokenKey(), t) : localStorage.removeItem(tokenKey()); } catch (e) { /* закрытый режим */ } }
+function send(o) {
+  if (!S.ws || S.ws.readyState !== 1) { log("err", "нет соединения с сервером"); return; }
+  const s = JSON.stringify(o);
   log("out", s);
-  ws.send(s);
+  S.ws.send(s);
+}
+function req(t, extra) { send(Object.assign({ t: t, id: ++S.seq }, extra || {})); }
+const color = (id) => "hsl(" + ((id * 47) % 360) + " 85% 58%)";
+const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+function nameOf(id) { const p = S.players.get(id); return p && p.name ? p.name : "игрок #" + id; }
+
+function setStatus(text, kind) { $("status").textContent = text; $("dot").className = "dot " + (kind || "off"); }
+
+function syncUI() {
+  const on = S.status === "on";
+  $("bConnect").disabled = on;
+  $("bDisconnect").disabled = !on;
+  $("bCreate").disabled = !on || !!S.room;
+  $("bRandom").disabled = !on || !!S.room;
+  $("bRefresh").disabled = !on || !!S.room;
+  $("bPing").disabled = !on;
+  $("bList").disabled = !on;
+  $("bEvent").disabled = !on || !S.room;
+  $("bToggle").disabled = !on || !S.room;
+  $("lobbyCard").classList.toggle("hidden", !!S.room);
+  $("roomCard").classList.toggle("hidden", !S.room);
+  $("mePill").classList.toggle("hidden", !S.userId);
+  $("meId").textContent = S.userId ? S.userId.slice(0, 8) + "…" : "—";
+  $("tokenInfo").textContent = "Токен: " + (S.token ? S.token.slice(0, 22) + "…" : "— (сервер выдаст при подключении)") +
+    ". Лежит в localStorage (" + tokenKey() + ") и позволяет после обрыва вернуться в ту же комнату тем же игроком.";
+  $("lobbyHint").textContent = !on ? "Подключитесь, чтобы увидеть комнаты сервера и войти в них. " +
+      "Для игры вдвоём откройте страницу в другом браузере или в приватном окне: вкладки одного браузера делят токен в localStorage и играют за одного игрока."
+    : (S.rooms.length ? "Это комнаты вашего App ID. «Войти» — подключиться к существующей."
+                      : "Комнат пока нет — создайте первую или войдите в случайную.");
 }
 
-$("bConnect").onclick = () => {
-  if (ws) ws.close();
-  const url = $("url").value + "?v=1&app=" + encodeURIComponent($("app").value);
-  ws = new WebSocket(url);
-  $("status").textContent = "connecting";
+// ---- подключение ------------------------------------------------------------
+function hardStop() {
+  S.intentional = true;
+  if (S.ws) { try { S.ws.close(); } catch (e) { } S.ws = null; }
+  S.status = "off"; S.room = null; S.wantRoom = null;
+  S.players.clear(); S.st = {}; stopLobby();
+}
+function connect() {
+  hardStop();
+  const base = $("url").value.trim().replace(/\?.*$/, "").replace(/\/+$/, "");
+  const app = $("app").value.trim() || "default";
+  S.url = base + "?v=1&app=" + encodeURIComponent(app);
+  S.token = loadToken();
+  S.noRetry = false;
+  S.intentional = false;
+  openSocket();
+}
+function openSocket() {
+  S.ws = new WebSocket(S.url);
+  setStatus("подключаюсь…", "wait");
+  const ws = S.ws;
   ws.onopen = () => {
-    $("status").textContent = "connected";
-    send({ t: "hello", token: localStorage.getItem(tokenKey()) || "", name: $("name").value });
+    setStatus("соединение открыто", "wait");
+    send({ t: "hello", token: S.token, name: $("name").value.trim() });
   };
   ws.onmessage = (ev) => {
     log("in", ev.data);
     let m = null;
     try { m = JSON.parse(ev.data); } catch (e) { return; }
-    if (m.t === "welcome") localStorage.setItem(tokenKey(), m.token);
-    if (m.t === "err" && m.code === 200) { localStorage.removeItem(tokenKey()); log("err", "token rejected and cleared, press Connect again"); }
+    onMsg(m);
   };
-  ws.onclose = (ev) => { $("status").textContent = "disconnected (" + ev.code + ")"; };
-};
-$("bDisconnect").onclick = () => { if (ws) ws.close(); };
-$("bReset").onclick = () => { localStorage.removeItem(tokenKey()); log("err", "token forgotten"); };
+  ws.onerror = () => log("err", "ошибка WebSocket (сервер недоступен?)");
+  ws.onclose = (ev) => {
+    const room = S.wantRoom;
+    S.status = "off"; S.room = null; S.players.clear(); S.st = {}; stopLobby();
+    setStatus("отключён" + (ev.code ? " (" + ev.code + ")" : ""), "off");
+    syncUI();
+    if (S.intentional) log("sys", "соединение закрыто по вашей команде");
+    else if (!$("autoRe").checked || S.noRetry) log("sys", "соединение потеряно");
+    else if (room) scheduleReconnect(room);
+    else log("sys", "соединение потеряно, переподключение не нужно");
+  };
+}
+function scheduleReconnect(room) {
+  if (S.retry >= 8) { log("sys", "переподключение остановлено после 8 попыток"); return; }
+  S.retry++;
+  const delay = Math.min(800 * S.retry, 5000);
+  setStatus("обрыв — попытка " + S.retry + " через " + (delay / 1000).toFixed(1) + " c…", "wait");
+  log("sys", "вернусь в комнату «" + room + "» через " + delay + " мс (попытка " + S.retry + ")");
+  setTimeout(() => {
+    if (S.intentional) return;
+    S.intentional = false;
+    openSocket();
+  }, delay);
+}
+// ---- лобби: список комнат, создание, вход -----------------------------------
+function startLobby() { stopLobby(); S.lobbyTimer = setInterval(refreshRooms, 4000); }
+function stopLobby() { if (S.lobbyTimer) { clearInterval(S.lobbyTimer); S.lobbyTimer = null; } }
+function refreshRooms() {
+  if (!S.ws || S.ws.readyState !== 1 || S.room) return;
+  req("room.list");
+}
+function renderRooms() {
+  const ul = $("roomList");
+  ul.innerHTML = "";
+  if (!S.rooms.length) {
+    const li = document.createElement("li");
+    li.className = "hint";
+    li.style.margin = "0";
+    li.textContent = "Список пуст.";
+    ul.appendChild(li);
+    return;
+  }
+  for (const r of S.rooms) {
+    const li = document.createElement("li");
+    const n = document.createElement("span");
+    n.className = "name";
+    n.textContent = r.room;
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = r.players + " / " + r.maxPlayers + " игроков";
+    const b = document.createElement("button");
+    b.className = "primary";
+    b.textContent = "Войти";
+    b.disabled = r.players >= r.maxPlayers;
+    b.onclick = () => joinRoom(r.room);
+    li.append(n, meta, b);
+    ul.appendChild(li);
+  }
+}
+function createRoom(name, mode) {
+  const def = MODE_DEFS[mode] || MODE_DEFS.boss;
+  log("sys", "создаю комнату «" + name + "» в режиме «" + MODE_NAME[mode] + "»");
+  req("room.join", {
+    room: name, create: true, maxPlayers: def.maxPlayers, emptyTTL: def.emptyTTL,
+    strict: def.strict, schema: def.schema, init: def.init
+  });
+}
+function joinRoom(name) {
+  log("sys", "вхожу в комнату «" + name + "»");
+  req("room.join", { room: name, create: false });
+}
+function joinRandom() {
+  const free = S.rooms.filter((r) => r.players < r.maxPlayers);
+  if (free.length) { joinRoom(free[Math.floor(Math.random() * free.length)].room); return; }
+  const mode = $("mode").value;
+  createRoom((mode === "cursor" ? "cursor-" : "boss-") + Math.random().toString(36).slice(2, 6), mode);
+}
+function leaveRoom() {
+  S.wantRoom = null;
+  req("room.leave");
+  resetRoom();
+  refreshRooms();
+}
+function resetRoom() {
+  S.room = null; S.players.clear(); S.st = {};
+  $("players").innerHTML = "";
+  $("stage").innerHTML = "";
+  renderRooms();
+  syncUI();
+  startLobby();
+}
 
-$("bJoin").onclick = () => send({
-  t: "room.join", id: ++seq, room: $("room").value, create: true, maxPlayers: 4, emptyTTL: 30,
-  schema: {
-    boss_hp:     { kind: "num", mode: "add", min: 0, max: 1000, maxDelta: 50 },
-    boss_max_hp: { kind: "num", mode: "const" }
-  },
-  init: { boss_hp: 1000, boss_max_hp: 1000 }
+// ---- вход в комнату и игроки ------------------------------------------------
+function onJoined(m) {
+  S.room = { name: m.room, you: m.you, hostId: m.hostId, maxPlayers: m.maxPlayers, mode: "boss" };
+  S.wantRoom = m.room;
+  S.retry = 0;
+  S.players.clear();
+  for (const p of (m.players || [])) S.players.set(p.id, p);
+  S.st = m.state || {};
+  S.room.mode = S.st.mode === "cursor" ? "cursor" : "boss";
+  stopLobby();
+  log("sys", (m.resumed ? "вернулся в комнату «" : "вошёл в комнату «") + m.room + "» как игрок #" + m.you +
+    (m.resumed ? " (resumed: тот же игрок и стейт)" : "") + ". Режим: " + MODE_NAME[S.room.mode] + ".");
+  $("rName").textContent = m.room;
+  $("rMe").textContent = "#" + m.you;
+  $("rMode").textContent = MODE_NAME[S.room.mode];
+  $("bossPane").classList.toggle("hidden", S.room.mode !== "boss");
+  $("cursorPane").classList.toggle("hidden", S.room.mode !== "cursor");
+  renderPlayers();
+  renderState();
+  syncUI();
+}
+function renderPlayers() {
+  const box = $("players");
+  box.innerHTML = "";
+  if (!S.room) return;
+  for (const p of [...S.players.values()].sort((a, b) => a.id - b.id)) {
+    const c = document.createElement("span");
+    c.className = "chip" + (p.status === "suspended" ? " susp" : "") + (p.id === S.room.you ? " me" : "");
+    c.style.borderColor = color(p.id);
+    const b = document.createElement("b");
+    b.style.color = color(p.id);
+    b.textContent = (p.name || "без имени") + " #" + p.id;
+    c.appendChild(b);
+    const role = document.createElement("span");
+    role.className = "role";
+    role.textContent = p.id === S.room.hostId ? (p.id === S.room.you ? "хост · вы" : "хост")
+      : (p.id === S.room.you ? "вы" : (p.status === "suspended" ? "отошёл" : "игрок"));
+    c.appendChild(role);
+    box.appendChild(c);
+  }
+  $("rHost").textContent = S.room.hostId ? "#" + S.room.hostId + (S.room.hostId === S.room.you ? " (вы)" : "") : "—";
+}
+function renderState() {
+  if (!S.room) return;
+  if (S.room.mode === "boss") updateBoss();
+  else renderCursors();
+}
+// ---- режим «бой с боссом» ---------------------------------------------------
+function updateBoss() {
+  const hp = num(S.st.boss_hp), max = num(S.st.boss_max_hp) || 1000;
+  $("hpFill").style.width = Math.max(0, Math.min(100, max ? (hp / max) * 100 : 0)) + "%";
+  $("hpText").textContent = hp + " / " + max + (hp <= 0 ? " — босс повержен!" : "");
+}
+
+// ---- режим «курсоры» --------------------------------------------------------
+const stage = () => $("stage");
+function stagePos(ev) {
+  const r = stage().getBoundingClientRect();
+  return [
+    Math.max(0, Math.min(1000, Math.round(((ev.clientX - r.left) / r.width) * 1000))),
+    Math.max(0, Math.min(1000, Math.round(((ev.clientY - r.top) / r.height) * 1000)))
+  ];
+}
+function cursorEl(id) {
+  let el = stage().querySelector('.cursor[data-id="' + id + '"]');
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "cursor";
+    el.dataset.id = id;
+    el.innerHTML = '<svg width="17" height="23" viewBox="0 0 18 24">' +
+      '<path d="M2 2 L2 19 L6.5 14.5 L9.5 21.5 L12.5 20 L9.5 13 L16 13 Z" fill="currentColor" ' +
+      'stroke="rgba(0,0,0,.45)" stroke-width="1"/></svg><span></span>';
+    stage().appendChild(el);
+  }
+  return el;
+}
+function drawCursor(id, x, y) {
+  const me = S.room && id === S.room.you;
+  const el = cursorEl(id);
+  el.style.display = "";
+  el.style.color = color(id);
+  el.style.left = (x / 10) + "%";
+  el.style.top = (y / 10) + "%";
+  const label = el.querySelector("span");
+  label.style.background = color(id);
+  label.textContent = nameOf(id) + (me ? " (вы)" : "");
+}
+function removeCursor(id, hard) {
+  const el = stage().querySelector('.cursor[data-id="' + id + '"]');
+  if (!el) return;
+  if (hard) el.remove();
+  else el.style.display = "none";
+}
+function moveCursor(id, value) {
+  if (!S.room || id === S.room.you) return;
+  const parts = String(value === null || value === undefined ? "" : value).split(",");
+  const x = Number(parts[0]), y = Number(parts[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) { removeCursor(id, true); return; }
+  drawCursor(id, x, y);
+}
+function renderCursors() {
+  stage().innerHTML = "";
+  if (!S.room) return;
+  for (const k of Object.keys(S.st)) {
+    const m = /^cursor_(\d+)$/.exec(k);
+    if (m) moveCursor(Number(m[1]), S.st[k]);
+  }
+}
+function ripple(x, y, col) {
+  const d = document.createElement("div");
+  d.className = "ripple";
+  d.style.color = col;
+  d.style.left = (x / 10) + "%";
+  d.style.top = (y / 10) + "%";
+  stage().appendChild(d);
+  setTimeout(() => d.remove(), 650);
+}
+let cursorTimer = null, cursorPending = null, cursorSent = "";
+function queueCursor(x, y) {
+  cursorPending = x + "," + y;
+  if (cursorPending === cursorSent || cursorTimer) return;
+  cursorTimer = setTimeout(() => {
+    cursorTimer = null;
+    if (!S.room || S.room.mode !== "cursor") return;
+    cursorSent = cursorPending;
+    send({ t: "state.set", key: "cursor_" + S.room.you, value: cursorPending });   // без id: ответ ok не нужен
+  }, 80);
+}
+function sweepCursors() {
+  if (!S.room || S.room.mode !== "cursor" || S.room.hostId !== S.room.you) return;
+  for (const k of Object.keys(S.st)) {
+    const m = /^cursor_(\d+)$/.exec(k);
+    if (m && Number(m[1]) !== S.room.you && !S.players.has(Number(m[1]))) {
+      send({ t: "state.set", key: k, value: "" });   // ушедший игрок: пустое значение = курсор убрать
+    }
+  }
+}
+stage().addEventListener("pointermove", (ev) => {
+  if (!S.room || S.room.mode !== "cursor") return;
+  const [x, y] = stagePos(ev);
+  drawCursor(S.room.you, x, y);
+  queueCursor(x, y);
 });
-$("bLeave").onclick = () => send({ t: "room.leave", id: ++seq });
-$("bEvent").onclick = () => send({ t: "event", code: 1, data: "hello", to: "others" });
-$("bHit").onclick = () => send({ t: "state.add", id: ++seq, key: "boss_hp", value: -10 });
-$("bBadSet").onclick = () => send({ t: "state.set", id: ++seq, key: "boss_hp", value: 5 });
-$("bToggle").onclick = () => send({ t: "state.toggle", id: ++seq, key: "flag" });
-$("bList").onclick = () => send({ t: "room.list", id: ++seq });
+stage().addEventListener("pointerdown", (ev) => {
+  if (!S.room || S.room.mode !== "cursor") return;
+  const [x, y] = stagePos(ev);
+  ripple(x, y, color(S.room.you));
+  send({ t: "event", code: 2, data: { x: x, y: y }, to: "others" });
+});
+// ---- сообщения сервера ------------------------------------------------------
+function onMsg(m) {
+  switch (m.t) {
+    case "welcome":
+      S.userId = m.userId;
+      S.token = m.token;
+      S.retry = 0;
+      saveToken(m.token);
+      S.status = "on";
+      setStatus("подключён", "on");
+      syncUI();
+      log("sys", "welcome: userId " + m.userId.slice(0, 8) + "…, proto " + m.proto);
+      if (S.wantRoom) {
+        log("sys", "возвращаюсь в комнату «" + S.wantRoom + "» (create: false)");
+        req("room.join", { room: S.wantRoom, create: false });
+      } else {
+        refreshRooms();
+        startLobby();
+      }
+      break;
+
+    case "room.joined":
+      onJoined(m);
+      break;
+
+    case "room.list.result":
+      S.rooms = m.rooms || [];
+      renderRooms();
+      syncUI();
+      break;
+
+    case "player.joined":
+    case "player.resumed":
+      S.players.set(m.player.id, m.player);
+      renderPlayers();
+      log("sys", (m.t === "player.resumed" ? "вернулся " : "пришёл ") + nameOf(m.player.id) + " #" + m.player.id);
+      break;
+
+    case "player.suspended":
+      if (S.players.has(m.id)) { S.players.get(m.id).status = "suspended"; renderPlayers(); }
+      removeCursor(m.id, false);
+      log("sys", nameOf(m.id) + " #" + m.id + " отвалился — игрок держится в комнате 30 c и может вернуться тем же id");
+      break;
+
+    case "player.left":
+      log("sys", nameOf(m.id) + " #" + m.id + " вышел (" + (m.reason || "left") + ")");
+      S.players.delete(m.id);
+      removeCursor(m.id, true);
+      renderPlayers();
+      sweepCursors();
+      break;
+
+    case "host.changed":
+      if (S.room) { S.room.hostId = m.hostId; renderPlayers(); }
+      log("sys", "хост комнаты теперь #" + m.hostId + (S.room && S.room.hostId === S.room.you ? " — это вы" : ""));
+      sweepCursors();
+      break;
+
+    case "state.changed": {
+      S.st[m.key] = m.value;
+      if (m.key === "boss_hp" || m.key === "boss_max_hp") updateBoss();
+      const cm = /^cursor_(\d+)$/.exec(m.key);
+      if (cm) moveCursor(Number(cm[1]), m.value);
+      break;
+    }
+
+    case "player.props": {
+      const p = S.players.get(m.id);
+      if (p) p.props = Object.assign({}, p.props, { [m.key]: m.value });
+      break;
+    }
+
+    case "event": {
+      const d = m.data;
+      if (d && typeof d === "object" && Number.isFinite(Number(d.x)) && Number.isFinite(Number(d.y))) {
+        if (S.room && S.room.mode === "cursor") ripple(Number(d.x), Number(d.y), color(m.from));
+        log("sys", "событие от " + nameOf(m.from) + ": клик в " + d.x + "," + d.y);
+      } else {
+        log("sys", "событие code=" + m.code + " от " + nameOf(m.from) + ": " + JSON.stringify(d));
+      }
+      break;
+    }
+
+    case "err": {
+      log("err", "ошибка " + m.code + " — " + (ERRLABEL[m.code] || "неизвестно") + ": " + m.msg);
+      if (m.code === 200) {
+        saveToken(""); S.token = "";
+        log("err", "токен не принят и забыт: подключитесь заново");
+        syncUI();
+      }
+      if (m.code === 100 || m.code === 102) {
+        S.noRetry = true;
+        log("sys", "авто-возврат отключён: проблема с версией протокола или hello");
+      }
+      if (m.code === 300) {
+        S.wantRoom = null;
+        if (!S.room) refreshRooms();
+      }
+      if (m.code === 301) refreshRooms();
+      break;
+    }
+
+    case "ok":
+      break;                                  // подтверждения запросов не засоряют лог
+
+    case "pong":
+      log("sys", "pong: задержка " + (Date.now() - num(m.ts)) + " мс");
+      break;
+  }
+}
+
+// ---- кнопки -----------------------------------------------------------------
+$("bConnect").onclick = connect;
+$("bDisconnect").onclick = () => {
+  log("sys", "отключаюсь по вашей команде");
+  hardStop();
+  setStatus("не подключён", "off");
+  syncUI();
+};
+$("bForget").onclick = () => {
+  saveToken(""); S.token = "";
+  log("sys", "токен забыт: следующее подключение создаст нового игрока");
+  syncUI();
+};
+$("bCreate").onclick = () => {
+  const n = $("newRoom").value.trim();
+  if (!n) { log("err", "сначала введите имя комнаты"); return; }
+  createRoom(n, $("mode").value);
+};
+$("bRandom").onclick = joinRandom;
+$("bRefresh").onclick = refreshRooms;
+$("bLeave").onclick = leaveRoom;
+$("bHit10").onclick = () => req("state.add", { key: "boss_hp", value: -10 });
+$("bHit50").onclick = () => req("state.add", { key: "boss_hp", value: -50 });
+$("bHeal").onclick = () => req("state.add", { key: "boss_hp", value: 10 });
+$("bBadSet").onclick = () => req("state.set", { key: "boss_hp", value: 5 });
+$("bPing").onclick = () => send({ t: "ping", ts: Date.now() });
+$("bList").onclick = refreshRooms;
+$("bEvent").onclick = () => req("event", { code: 1, data: "привет", to: "others" });
+$("bToggle").onclick = () => req("state.toggle", { key: "flag" });
+$("bClear").onclick = () => { $("log").innerHTML = ""; };
+$("app").onchange = () => { S.token = loadToken(); syncUI(); };
+
+// ---- старт ------------------------------------------------------------------
+$("url").value = (location.protocol === "https:" ? "wss://" : "ws://") + (location.host || "localhost:8080") + "/ws";
+renderRooms();
+syncUI();
+log("sys", "Это тестовый клиент сервера. Подключитесь, создайте комнату (режим «бой с боссом» " +
+  "или «курсоры») или войдите в существующую. Откройте страницу в другом браузере, чтобы играть вдвоём.");
 </script>
 </body>
 </html>

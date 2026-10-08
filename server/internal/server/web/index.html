@@ -178,6 +178,14 @@
           <input id="rate" type="number" min="1" max="50" step="1" value="20" style="width:84px">
           <span class="hint" style="margin:0" id="rateHint">кадров/с</span>
         </div>
+        <div class="row" style="margin-bottom:6px">
+          <label class="f" style="margin:0" for="smooth">Сглаживание чужого курсора</label>
+          <input id="smooth" type="number" min="0" max="500" step="10" value="70" style="width:84px">
+          <span class="hint" style="margin:0" id="smoothHint">мс</span>
+          <label class="hint row" style="gap:6px; margin:0; white-space:nowrap">
+            <input id="smoothAuto" type="checkbox" checked> авто от частоты
+          </label>
+        </div>
         <p class="hint">Веди мышь по полю — своя позиция уходит в <b>стейт игрока</b> (<code>player.set</code>), поэтому
           перезаписать чужой курсор нельзя, а лимит ключей комнаты не расходуется. Клик по полю отправляет событие:
           у остальных в этом месте вспыхивает кружок. Рамка вокруг ника — это ты.</p>
@@ -571,31 +579,55 @@ function ripple(x, y, col) {
 }
 let cursorTimer = null, cursorPending = null, cursorSent = "", ownFrame = 0, ownNext = null;
 
-// ---- частота отправки --------------------------------------------------------
+// ---- частота отправки и сглаживание -----------------------------------------
 // У стейта игрока (player.set) нет отдельного лимита на игрока, поэтому потолок — общий
 // лимит соединения: 60 сообщений/с (config.MsgRatePerSec), в него же идут ping и прочее.
 const RATE_DEFAULT = 20, RATE_MAX = 50;
+const SMOOTH_MAX = 500;   // мс; 0 = сглаживания нет, чужой курсор прыгает так же резко, как свой
+const smoothAutoMs = () => Math.max(70, Math.min(300, Math.round((1000 / cursorRate()) * 1.4)));
 function cursorRate() {
   const v = Math.round(Number($("rate").value));
   return Math.max(1, Math.min(RATE_MAX, Number.isFinite(v) ? v : RATE_DEFAULT));
 }
 function cursorInterval() { return Math.round(1000 / cursorRate()); }
-// Сглаживание чужого курсора подстраиваем под частоту: примерно полтора интервала отправки.
-// Редко шлём — сильнее сглаживаем, часто — сглаживание почти не нужно.
+function smoothOn() { return $("smoothAuto").checked; }
+function smoothMs() {
+  if (smoothOn()) return smoothAutoMs();
+  const v = Math.round(Number($("smooth").value));
+  return Math.max(0, Math.min(SMOOTH_MAX, Number.isFinite(v) ? v : 0));
+}
+function store(key, value) { try { localStorage.setItem(key, String(value)); } catch (e) { /* закрытый режим */ } }
+// Сглаживание чужого курсора задаётся отдельно: либо вручную, либо авто (1.4 интервала отправки).
+function applySmoothing(save) {
+  const ms = smoothMs();
+  $("smooth").disabled = smoothOn();
+  $("smooth").value = String(ms);
+  stage().style.setProperty("--remote-ms", ms + "ms");
+  $("smoothHint").textContent = ms === 0
+    ? "мс — сглаживания нет: чужой курсор прыгает так же резко, как свой"
+    : "мс — " + (smoothOn() ? "авто: 1.4 × интервал отправки" : "задано вручную");
+  if (save !== false) store("starkflow:smooth", smoothOn() ? "auto" : ms);
+}
 function applyRate(save) {
   const rate = cursorRate();
   $("rate").value = rate;
-  const ms = Math.max(70, Math.min(300, Math.round((1000 / rate) * 1.4)));
-  stage().style.setProperty("--remote-ms", ms + "ms");
-  $("rateHint").textContent = "кадров/с — интервал " + cursorInterval() + " мс, сглаживание чужого курсора " + ms + " мс" +
+  $("rateHint").textContent = "кадров/с — интервал " + cursorInterval() + " мс" +
     (rate >= RATE_MAX ? ". Выше нельзя: сервер режет больше 60 сообщений/с на соединение" : "");
-  cursorSent = "";
-  if (save !== false) { try { localStorage.setItem("starkflow:rate", String(rate)); } catch (e) { /* закрытый режим */ } }
+  cursorSent = "";                     // после смены настроек отправим позицию сразу
+  applySmoothing(save);
+  if (save !== false) store("starkflow:rate", rate);
 }
-function loadRate() {
+function loadSettings() {
   try {
-    const v = Number(localStorage.getItem("starkflow:rate"));
-    if (Number.isFinite(v) && v > 0) $("rate").value = String(v);
+    const r = Number(localStorage.getItem("starkflow:rate"));
+    if (Number.isFinite(r) && r > 0) $("rate").value = String(r);
+    const s = localStorage.getItem("starkflow:smooth");
+    if (s === "auto") {
+      $("smoothAuto").checked = true;
+    } else if (s !== null && Number.isFinite(Number(s))) {
+      $("smoothAuto").checked = false;
+      $("smooth").value = String(Number(s));
+    }
   } catch (e) { /* закрытый режим */ }
 }
 function queueCursor(x, y) {
@@ -773,10 +805,12 @@ $("bToggle").onclick = () => req("state.toggle", { key: "flag" });
 $("bClear").onclick = () => { $("log").innerHTML = ""; };
 $("app").onchange = () => { S.token = loadToken(); syncUI(); };
 $("rate").oninput = () => applyRate();
+$("smooth").oninput = () => applySmoothing();
+$("smoothAuto").onchange = () => applySmoothing();
 
 // ---- старт ------------------------------------------------------------------
 $("url").value = (location.protocol === "https:" ? "wss://" : "ws://") + (location.host || "localhost:8080") + "/ws";
-loadRate();
+loadSettings();
 applyRate(false);
 renderRooms();
 syncUI();

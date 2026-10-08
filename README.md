@@ -19,6 +19,8 @@ on your own machine or VPS, and players connect straight to it over WebSocket.
   (shared HP with `add` rules) and cursor synchronisation (per-player state + events).
 - **Construct 3 plugin** `EwenLoy_StarkFlow`: 14 actions, 20 conditions, 30 expressions — install
   `dist/starkflow.c3addon` via C3 → View → Addon Manager. Full ACE list: `plugin/aces.json`.
+- **Docker**: `docker compose up -d --build` runs the server in a container; add `--profile tunnel` to get a
+  public https/wss address (Cloudflare Tunnel) without opening any ports — handy when the game page is served over https.
 
 Quick start:
 
@@ -90,6 +92,38 @@ go run ./cmd/starkflow
 - `STARKFLOW_ROOM_NAME_MAX`: максимальная длина названия комнаты в символах (любой язык, включая эмодзи), по умолчанию `32`. Лимит приходит клиенту в `welcome`
 
 Остальные лимиты лежат в `server/internal/config/config.go`.
+
+## Запуск на VPS через Docker (игра с другом)
+
+Подходит для маленького VPS (серверу хватает 64–128 МБ), где из инструментов есть только Docker.
+В репозитории лежат `Dockerfile` (сборка Go → маленький Alpine, запуск от непривилегированного пользователя)
+и `docker-compose.yml`.
+
+```bash
+git clone https://github.com/EwenLoy/starkflow.git
+cd starkflow
+# открой docker-compose.yml и задай свой STARKFLOW_SECRET — иначе после перезапуска сервера токены игроков слетают
+docker compose up -d --build
+docker compose logs -f starkflow        # видно строку "StarkFlow listening addr=:8080"
+```
+
+Друг открывает `http://<IP-сервера>:8080` — это встроенный тестовый клиент (лобби, комнаты, бой с боссом,
+синхронизация курсоров). Порт 8080 нужно открыть в панели VPS или в фаерволе.
+
+**Если игра в C3 открыта у друга по https** (itch.io, GitHub Pages, свой домен) — нужен `wss://`, иначе браузер
+заблокирует соединение. Самый простой путь без открытия портов — туннель, он уже описан в том же compose-файле:
+
+```bash
+docker compose --profile tunnel up -d
+docker compose logs tunnel | grep trycloudflare     # получишь адрес вида https://xxxx.trycloudflare.com
+```
+
+В свойствах плагина тогда указывай `wss://xxxx.trycloudflare.com/ws`. Туннель `trycloudflare` — тестовый:
+адрес живёт, пока живёт контейнер, у бесплатного варианта есть лимиты. Для постоянного адреса нужен свой домен
+(Cloudflare Tunnel с токеном или Caddy с автоматическим Let's Encrypt) — скажи, добавлю отдельный compose-файл.
+
+Проверки: образ собирается и проверяется в CI (job `docker`: сборка, запуск, ожидание `/health`, затем smoke-тест
+внутри контейнера), а состояние контейнера видно через `docker compose ps` — healthcheck стучит в `/health`.
 
 ## Тесты
 

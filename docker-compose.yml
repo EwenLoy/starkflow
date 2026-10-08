@@ -1,0 +1,43 @@
+# StarkFlow на своём сервере.
+#
+# Обычный запуск:            docker compose up -d --build
+# С публичным адресом:       docker compose --profile tunnel up -d --build
+# Логи:                      docker compose logs -f starkflow
+#
+# STARKFLOW_SECRET обязательно поменяй: если он не задан, сервер берёт случайный при каждом
+# запуске, и токены всех игроков после перезапуска перестают работать (то есть ломается
+# возврат в комнату после обрыва и после рестарта сервера).
+services:
+  starkflow:
+    build: .
+    image: starkflow:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      STARKFLOW_ADDR: ":8080"
+      STARKFLOW_SECRET: "change-me-to-a-long-random-string"
+      # Разрешённые Origin через запятую; пусто = разрешено всё (годится для разработки).
+      # STARKFLOW_ORIGINS: "https://example.com,http://1.2.3.4:8080"
+      # Максимальная длина названия комнаты в символах (любой язык).
+      # STARKFLOW_ROOM_NAME_MAX: "32"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # Необязательно: туннель Cloudflare. Даёт публичный адрес с https и wss, порты открывать не нужно.
+  # Запуск: docker compose --profile tunnel up -d
+  # Адрес смотри в логах: docker compose logs tunnel   (строка вида https://xxxx.trycloudflare.com)
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://starkflow:8080
+    depends_on:
+      - starkflow

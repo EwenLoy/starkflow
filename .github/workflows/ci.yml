@@ -57,3 +57,31 @@ jobs:
           STARKFLOW_ADDR=:8099 STARKFLOW_SECRET=ci "$RUNNER_TEMP/starkflow" &
           sleep 1
           node tests/server-smoke.mjs
+
+  docker:
+    name: Docker image + smoke test inside the container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build the image
+        run: docker build -t starkflow:ci .
+      - name: Run the container
+        run: docker run -d --name starkflow -p 8099:8080 -e STARKFLOW_SECRET=ci starkflow:ci
+      - name: Wait for the health endpoint
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8099/health; then exit 0; fi
+            sleep 1
+          done
+          echo "server did not start"; docker logs starkflow; exit 1
+      - name: Smoke test against the container
+        env:
+          SF_BASE: http://127.0.0.1:8099
+          SF_WS: ws://127.0.0.1:8099/ws
+        run: node tests/server-smoke.mjs
+      - name: Container logs
+        if: always()
+        run: docker logs starkflow

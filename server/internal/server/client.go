@@ -216,11 +216,12 @@ func (c *client) onHello(m *proto.ClientMsg) {
 	c.hello = true
 	_ = c.conn.SetReadDeadline(time.Now().Add(cfg.IdleTimeout))
 	c.Send(proto.Marshal(map[string]any{
-		"t":          "welcome",
-		"userId":     uid,
-		"token":      auth.Sign(cfg.Secret, uid, time.Now()),
-		"serverTime": time.Now().UnixMilli(),
-		"proto":      proto.Version,
+		"t":           "welcome",
+		"userId":      uid,
+		"token":       auth.Sign(cfg.Secret, uid, time.Now()),
+		"serverTime":  time.Now().UnixMilli(),
+		"proto":       proto.Version,
+		"roomNameMax": cfg.MaxRoomNameRunes,
 	}))
 }
 
@@ -229,9 +230,25 @@ func (c *client) onJoin(m *proto.ClientMsg) {
 		c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrAlreadyIn, "already in a room, leave it first")))
 		return
 	}
-	if !validName(m.Room) {
-		c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrBadRoomName, "room name: 1-64 chars, letters, digits, . _ - :")))
-		return
+	// room.join: ref — это id комнаты (hex) или её имя на любом языке.
+	// Имена не уникальны, поэтому при create=true всегда создаётся НОВАЯ комната,
+	// а id выделяет сервер. При create=false ищем сначала по id, потом по имени
+	// (самую старую комнату с таким именем).
+	ref := m.Room
+	if m.Create {
+		name, e := c.srv.cleanRoomName(ref)
+		if e != nil {
+			c.Send(proto.ErrFrame(m.ID, e))
+			return
+		}
+		ref = name
+	} else {
+		clean, e := c.srv.ValidRoomRef(ref)
+		if e != nil {
+			c.Send(proto.ErrFrame(m.ID, e))
+			return
+		}
+		ref = clean
 	}
 	opts := room.Options{
 		MaxPlayers: m.MaxPlayers,
@@ -243,7 +260,7 @@ func (c *client) onJoin(m *proto.ClientMsg) {
 	if m.EmptyTTL != nil && *m.EmptyTTL >= 0 {
 		opts.EmptyTTL = time.Duration(*m.EmptyTTL) * time.Second
 	}
-	rm, err := c.srv.join(c.app, m.Room, m.Create, opts, room.JoinReq{
+	rm, err := c.srv.join(c.app, ref, m.Create, opts, room.JoinReq{
 		ReqID:  m.ID,
 		UserID: c.userID,
 		Name:   c.name,

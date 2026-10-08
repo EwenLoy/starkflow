@@ -38,8 +38,10 @@
 			this._serverOffset = 0;
 			this._nextReq = 0;
 			this._lastJoin = null;				// replayed after a reconnect
+			this._pendingCreate = null;			// "join or create": создаём, если комнаты нет
 
 			// Room.
+			this._roomId = "";
 			this._roomName = "";
 			this._myId = 0;
 			this._hostId = 0;
@@ -126,6 +128,7 @@
 
 		_clearRoom()
 		{
+			this._roomId = "";
 			this._roomName = "";
 			this._myId = 0;
 			this._hostId = 0;
@@ -299,6 +302,17 @@
 				msg.maxPlayers = Math.floor(maxPlayers);
 			if (emptyTTL >= 0)
 				msg.emptyTTL = Math.floor(emptyTTL);
+			this._pendingCreate = null;
+			if (create)
+			{
+				// Сервер при create=true всегда создаёт НОВУЮ комнату (одинаковые имена
+				// разрешены), а нам нужно «войти, если есть, иначе создать»: сначала пробуем
+				// войти по имени, и если такой комнаты нет (ошибка 300) — создаём.
+				this._pendingCreate = msg;
+				this._lastJoin = msg;
+				this._send(Object.assign({ id: this._reqId() }, msg, { create: false }));
+				return;
+			}
 			this._lastJoin = msg;
 			this._send(Object.assign({ id: this._reqId() }, msg));
 		}
@@ -306,6 +320,7 @@
 		_leave()
 		{
 			this._lastJoin = null;
+			this._pendingCreate = null;
 			const wasIn = this._status === "in-room";
 			this._send({ t: "room.leave", id: this._reqId() });
 			if (wasIn)
@@ -387,7 +402,11 @@
 
 		_onJoined(m)
 		{
+			this._roomId = m.roomId || "";
 			this._roomName = m.room;
+			this._pendingCreate = null;
+			// после обрыва возвращаемся по id: имена комнат не уникальны
+			this._lastJoin = this._roomId ? { t: "room.join", room: this._roomId, create: false } : null;
 			this._myId = m.you;
 			this._hostId = m.hostId;
 			this._resumed = m.resumed ? 1 : 0;
@@ -477,6 +496,14 @@
 			else if (m.code === 100)
 			{
 				this._noReconnect = true;		// protocol mismatch, retrying is pointless
+			}
+			else if (m.code === 300 && this._pendingCreate)
+			{
+				// комнаты с таким именем нет: создаём её (действие «войти или создать»)
+				const msg = this._pendingCreate;
+				this._pendingCreate = null;
+				this._lastJoin = msg;
+				this._send(Object.assign({ id: this._reqId() }, msg));
 			}
 			else if (m.code >= 300 && m.code < 400 && this._status !== "in-room")
 			{

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,6 +24,7 @@ type Config struct {
 	MsgBurst      float64
 
 	MaxRooms          int
+	MaxRoomNameRunes  int // максимальная длина названия комнаты в символах (любой язык)
 	MaxPlayersDefault int
 	MaxPlayersCap     int
 	EmptyTTLDefault   time.Duration
@@ -36,7 +38,8 @@ type Config struct {
 }
 
 // Load returns defaults overridden by environment variables:
-// STARKFLOW_ADDR, STARKFLOW_SECRET, STARKFLOW_ORIGINS (comma separated).
+// STARKFLOW_ADDR, STARKFLOW_SECRET, STARKFLOW_ORIGINS (comma separated),
+// STARKFLOW_ROOM_NAME_MAX (max room name length in characters).
 func Load() Config {
 	c := Config{
 		Addr:              ":8080",
@@ -47,6 +50,7 @@ func Load() Config {
 		MsgRatePerSec:     60,
 		MsgBurst:          120,
 		MaxRooms:          1000,
+		MaxRoomNameRunes:  32,
 		MaxPlayersDefault: 8,
 		MaxPlayersCap:     64,
 		EmptyTTLDefault:   60 * time.Second,
@@ -65,6 +69,11 @@ func Load() Config {
 			if o = strings.TrimSpace(o); o != "" {
 				c.AllowedOrigins = append(c.AllowedOrigins, o)
 			}
+		}
+	}
+	if v := os.Getenv("STARKFLOW_ROOM_NAME_MAX"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.MaxRoomNameRunes = n
 		}
 	}
 	if v := os.Getenv("STARKFLOW_SECRET"); v != "" {

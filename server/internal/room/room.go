@@ -40,6 +40,7 @@ type JoinReq struct {
 
 // Info is a lock-free summary used by room.list.
 type Info struct {
+	ID         string // короткий хэш: он уникален, имя комнаты — просто метка
 	Name       string
 	Players    int
 	MaxPlayers int
@@ -60,10 +61,12 @@ type Player struct {
 
 // Room is one game session.
 type Room struct {
-	Key  string // app-qualified key, unique on the server
-	Name string
+	Key  string // app-qualified key (app:id), unique on the server
+	ID   string // короткий хэш комнаты: одинаковые имена не мешают друг другу
+	Name string // отображаемое имя, любой язык
 
 	cfg        config.Config
+	created    time.Time
 	state      *State
 	players    map[int]*Player
 	byUser     map[string]int
@@ -81,7 +84,7 @@ type Room struct {
 }
 
 // New creates a room. Call Run in its own goroutine afterwards.
-func New(key, name string, opts Options, cfg config.Config, onClose func(*Room)) (*Room, *proto.Error) {
+func New(key, id, name string, opts Options, cfg config.Config, onClose func(*Room)) (*Room, *proto.Error) {
 	maxP := opts.MaxPlayers
 	if maxP <= 0 {
 		maxP = cfg.MaxPlayersDefault
@@ -106,8 +109,10 @@ func New(key, name string, opts Options, cfg config.Config, onClose func(*Room))
 	}
 	return &Room{
 		Key:        key,
+		ID:         id,
 		Name:       name,
 		cfg:        cfg,
+		created:    time.Now(),
 		state:      st,
 		players:    map[int]*Player{},
 		byUser:     map[string]int{},
@@ -122,8 +127,11 @@ func New(key, name string, opts Options, cfg config.Config, onClose func(*Room))
 
 // Info returns a summary; safe to call from any goroutine.
 func (r *Room) Info() Info {
-	return Info{Name: r.Name, Players: int(r.count.Load()), MaxPlayers: r.maxPlayers}
+	return Info{ID: r.ID, Name: r.Name, Players: int(r.count.Load()), MaxPlayers: r.maxPlayers}
 }
+
+// Created reports when the room was made; used to pick the oldest room with a name.
+func (r *Room) Created() time.Time { return r.created }
 
 // Run is the room loop. It returns when the room is disposed.
 func (r *Room) Run() {
@@ -337,6 +345,7 @@ func (r *Room) doJoin(req JoinReq) *proto.Error {
 	joined := map[string]any{
 		"t":          "room.joined",
 		"room":       r.Name,
+		"roomId":     r.ID,
 		"you":        p.ID,
 		"hostId":     r.hostID(),
 		"maxPlayers": r.maxPlayers,

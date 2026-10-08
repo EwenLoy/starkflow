@@ -72,10 +72,16 @@ console.log("ACE consistency OK (" + n + " entries)");
 
 	P.Acts.JoinOrCreateRoom.call(inst, "boss1", 4, 30);
 	let last = ws.sent[ws.sent.length - 1];
-	assert.deepStrictEqual([last.t, last.room, last.create, last.maxPlayers, last.emptyTTL], ["room.join", "boss1", true, 4, 30]);
+	// «войти или создать»: сначала пробуем войти по имени
+	assert.deepStrictEqual([last.t, last.room, last.create, last.maxPlayers, last.emptyTTL], ["room.join", "boss1", false, 4, 30]);
 	assert.ok(typeof last.id === "number");
 
-	ws.recv({ t: "room.joined", room: "boss1", you: 1, hostId: 1, resumed: false, maxPlayers: 4,
+	// комнаты с таким именем нет -> плагин создаёт новую
+	ws.recv({ t: "err", code: 300, msg: "room not found: boss1" });
+	last = ws.sent[ws.sent.length - 1];
+	assert.deepStrictEqual([last.t, last.room, last.create, last.maxPlayers, last.emptyTTL], ["room.join", "boss1", true, 4, 30]);
+
+	ws.recv({ t: "room.joined", room: "boss1", roomId: "a1b2c3d4", you: 1, hostId: 1, resumed: false, maxPlayers: 4,
 		players: [{ id: 1, userId: "u1", name: "A", status: "active", props: {} }], state: { boss_hp: 1000, flag: true } });
 	assert.strictEqual(inst._status, "in-room");
 	assert.strictEqual(P.Exps.MyId.call(inst), 1);
@@ -122,7 +128,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	ws.recv({ t: "player.props", id: 2, key: "ready", value: true });
 	assert.strictEqual(P.Exps.PlayerProp.call(inst, 2, "ready"), 1);
 
-	ws.recv({ t: "room.list.result", rooms: [{ room: "boss1", players: 2, maxPlayers: 4 }] });
+	ws.recv({ t: "room.list.result", rooms: [{ id: "a1b2c3d4", room: "boss1", players: 2, maxPlayers: 4 }] });
 	assert.strictEqual(P.Exps.RoomCount.call(inst), 1);
 	assert.strictEqual(P.Exps.RoomNameAt.call(inst, 0), "boss1");
 
@@ -140,8 +146,9 @@ console.log("ACE consistency OK (" + n + " entries)");
 	ws.recv({ t: "welcome", userId: "u1", token: "tok2", serverTime: Date.now(), proto: 1 });
 	assert.strictEqual(inst._status, "reconnecting");
 	const rejoin = ws.sent[ws.sent.length - 1];
-	assert.deepStrictEqual([rejoin.t, rejoin.room, rejoin.create], ["room.join", "boss1", true]);
-	ws.recv({ t: "room.joined", room: "boss1", you: 1, hostId: 1, resumed: true, maxPlayers: 4, players: [], state: { boss_hp: 990 } });
+	// возврат идёт по id комнаты: имена комнат не уникальны
+	assert.deepStrictEqual([rejoin.t, rejoin.room, rejoin.create], ["room.join", "a1b2c3d4", false]);
+	ws.recv({ t: "room.joined", room: "boss1", roomId: "a1b2c3d4", you: 1, hostId: 1, resumed: true, maxPlayers: 4, players: [], state: { boss_hp: 990 } });
 	assert.strictEqual(inst._status, "in-room");
 	assert.strictEqual(P.Exps.Resumed.call(inst), 1);
 

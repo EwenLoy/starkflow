@@ -123,8 +123,9 @@
     <section class="card" id="lobbyCard">
       <h2>2. Комнаты на сервере</h2>
       <div class="grow">
-        <label class="f" for="newRoom">Имя новой комнаты (буквы, цифры, <b>.</b> <b>_</b> <b>-</b> <b>:</b>, до 64 символов)</label>
-        <input id="newRoom" value="boss1" maxlength="64" autocomplete="off">
+        <label class="f" for="newRoom">Имя новой комнаты — любой язык, до <b id="nameMax">32</b> символов.
+          Каждое создание даёт <b>новую</b> комнату со своим id, одинаковые имена разрешены</label>
+        <input id="newRoom" value="boss1" autocomplete="off">
       </div>
       <div class="grow" style="margin-top:8px">
         <label class="f" for="mode">Режим новой комнаты</label>
@@ -371,6 +372,15 @@ function renderRooms() {
     const n = document.createElement("span");
     n.className = "name";
     n.textContent = r.room;
+    if (r.id) {
+      const idTag = document.createElement("span");
+      idTag.className = "meta";
+      idTag.style.marginLeft = "0";
+      idTag.textContent = "#" + r.id;
+      li.append(n, idTag);            // одинаковые имена различаем по id
+    } else {
+      li.appendChild(n);
+    }
     const meta = document.createElement("span");
     meta.className = "meta";
     meta.textContent = r.players + " / " + r.maxPlayers + " игроков";
@@ -378,8 +388,8 @@ function renderRooms() {
     b.className = "primary";
     b.textContent = "Войти";
     b.disabled = r.players >= r.maxPlayers;
-    b.onclick = () => joinRoom(r.room);
-    li.append(n, meta, b);
+    b.onclick = () => joinRoom(r.id || r.room);   // входим по id: имя не уникально
+    li.append(meta, b);
     ul.appendChild(li);
   }
 }
@@ -391,13 +401,17 @@ function createRoom(name, mode) {
     strict: def.strict, schema: def.schema, init: def.init
   });
 }
-function joinRoom(name) {
-  log("sys", "вхожу в комнату «" + name + "»");
-  req("room.join", { room: name, create: false });
+function joinRoom(ref) {
+  log("sys", "вхожу в комнату «" + ref + "»");
+  req("room.join", { room: ref, create: false });   // ref — id комнаты (или имя)
 }
 function joinRandom() {
   const free = S.rooms.filter((r) => r.players < r.maxPlayers);
-  if (free.length) { joinRoom(free[Math.floor(Math.random() * free.length)].room); return; }
+  if (free.length) {
+    const r = free[Math.floor(Math.random() * free.length)];
+    joinRoom(r.id || r.room);
+    return;
+  }
   const mode = $("mode").value;
   createRoom((mode === "cursor" ? "cursor-" : "boss-") + Math.random().toString(36).slice(2, 6), mode);
 }
@@ -418,8 +432,8 @@ function resetRoom() {
 
 // ---- вход в комнату и игроки ------------------------------------------------
 function onJoined(m) {
-  S.room = { name: m.room, you: m.you, hostId: m.hostId, maxPlayers: m.maxPlayers, mode: "boss" };
-  S.wantRoom = m.room;
+  S.room = { id: m.roomId || "", name: m.room, you: m.you, hostId: m.hostId, maxPlayers: m.maxPlayers, mode: "boss" };
+  S.wantRoom = m.roomId || m.room;   // возвращаемся по id: имя не уникально
   S.retry = 0;
   S.players.clear();
   for (const p of (m.players || [])) S.players.set(p.id, p);
@@ -428,7 +442,7 @@ function onJoined(m) {
   stopLobby();
   log("sys", (m.resumed ? "вернулся в комнату «" : "вошёл в комнату «") + m.room + "» как игрок #" + m.you +
     (m.resumed ? " (resumed: тот же игрок и стейт)" : "") + ". Режим: " + MODE_NAME[S.room.mode] + ".");
-  $("rName").textContent = m.room;
+  $("rName").textContent = m.room + (m.roomId ? " · #" + m.roomId : "");
   $("rMe").textContent = "#" + m.you;
   $("rMode").textContent = MODE_NAME[S.room.mode];
   $("bossPane").classList.toggle("hidden", S.room.mode !== "boss");
@@ -686,8 +700,13 @@ function onMsg(m) {
       saveToken(m.token);
       S.status = "on";
       setStatus("подключён", "on");
+      if (m.roomNameMax) {                       // лимит длины имени комнаты задаёт сервер
+        $("nameMax").textContent = m.roomNameMax;
+        $("newRoom").maxLength = m.roomNameMax;
+      }
       syncUI();
-      log("sys", "welcome: userId " + m.userId.slice(0, 8) + "…, proto " + m.proto);
+      log("sys", "welcome: userId " + m.userId.slice(0, 8) + "…, proto " + m.proto +
+        (m.roomNameMax ? ", имена комнат до " + m.roomNameMax + " символов" : ""));
       if (S.wantRoom) {
         log("sys", "возвращаюсь в комнату «" + S.wantRoom + "» (create: false)");
         req("room.join", { room: S.wantRoom, create: false });

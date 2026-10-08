@@ -194,7 +194,62 @@ const schema = {
     E.send({ t: 'room.list', id: 1 });
     eq('app=other: список комнат пуст', (await E.nextT('room.list.result')).rooms, []);
 
-    for (const c of [A, B2, B3, C, D, E]) c.ws.close();
+    // --- комнаты: id вместо имени, одинаковые имена разрешены ---
+    const IDURL = `${WS}?v=1&app=${APP}-ids`;
+    const R1 = await open(IDURL);
+    R1.send({ t: 'hello', name: 'K' });
+    const wR1 = await R1.nextT('welcome');
+    eq('welcome сообщает лимит длины имени комнаты', wR1.roomNameMax, 32);
+
+    R1.send({ t: 'room.join', id: 1, room: 'дубликат', create: true, maxPlayers: 4 });
+    const r1a = await R1.nextT('room.joined');
+    eq('room.joined отдаёт id комнаты', /^[0-9a-f]{8}$/.test(r1a.roomId), true);
+    eq('имя комнаты сохранилось как есть', r1a.room, 'дубликат');
+
+    const R2 = await open(IDURL);
+    R2.send({ t: 'hello', name: 'L' });
+    await R2.nextT('welcome');
+    R2.send({ t: 'room.join', id: 1, room: 'дубликат', create: true, maxPlayers: 4 });
+    const r2a = await R2.nextT('room.joined');
+    eq('вторая комната с тем же именем получила другой id', r2a.roomId !== r1a.roomId, true);
+    console.log(`  инфо  id комнат: K=${r1a.roomId}, L=${r2a.roomId}`);
+
+    R1.send({ t: 'room.list', id: 2 });
+    const lobby = await R1.nextT('room.list.result');
+    eq('в списке две комнаты с одинаковым именем', lobby.rooms.filter((r) => r.room === 'дубликат').length, 2);
+    eq('у каждой комнаты в списке есть id', lobby.rooms.every((r) => /^[0-9a-f]{8}$/.test(r.id)), true);
+
+    const R3 = await open(IDURL);
+    R3.send({ t: 'hello', name: 'M' });
+    await R3.nextT('welcome');
+    R3.send({ t: 'room.join', id: 1, room: r2a.roomId, create: false });
+    const r3a = await R3.nextT('room.joined');
+    eq('вход по id попадает именно в эту комнату', r3a.roomId, r2a.roomId);
+    eq('в комнате уже был игрок L', r3a.players.map((p) => p.name), ['L', 'M']);
+
+    const R4 = await open(IDURL);
+    R4.send({ t: 'hello', name: 'N' });
+    await R4.nextT('welcome');
+    R4.send({ t: 'room.join', id: 1, room: 'дубликат', create: false });
+    const r4a = await R4.nextT('room.joined');
+    eq('вход по имени попал в самую старую комнату с таким именем', r4a.roomId, r1a.roomId);
+
+    const R5 = await open(IDURL);
+    R5.send({ t: 'hello', name: 'U' });
+    await R5.nextT('welcome');
+    R5.send({ t: 'room.join', id: 1, room: 'Игровая комната 🎮', create: true });
+    const r5a = await R5.nextT('room.joined');
+    eq('имя комнаты на другом языке принято', r5a.room, 'Игровая комната 🎮');
+
+    const R6 = await open(IDURL);
+    R6.send({ t: 'hello', name: 'V' });
+    await R6.nextT('welcome');
+    R6.send({ t: 'room.join', id: 1, room: 'x'.repeat(33), create: true });
+    eq('слишком длинное имя (33 символа) -> 306', (await R6.nextT('err')).code, 306);
+    R6.send({ t: 'room.join', id: 2, room: '   ', create: true });
+    eq('пустое имя -> 306', (await R6.nextT('err')).code, 306);
+
+    for (const c of [A, B2, B3, C, D, E, R1, R2, R3, R4, R5, R6]) c.ws.close();
     await sleep(200);
   } catch (e) {
     bad('исключение', e && e.message ? e.message : String(e));

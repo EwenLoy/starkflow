@@ -112,6 +112,15 @@ jobs:
           docker logs starkflow-port; docker rm -f starkflow-port; echo "healthcheck never reported healthy"; exit 1
 
 
+      - name: Entrypoint with a tunnel token (cloudflared must not block the server)
+        run: |
+          docker run -d --name starkflow-tunnel -p 8096:3000 -e PORT=3000 -e STARKFLOW_SECRET=ci -e CF_TUNNEL_TOKEN=dummy starkflow:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8096/health; then docker rm -f starkflow-tunnel; exit 0; fi
+            sleep 1
+          done
+          docker logs starkflow-tunnel; docker rm -f starkflow-tunnel; exit 1
+
       - name: Container logs
         if: always()
         run: docker logs starkflow

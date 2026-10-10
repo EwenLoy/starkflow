@@ -12,6 +12,9 @@ import (
 
 // Config is the whole server configuration. Defaults are in Load.
 type Config struct {
+	// Mode — роль этого процесса: "node" (игровой сервер, по умолчанию) или
+	// "directory" (менеджер кластера). Задаётся переменной STARKFLOW_MODE.
+	Mode           string
 	Addr           string
 	Secret         []byte   // signs user tokens (HMAC-SHA256)
 	AllowedOrigins []string // empty = allow all (development only)
@@ -45,10 +48,12 @@ type Config struct {
 }
 
 // Load returns defaults overridden by environment variables:
-// STARKFLOW_ADDR, STARKFLOW_SECRET, STARKFLOW_ORIGINS (comma separated),
+// STARKFLOW_MODE (node|directory), STARKFLOW_ADDR, STARKFLOW_SECRET,
+// STARKFLOW_ORIGINS (comma separated),
 // STARKFLOW_ROOM_NAME_MAX (max room name length in characters).
 func Load() Config {
 	c := Config{
+		Mode:              "node",
 		Addr:              ":8080",
 		MaxMsgBytes:       16 * 1024,
 		IdleTimeout:       45 * time.Second,
@@ -67,6 +72,9 @@ func Load() Config {
 		MaxStateBytes:     64 * 1024,
 		MaxStringBytes:    1024,
 		StateWritesPerSec: 20,
+	}
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("STARKFLOW_MODE"))); v != "" {
+		c.Mode = v
 	}
 	if v := os.Getenv("STARKFLOW_ADDR"); v != "" {
 		c.Addr = v

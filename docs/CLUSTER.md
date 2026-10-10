@@ -1,11 +1,13 @@
 # Кластер StarkFlow: несколько нод и directory
 
-Один бинарник, два режима (`--mode`):
+Один бинарник, два режима. Роль задаётся переменной окружения
+`STARKFLOW_MODE` — команду запуска менять не нужно (на Bothost аргументы
+в контейнер не доходят, так что env — единственный рабочий способ):
 
-| режим | что делает |
+| `STARKFLOW_MODE` | что делает |
 |---|---|
-| `node` (по умолчанию) | игровой сервер: комнаты, игроки, `/ws` |
-| `directory` | менеджер кластера: `/assign`, heartbeat от нод, админ-панель `/admin/` |
+| `node` (по умолчанию, можно не задавать) | игровой сервер: комнаты, игроки, `/ws` |
+| `directory` | распределитель: `/assign`, heartbeat от нод, админ-панель `/admin/` |
 
 ## Как это работает
 
@@ -27,11 +29,13 @@ directory ──GET /health каждые 3 с (замер RTT)──────
 
 ## Развёртывание (Bothost / Docker)
 
-1. **Directory**: бот из того же образа, в команде запуска `--mode=directory`,
-   env: `STARKFLOW_CLUSTER_SECRET`, `STARKFLOW_ADMIN_TOKEN`. Панель: `https://dir.../admin/`.
+1. **Directory (распределитель)**: бот из того же образа, env:
+   `STARKFLOW_MODE=directory`, `STARKFLOW_CLUSTER_SECRET`, `STARKFLOW_ADMIN_TOKEN`.
+   Панель: `https://dir.../admin/`.
 2. **Каждая нода**: env `STARKFLOW_DIRECTORY_URL` (адрес directory),
    `STARKFLOW_PUBLIC_URL` (свой публичный `wss://.../ws`), `STARKFLOW_REGION`,
-   тот же `STARKFLOW_CLUSTER_SECRET`. Нода регистрируется сама — ничего
+   тот же `STARKFLOW_CLUSTER_SECRET`. `STARKFLOW_MODE` можно не задавать
+   (по умолчанию `node`). Нода регистрируется сама — ничего
    вручную добавлять не нужно.
 3. В Construct-плагине в поле Server URL указывается `https://dir...` (directory),
    App ID — как раньше. Плагин сам ходит в `/assign` и переподключается.

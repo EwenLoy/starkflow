@@ -1,11 +1,10 @@
-// Command starkflow runs the StarkFlow multiplayer server
-// (or, with --mode=directory, the cluster manager).
+// Command starkflow runs the StarkFlow multiplayer server;
+// with STARKFLOW_MODE=directory it runs the cluster manager instead.
 package main
 
 import (
 	"context"
 	"errors"
-	"flag"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,17 +18,14 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "node", "run mode: node = game server, directory = cluster manager + admin panel")
-	flag.Parse()
-
 	cfg := config.Load()
-	switch *mode {
+	switch cfg.Mode {
 	case "node":
 		runNode(cfg)
 	case "directory":
 		runDirectory(cfg)
 	default:
-		slog.Error("unknown --mode (expected \"node\" or \"directory\")", "mode", *mode)
+		slog.Error("unknown STARKFLOW_MODE (expected \"node\" or \"directory\")", "mode", cfg.Mode)
 		os.Exit(2)
 	}
 }

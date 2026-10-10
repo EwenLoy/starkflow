@@ -30,6 +30,19 @@
 					"auto-reconnect": {
 						"name": "Auto reconnect",
 						"desc": "Reconnect and rejoin the room automatically after a connection loss."
+					},
+					"replay-players": {
+						"name": "Replay players on join",
+						"desc": "After you enter a room, fire \"On player joined\" for every player already in it (including you), so one event can create all player objects."
+					},
+					"send-rate": {
+						"name": "Send rate",
+						"desc": "How often synced objects and player properties are sent. Can be changed in the game with the Send rate actions.",
+						"items": {
+							"fast": "Fast (58/s)",
+							"medium": "Medium (30/s)",
+							"slow": "Slow (15/s)"
+						}
 					}
 				},
 				"aceCategories": {
@@ -38,7 +51,9 @@
 					"players": "Players",
 					"events": "Events",
 					"state": "Room state",
-					"errors": "Errors"
+					"errors": "Errors",
+					"sync": "Object sync",
+					"rules": "Room rules"
 				},
 				"conditions": {
 					"on-connected": {
@@ -154,10 +169,63 @@
 						"display-text": "On any state changed",
 						"description": "Triggered for every state change."
 					},
+					"is-syncing": {
+						"list-name": "Is syncing",
+						"display-text": "Is syncing",
+						"description": "True after \"Start sync\" and until \"Stop sync\"."
+					},
+					"for-each-object": {
+						"list-name": "For each object",
+						"display-text": "For each object with tag [i]{0}[/i]",
+						"description": "Runs the following actions once for every synced object: mine and the ones created for other players. Empty tag = all of them. Pick the instance with EntityUID, read the owner with EntityOwner.",
+						"params": {
+							"tag": {
+								"name": "Tag",
+								"desc": "Tag from \"Sync object\". Empty = all objects."
+							}
+						}
+					},
+					"on-other-object-created": {
+						"list-name": "On other player's object created",
+						"display-text": "On other player's object created (tag [i]{0}[/i])",
+						"description": "Triggered when the plugin creates the object of another player. Read ProxyUID to pick that instance and ProxyPlayerId to know whose it is.",
+						"params": {
+							"tag": {
+								"name": "Tag",
+								"desc": "Tag from \"Sync object\". Empty = any tag."
+							}
+						}
+					},
+					"on-other-object-destroyed": {
+						"list-name": "On other player's object destroyed",
+						"display-text": "On other player's object destroyed (tag [i]{0}[/i])",
+						"description": "Triggered when the object of another player goes away (he left the room or stopped syncing). Fires before the instance is destroyed.",
+						"params": {
+							"tag": {
+								"name": "Tag",
+								"desc": "Tag from \"Sync object\". Empty = any tag."
+							}
+						}
+					},
+					"on-rate-limited": {
+						"list-name": "On rate limited",
+						"display-text": "On rate limited",
+						"description": "Triggered when the server dropped a message because of the send rate limit (60 messages per second per connection). Send less often."
+					},
 					"on-error": {
 						"list-name": "On error",
 						"display-text": "On error",
 						"description": "Triggered when the server sent an error. Read ErrorCode and ErrorMsg."
+					},
+					"on-any-player-prop-changed": {
+						"list-name": "On any player property changed",
+						"display-text": "On any player property changed",
+						"description": "Triggered when any property of any player changed. Read LastPlayerId and ChangedPropKey."
+					},
+					"for-each-player": {
+						"list-name": "For each player",
+						"display-text": "For each player",
+						"description": "Repeat the sub-events once for every player in the room. Read CurrentPlayerId inside."
 					}
 				},
 				"actions": {
@@ -237,6 +305,44 @@
 						"list-name": "Leave room",
 						"display-text": "Leave room",
 						"description": "Leave the current room."
+					},
+					"join-room-password": {
+						"list-name": "Join room with password",
+						"display-text": "Join room [i]{0}[/i] with password [i]{1}[/i]",
+						"description": "Enter a locked room by id or by name. The password is kept for the automatic reconnect.",
+						"params": {
+							"room": {
+								"name": "Room id or name",
+								"desc": "Room id is exact; a name picks the oldest room with it."
+							},
+							"password": {
+								"name": "Password",
+								"desc": "Room password."
+							}
+						}
+					},
+					"join-or-create-password": {
+						"list-name": "Join or create locked room",
+						"display-text": "Join or create room [i]{0}[/i] with password [i]{1}[/i] (max players [i]{2}[/i], delete when empty after [i]{3}[/i] s)",
+						"description": "Enter the room with this password, creating it if it does not exist.",
+						"params": {
+							"room": {
+								"name": "Room name",
+								"desc": "Display name, any language."
+							},
+							"password": {
+								"name": "Password",
+								"desc": "Password that will be required to enter."
+							},
+							"max-players": {
+								"name": "Max players",
+								"desc": "0 = server default (8), cap 64."
+							},
+							"empty-ttl": {
+								"name": "Delete when empty after, s",
+								"desc": "-1 = server default (60 s), 0 = at once."
+							}
+						}
 					},
 					"request-rooms": {
 						"list-name": "Request room list",
@@ -332,6 +438,254 @@
 								"desc": "Number or text."
 							}
 						}
+					},
+					"sync-object": {
+						"list-name": "Sync object",
+						"display-text": "Sync [i]{0}[/i] as tag [i]{1}[/i] | scope [i]{2}[/i], fields [i]{3}[/i], smoothing [i]{4}[/i], layer [i]{5}[/i]",
+						"description": "What to sync: an object type, a tag and a set of fields. Call it once with the same values on every client (for example on start of layout), then \"Start sync\". One tag = one object per player.",
+						"params": {
+							"object": {
+								"name": "Object",
+								"desc": "The object type to sync."
+							},
+							"tag": {
+								"name": "Tag",
+								"desc": "Name of this kind of object, e.g. player, crate, bullet. Same on every client."
+							},
+							"scope": {
+								"name": "Scope",
+								"desc": "Player: every player has his own object. Host: one object controlled by the host.",
+								"items": {
+									"player": "Player",
+									"host": "Host"
+								}
+							},
+							"transform": {
+								"name": "Fields",
+								"desc": "How much of the object is synced.",
+								"items": {
+									"none": "Nothing (the object is only registered)",
+									"position": "Position (X, Y)",
+									"positionAngle": "Position and angle",
+									"everything": "Everything (position, angle, size, mirror, animation, frame, visible, opacity)"
+								}
+							},
+							"interpolate": {
+								"name": "Smoothing",
+								"desc": "Glide other players' objects to new values instead of jumping."
+							},
+							"layer": {
+								"name": "Layer",
+								"desc": "Layer for the objects created for other players. Empty = the layer of your own object."
+							}
+						}
+					},
+					"bind-local-instance": {
+						"list-name": "Bind local instance",
+						"display-text": "Bind [i]{0}[/i] as my object",
+						"description": "The picked instance(s) become mine and are the ones sent to the other players. Without this action \"Start sync\" takes the instance that is in the layout.",
+						"params": {
+							"object": {
+								"name": "Object",
+								"desc": "Object type (pick the instance before this action)."
+							}
+						}
+					},
+					"start-sync": {
+						"list-name": "Start sync",
+						"display-text": "Start sync",
+						"description": "Start sending my objects and moving the objects the plugin creates for the other players. Call it after joining the room."
+					},
+					"stop-sync": {
+						"list-name": "Stop sync",
+						"display-text": "Stop sync",
+						"description": "Stop sending. The objects created for the other players are removed, the other clients remove mine."
+					},
+					"register-object": {
+						"list-name": "Register sync object",
+						"display-text": "Sync [i]{0}[/i]: owner player [i]{1}[/i], slot [i]{2}[/i] | X [i]{3}[/i] Y [i]{4}[/i] Z [i]{5}[/i] angle [i]{6}[/i] size [i]{7}[/i] mirror [i]{8}[/i] animation [i]{9}[/i] frame [i]{10}[/i] visible [i]{11}[/i] opacity [i]{12}[/i]",
+						"description": "Link the picked object(s) to a player. If the owner is you, the object is sent to the others; for any other owner it is moved by that player's data. Pick one instance (e.g. Player.pid = id); with several picked, slots go slot, slot+1, ... Use the same settings on every client.",
+						"params": {
+							"object": {
+								"name": "Object",
+								"desc": "The object to sync (pick instances before this action)."
+							},
+							"owner": {
+								"name": "Owner player id",
+								"desc": "Player id that controls this object, e.g. LastPlayerId or MyId."
+							},
+							"slot": {
+								"name": "Slot",
+								"desc": "Number of this object among the owner's objects (0 for a single object). Must be the same on every client."
+							},
+							"x": {
+								"name": "Position X",
+								"desc": "Sync X."
+							},
+							"y": {
+								"name": "Position Y",
+								"desc": "Sync Y."
+							},
+							"z": {
+								"name": "Z elevation",
+								"desc": "Sync Z elevation (ignored in Construct versions that do not have it)."
+							},
+							"angle": {
+								"name": "Angle",
+								"desc": "Sync the angle."
+							},
+							"size": {
+								"name": "Width and height",
+								"desc": "Sync width and height."
+							},
+							"mirror": {
+								"name": "Mirrored",
+								"desc": "Sync horizontal mirroring (negative width)."
+							},
+							"anim": {
+								"name": "Animation",
+								"desc": "Sync the animation name (Sprite only). Frames run by themselves on every client."
+							},
+							"frame": {
+								"name": "Animation frame",
+								"desc": "Also sync the exact animation frame."
+							},
+							"visible": {
+								"name": "Visible",
+								"desc": "Sync visibility."
+							},
+							"opacity": {
+								"name": "Opacity",
+								"desc": "Sync opacity."
+							}
+						}
+					},
+					"unregister-object": {
+						"list-name": "Unregister sync object",
+						"display-text": "Stop syncing [i]{0}[/i]",
+						"description": "Stop syncing the picked object(s). Destroyed objects are removed automatically.",
+						"params": {
+							"object": {
+								"name": "Object",
+								"desc": "The object to stop syncing (pick instances first)."
+							}
+						}
+					},
+					"set-smoothing": {
+						"list-name": "Set smoothing",
+						"display-text": "Set smoothing of other players' objects to [i]{0}[/i] ms",
+						"description": "How long other players' objects take to glide to a new position. 0 = no smoothing (jumps). Default 100.",
+						"params": {
+							"ms": {
+								"name": "Time (ms)",
+								"desc": "Smoothing time in milliseconds."
+							}
+						}
+					},
+					"set-send-rate-preset": {
+						"list-name": "Set send rate (mode)",
+						"display-text": "Set send rate: [i]{0}[/i]",
+						"description": "How often synced objects and player properties are sent: fast 58/s, medium 30/s, slow 15/s.",
+						"params": {
+							"preset": {
+								"name": "Mode",
+								"desc": "Send rate mode.",
+								"items": {
+									"fast": "Fast (58/s)",
+									"medium": "Medium (30/s)",
+									"slow": "Slow (15/s)"
+								}
+							}
+						}
+					},
+					"set-send-rate-custom": {
+						"list-name": "Set send rate (custom)",
+						"display-text": "Set send rate to [i]{0}[/i] per second",
+						"description": "Send at most this many times per second (1-60). Values above 58 are capped at 58, the server limit is 60 messages per second.",
+						"params": {
+							"rate": {
+								"name": "Per second",
+								"desc": "1-60 (60 means the maximum, 58)."
+							}
+						}
+					},
+					"clear-rules": {
+						"list-name": "Clear room rules",
+						"display-text": "Clear room rules",
+						"description": "Forget all rules, strict mode and initial values set before."
+					},
+					"set-strict": {
+						"list-name": "Set strict mode",
+						"display-text": "Strict mode: [i]{0}[/i]",
+						"description": "In strict mode the room accepts only keys that have a rule. Applies to rooms created after this action.",
+						"params": {
+							"on": {
+								"name": "Strict",
+								"desc": "Reject keys without a rule."
+							}
+						}
+					},
+					"add-key-rule": {
+						"list-name": "Add key rule",
+						"display-text": "Rule for state key [i]{0}[/i]: type [i]{1}[/i], mode [i]{2}[/i], min [i]{3}[/i], max [i]{4}[/i], max change [i]{5}[/i], reject [i]{6}[/i]",
+						"description": "Define what clients may do with a room state key. Applies to rooms created after this action (by Join or create).",
+						"params": {
+							"key": {
+								"name": "Key",
+								"desc": "State key name (letters, digits, . and _)."
+							},
+							"kind": {
+								"name": "Type",
+								"desc": "Type of the value.",
+								"items": {
+									"num": "Number",
+									"str": "Text",
+									"bool": "Yes/No"
+								}
+							},
+							"mode": {
+								"name": "Mode",
+								"desc": "Who may change the value and how.",
+								"items": {
+									"set": "Set (anyone can set)",
+									"add": "Add (only +/- with Add state)",
+									"const": "Constant (never changes)",
+									"once": "Once (can be set one time)",
+									"server": "Server (only the server)"
+								}
+							},
+							"min": {
+								"name": "Min",
+								"desc": "Smallest value, or empty for none (numbers only)."
+							},
+							"max": {
+								"name": "Max",
+								"desc": "Largest value, or empty for none (numbers only)."
+							},
+							"max-delta": {
+								"name": "Max change",
+								"desc": "Largest allowed |change| of one Add. 0 = no limit."
+							},
+							"reject": {
+								"name": "Reject",
+								"desc": "Reject out-of-range values instead of clamping them."
+							}
+						}
+					},
+					"set-initial-value": {
+						"list-name": "Set initial value",
+						"display-text": "Initial value of [i]{0}[/i] is [i]{1}[/i]",
+						"description": "Value the key has when a room is created by you. Works for constant keys too.",
+						"params": {
+							"key": {
+								"name": "Key",
+								"desc": "State key name."
+							},
+							"value": {
+								"name": "Value",
+								"desc": "Initial value."
+							}
+						}
 					}
 				},
 				"expressions": {
@@ -359,6 +713,10 @@
 						"translated-name": "RoomName",
 						"description": "Name of the current room."
 					},
+					"room-id": {
+						"translated-name": "RoomId",
+						"description": "Id of the current room."
+					},
 					"my-id": {
 						"translated-name": "MyId",
 						"description": "Your player id inside the room."
@@ -373,7 +731,7 @@
 					},
 					"room-count": {
 						"translated-name": "RoomCount",
-						"description": "Number of rooms in the last room list."
+						"description": "(Deprecated, use RoomListCount.) Number of rooms in the room list."
 					},
 					"room-name-at": {
 						"translated-name": "RoomNameAt",
@@ -509,9 +867,153 @@
 						"translated-name": "ErrorCode",
 						"description": "Code of the last error."
 					},
+					"room-id-at": {
+						"translated-name": "RoomIdAt",
+						"description": "Id of the room at index. Pass it to Join room to enter exactly that room.",
+						"params": {
+							"index": {
+								"name": "Index",
+								"desc": "0-based."
+							}
+						}
+					},
+					"room-free-at": {
+						"translated-name": "RoomFreeAt",
+						"description": "Free slots in the room at index; 0 means the room is full.",
+						"params": {
+							"index": {
+								"name": "Index",
+								"desc": "0-based."
+							}
+						}
+					},
+					"room-is-full-at": {
+						"translated-name": "RoomIsFullAt",
+						"description": "1 if the room at index has no free slots.",
+						"params": {
+							"index": {
+								"name": "Index",
+								"desc": "0-based."
+							}
+						}
+					},
+					"room-locked-at": {
+						"translated-name": "RoomLockedAt",
+						"description": "1 if the room at index needs a password.",
+						"params": {
+							"index": {
+								"name": "Index",
+								"desc": "0-based."
+							}
+						}
+					},
 					"error-msg": {
 						"translated-name": "ErrorMsg",
 						"description": "Text of the last error."
+					},
+					"current-player-id": {
+						"translated-name": "CurrentPlayerId",
+						"description": "Player id inside \"For each player\"."
+					},
+					"changed-prop-key": {
+						"translated-name": "ChangedPropKey",
+						"description": "Name of the player property from the last \"On any player property changed\"."
+					},
+					"room-list-count": {
+						"translated-name": "RoomListCount",
+						"description": "Number of rooms in the list loaded by \"Request rooms\"."
+					},
+					"room-player-count": {
+						"translated-name": "RoomPlayerCount",
+						"description": "Number of players in the room you are in."
+					},
+					"room-max-players": {
+						"translated-name": "RoomMaxPlayers",
+						"description": "Maximum number of players of the room you are in."
+					},
+					"send-rate": {
+						"translated-name": "SendRate",
+						"description": "Current send rate, flushes per second (1-58)."
+					},
+					"synced-object-count": {
+						"translated-name": "SyncedObjectCount",
+						"description": "Number of objects registered for sync."
+					},
+					"entity-uid": {
+						"translated-name": "EntityUID",
+						"description": "C3 UID of the current object (in \"For each object\" and its triggers). Use it with System \"Pick by unique ID\"."
+					},
+					"entity-tag": {
+						"translated-name": "EntityTag",
+						"description": "Tag of the current object."
+					},
+					"entity-owner": {
+						"translated-name": "EntityOwner",
+						"description": "Player id that controls the current object (0 for objects the game never sent)."
+					},
+					"entity-type": {
+						"translated-name": "EntityType",
+						"description": "Object type name of the current object."
+					},
+					"entity-slot": {
+						"translated-name": "EntitySlot",
+						"description": "Slot of the current object on its owner (technical, mostly for logs)."
+					},
+					"entity-field": {
+						"translated-name": "EntityField",
+						"description": "Field of the current object: x, y, z, angle, width, height, size, mirror, animation, frame, visible, opacity, uid, tag, owner, slot, type. Example: StarkFlow.EntityField(\"x\").",
+						"params": {
+							"key": {
+								"name": "Field",
+								"desc": "Field name, e.g. x, y, angle, animation."
+							}
+						}
+					},
+					"entity-count": {
+						"translated-name": "EntityCount",
+						"description": "How many synced objects have this tag (empty tag = all).",
+						"params": {
+							"tag": {
+								"name": "Tag",
+								"desc": "Tag from \"Sync object\". Empty = all objects."
+							}
+						}
+					},
+					"local-entity-uid": {
+						"translated-name": "LocalEntityUID",
+						"description": "C3 UID of my own object with this tag. Use it with System \"Pick by unique ID\" to make sure an event touches only my object.",
+						"params": {
+							"tag": {
+								"name": "Tag",
+								"desc": "Tag from \"Sync object\"."
+							}
+						}
+					},
+					"player-proxy-uid": {
+						"translated-name": "PlayerProxyUID",
+						"description": "C3 UID of the object the plugin created for another player. Use it with System \"Pick by unique ID\".",
+						"params": {
+							"playerId": {
+								"name": "Player id",
+								"desc": "Player whose object you want."
+							},
+							"tag": {
+								"name": "Tag",
+								"desc": "Tag from \"Sync object\"."
+							}
+						}
+					},
+					"proxy-player-id": {
+						"translated-name": "ProxyPlayerId",
+						"description": "Player id of the object in \"On other player's object created/destroyed\"."
+					},
+					"proxy-tag": {
+						"translated-name": "ProxyTag",
+						"description": "Tag of the object in \"On other player's object created/destroyed\"."
+					},
+					"proxy-uid": {
+						"translated-name": "ProxyUID",
+						"description": "C3 UID of the object in \"On other player's object created/destroyed\". Use it with System \"Pick by unique ID\"."
 					}
 				}
 			}

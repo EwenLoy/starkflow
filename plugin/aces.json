@@ -157,6 +157,48 @@
 				"scriptName": "LeaveRoom"
 			},
 			{
+				"id": "join-room-password",
+				"scriptName": "JoinRoomWithPassword",
+				"params": [
+					{
+						"id": "room",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "password",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "join-or-create-password",
+				"scriptName": "JoinOrCreateRoomWithPassword",
+				"params": [
+					{
+						"id": "room",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "password",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "max-players",
+						"type": "number",
+						"initialValue": 0
+					},
+					{
+						"id": "empty-ttl",
+						"type": "number",
+						"initialValue": -1
+					}
+				]
+			},
+			{
 				"id": "request-rooms",
 				"scriptName": "RequestRooms"
 			}
@@ -165,6 +207,11 @@
 			{
 				"id": "room-name",
 				"expressionName": "RoomName",
+				"returnType": "string"
+			},
+			{
+				"id": "room-id",
+				"expressionName": "RoomId",
 				"returnType": "string"
 			},
 			{
@@ -185,11 +232,23 @@
 			{
 				"id": "room-count",
 				"expressionName": "RoomCount",
-				"returnType": "number"
+				"returnType": "number",
+				"isDeprecated": true
 			},
 			{
 				"id": "room-name-at",
 				"expressionName": "RoomNameAt",
+				"returnType": "string",
+				"params": [
+					{
+						"id": "index",
+						"type": "number"
+					}
+				]
+			},
+			{
+				"id": "room-id-at",
+				"expressionName": "RoomIdAt",
 				"returnType": "string",
 				"params": [
 					{
@@ -219,6 +278,54 @@
 						"type": "number"
 					}
 				]
+			},
+			{
+				"id": "room-free-at",
+				"expressionName": "RoomFreeAt",
+				"returnType": "number",
+				"params": [
+					{
+						"id": "index",
+						"type": "number"
+					}
+				]
+			},
+			{
+				"id": "room-is-full-at",
+				"expressionName": "RoomIsFullAt",
+				"returnType": "number",
+				"params": [
+					{
+						"id": "index",
+						"type": "number"
+					}
+				]
+			},
+			{
+				"id": "room-locked-at",
+				"expressionName": "RoomLockedAt",
+				"returnType": "number",
+				"params": [
+					{
+						"id": "index",
+						"type": "number"
+					}
+				]
+			},
+			{
+				"id": "room-list-count",
+				"expressionName": "RoomListCount",
+				"returnType": "number"
+			},
+			{
+				"id": "room-player-count",
+				"expressionName": "RoomPlayerCount",
+				"returnType": "number"
+			},
+			{
+				"id": "room-max-players",
+				"expressionName": "RoomMaxPlayers",
+				"returnType": "number"
 			}
 		]
 	},
@@ -260,6 +367,17 @@
 						"initialValue": "\"\""
 					}
 				]
+			},
+			{
+				"id": "on-any-player-prop-changed",
+				"scriptName": "OnAnyPlayerPropChanged",
+				"isTrigger": true
+			},
+			{
+				"id": "for-each-player",
+				"scriptName": "ForEachPlayer",
+				"isLooping": true,
+				"isInvertible": false
 			}
 		],
 		"actions": [
@@ -349,6 +467,16 @@
 				"id": "last-player-id",
 				"expressionName": "LastPlayerId",
 				"returnType": "number"
+			},
+			{
+				"id": "current-player-id",
+				"expressionName": "CurrentPlayerId",
+				"returnType": "number"
+			},
+			{
+				"id": "changed-prop-key",
+				"expressionName": "ChangedPropKey",
+				"returnType": "string"
 			}
 		]
 	},
@@ -531,6 +659,11 @@
 	"errors": {
 		"conditions": [
 			{
+				"id": "on-rate-limited",
+				"scriptName": "OnRateLimited",
+				"isTrigger": true
+			},
+			{
 				"id": "on-error",
 				"scriptName": "OnError",
 				"isTrigger": true
@@ -549,5 +682,427 @@
 				"returnType": "string"
 			}
 		]
+	},
+	"sync": {
+		"conditions": [
+			{
+				"id": "is-syncing",
+				"scriptName": "IsSyncing"
+			},
+			{
+				"id": "for-each-object",
+				"scriptName": "ForEachEntity",
+				"isLooping": true,
+				"isInvertible": false,
+				"params": [
+					{
+						"id": "tag",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "on-other-object-created",
+				"scriptName": "OnProxyCreated",
+				"isTrigger": true,
+				"params": [
+					{
+						"id": "tag",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "on-other-object-destroyed",
+				"scriptName": "OnProxyDestroyed",
+				"isTrigger": true,
+				"params": [
+					{
+						"id": "tag",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			}
+		],
+		"actions": [
+			{
+				"id": "register-object",
+				"scriptName": "RegisterObject",
+				"params": [
+					{
+						"id": "object",
+						"type": "object"
+					},
+					{
+						"id": "owner",
+						"type": "number",
+						"initialValue": "0"
+					},
+					{
+						"id": "slot",
+						"type": "number",
+						"initialValue": "0"
+					},
+					{
+						"id": "x",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "y",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "z",
+						"type": "boolean",
+						"initialValue": "false"
+					},
+					{
+						"id": "angle",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "size",
+						"type": "boolean",
+						"initialValue": "false"
+					},
+					{
+						"id": "mirror",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "anim",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "frame",
+						"type": "boolean",
+						"initialValue": "false"
+					},
+					{
+						"id": "visible",
+						"type": "boolean",
+						"initialValue": "false"
+					},
+					{
+						"id": "opacity",
+						"type": "boolean",
+						"initialValue": "false"
+					}
+				]
+			},
+			{
+				"id": "unregister-object",
+				"scriptName": "UnregisterObject",
+				"params": [
+					{
+						"id": "object",
+						"type": "object"
+					}
+				]
+			},
+			{
+				"id": "sync-object",
+				"scriptName": "SyncObject",
+				"params": [
+					{
+						"id": "object",
+						"type": "object"
+					},
+					{
+						"id": "tag",
+						"type": "string",
+						"initialValue": "\"player\""
+					},
+					{
+						"id": "scope",
+						"type": "combo",
+						"initialValue": "player",
+						"items": [
+							"player",
+							"host"
+						]
+					},
+					{
+						"id": "transform",
+						"type": "combo",
+						"initialValue": "positionAngle",
+						"items": [
+							"none",
+							"position",
+							"positionAngle",
+							"everything"
+						]
+					},
+					{
+						"id": "interpolate",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "layer",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "bind-local-instance",
+				"scriptName": "BindLocalInstance",
+				"params": [
+					{
+						"id": "object",
+						"type": "object"
+					}
+				]
+			},
+			{
+				"id": "start-sync",
+				"scriptName": "StartSync"
+			},
+			{
+				"id": "stop-sync",
+				"scriptName": "StopSync"
+			},
+			{
+				"id": "set-smoothing",
+				"scriptName": "SetSmoothing",
+				"params": [
+					{
+						"id": "ms",
+						"type": "number",
+						"initialValue": "100"
+					}
+				]
+			},
+			{
+				"id": "set-send-rate-preset",
+				"scriptName": "SetSendRatePreset",
+				"params": [
+					{
+						"id": "preset",
+						"type": "combo",
+						"initialValue": "medium",
+						"items": [
+							"fast",
+							"medium",
+							"slow"
+						]
+					}
+				]
+			},
+			{
+				"id": "set-send-rate-custom",
+				"scriptName": "SetSendRateCustom",
+				"params": [
+					{
+						"id": "rate",
+						"type": "number",
+						"initialValue": "30"
+					}
+				]
+			}
+		],
+		"expressions": [
+			{
+				"id": "send-rate",
+				"expressionName": "SendRate",
+				"returnType": "number"
+			},
+			{
+				"id": "synced-object-count",
+				"expressionName": "SyncedObjectCount",
+				"returnType": "number"
+			},
+			{
+				"id": "entity-uid",
+				"expressionName": "EntityUID",
+				"returnType": "number"
+			},
+			{
+				"id": "entity-tag",
+				"expressionName": "EntityTag",
+				"returnType": "string"
+			},
+			{
+				"id": "entity-owner",
+				"expressionName": "EntityOwner",
+				"returnType": "number"
+			},
+			{
+				"id": "entity-type",
+				"expressionName": "EntityType",
+				"returnType": "string"
+			},
+			{
+				"id": "entity-slot",
+				"expressionName": "EntitySlot",
+				"returnType": "number"
+			},
+			{
+				"id": "entity-field",
+				"expressionName": "EntityField",
+				"returnType": "any",
+				"params": [
+					{
+						"id": "key",
+						"type": "string"
+					}
+				]
+			},
+			{
+				"id": "entity-count",
+				"expressionName": "EntityCount",
+				"returnType": "number",
+				"params": [
+					{
+						"id": "tag",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "local-entity-uid",
+				"expressionName": "LocalEntityUID",
+				"returnType": "number",
+				"params": [
+					{
+						"id": "tag",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "player-proxy-uid",
+				"expressionName": "PlayerProxyUID",
+				"returnType": "number",
+				"params": [
+					{
+						"id": "playerId",
+						"type": "number",
+						"initialValue": "0"
+					},
+					{
+						"id": "tag",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "proxy-player-id",
+				"expressionName": "ProxyPlayerId",
+				"returnType": "number"
+			},
+			{
+				"id": "proxy-tag",
+				"expressionName": "ProxyTag",
+				"returnType": "string"
+			},
+			{
+				"id": "proxy-uid",
+				"expressionName": "ProxyUID",
+				"returnType": "number"
+			}
+		]
+	},
+	"rules": {
+		"conditions": [],
+		"actions": [
+			{
+				"id": "clear-rules",
+				"scriptName": "ClearRules"
+			},
+			{
+				"id": "set-strict",
+				"scriptName": "SetStrict",
+				"params": [
+					{
+						"id": "on",
+						"type": "boolean",
+						"initialValue": "true"
+					}
+				]
+			},
+			{
+				"id": "add-key-rule",
+				"scriptName": "AddKeyRule",
+				"params": [
+					{
+						"id": "key",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "kind",
+						"type": "combo",
+						"initialValue": "num",
+						"items": [
+							"num",
+							"str",
+							"bool"
+						]
+					},
+					{
+						"id": "mode",
+						"type": "combo",
+						"initialValue": "set",
+						"items": [
+							"set",
+							"add",
+							"const",
+							"once",
+							"server"
+						]
+					},
+					{
+						"id": "min",
+						"type": "any",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "max",
+						"type": "any",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "max-delta",
+						"type": "number",
+						"initialValue": "0"
+					},
+					{
+						"id": "reject",
+						"type": "boolean",
+						"initialValue": "false"
+					}
+				]
+			},
+			{
+				"id": "set-initial-value",
+				"scriptName": "SetInitialValue",
+				"params": [
+					{
+						"id": "key",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "value",
+						"type": "any",
+						"initialValue": "\"\""
+					}
+				]
+			}
+		],
+		"expressions": []
 	}
 }

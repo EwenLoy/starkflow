@@ -1,7 +1,34 @@
 # Плагин Construct 3
 
 Установка аддона, минимальный пример и правила id. Полный список действий, условий и выражений — в
-`plugin/aces.json` и `plugin/lang/en-US.json`.
+[ACE.md](ACE.md) (и в исходниках `plugin/aces.json`, `plugin/lang/en-US.json`), пошаговая сборка игры — в
+[GAME-GUIDE.md](GAME-GUIDE.md).
+
+
+1. Construct 3: меню, View, Addon Manager, Install new addon, выбери `dist/starkflow.c3addon`, перезапусти C3.
+2. Добавь объект StarkFlow (single-global) в проект и впиши Server URL и App ID.
+3. Пример для босса: при старте `Connect`, на `On connected` вызови `Join or create room "boss1"`. Удар: `Add -10 to state "boss_hp"`. Показывай `StarkFlow.State("boss_hp")`, обновляй на `On state "boss_hp" changed`.
+
+## Список комнат: как читать
+
+Список приходит массивом внутрь плагина, поэтому читается он индексом, а не объектом C3:
+
+```
+StarkFlow: On room list received
+    → System: Repeat StarkFlow.RoomCount times
+        → RoomRow: Create at (32, 120 + loopindex * 48)
+        → RoomRow: Set instance variable roomId to StarkFlow.RoomIdAt(loopindex)
+        → Text: Set text to StarkFlow.RoomNameAt(loopindex) & " " &
+                      StarkFlow.RoomPlayersAt(loopindex) & "/" & StarkFlow.RoomMaxAt(loopindex) &
+                      (StarkFlow.RoomLockedAt(loopindex) = 1 ? " 🔒" : "")
+
+RoomRow: On clicked
+    → StarkFlow: Join room with password (RoomRow.roomId, PasswordInput.Text)   // вход именно в эту комнату
+```
+
+`loopindex` — номер комнаты в списке (с нуля). Подробнее, включая «войти в первую свободную» и вариант с Array —
+в [GAME-GUIDE.md](GAME-GUIDE.md#3-список-комнат-как-читать-и-как-перебирать).
+
 
 
 1. Construct 3: меню, View, Addon Manager, Install new addon, выбери `dist/starkflow.c3addon`, перезапусти C3.

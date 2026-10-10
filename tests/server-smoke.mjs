@@ -254,6 +254,43 @@ const schema = {
   } catch (e) {
     bad('исключение', e && e.message ? e.message : String(e));
   }
+    // --- комнаты с паролем ---
+    const LOCKURL = `${WS}?v=1&app=${APP}-lock`;
+    const L1 = await open(LOCKURL);
+    L1.send({ t: 'hello', name: 'Owner' });
+    await L1.nextT('welcome');
+    L1.send({ t: 'room.join', id: 1, room: 'secret', create: true, password: 'pw1', maxPlayers: 2 });
+    const jL1 = await L1.nextT('room.joined');
+    eq('пароль: комната создана', [jL1.you, jL1.hostId], [1, 1]);
+
+    L1.send({ t: 'room.list', id: 2 });
+    const listLock = await L1.nextT('room.list.result');
+    eq('пароль: комната помечена как закрытая', listLock.rooms.map((r) => [r.room, r.locked]), [['secret', true]]);
+
+    const L2 = await open(LOCKURL);
+    L2.send({ t: 'hello', name: 'Guest' });
+    const wL2 = await L2.nextT('welcome');
+    await L2.expectErr({ t: 'room.join', id: 1, room: 'secret', password: 'nope' }, 307, 'неверный пароль -> 307');
+    await L2.expectErr({ t: 'room.join', id: 2, room: 'secret' }, 307, 'вход без пароля -> 307');
+    L2.send({ t: 'room.join', id: 3, room: 'secret', password: 'pw1' });
+    const jL2 = await L2.nextT('room.joined');
+    eq('верный пароль -> вошли', [jL2.resumed, jL2.you], [false, 2]);
+
+    // после обрыва тот же userId возвращается в закрытую комнату без пароля
+    L2.ws.close();
+    await sleep(50);
+    const L3 = await open(LOCKURL);
+    L3.send({ t: 'hello', token: wL2.token });
+    const wL3 = await L3.nextT('welcome');
+    eq('токен даёт того же игрока', wL3.userId, wL2.userId);
+    L3.send({ t: 'room.join', id: 4, room: 'secret' });
+    const jL3 = await L3.nextT('room.joined');
+    eq('возврат по тому же userId без пароля', jL3.resumed, true);
+    L3.send({ t: 'room.list', id: 5 });
+    const listLock2 = await L3.nextT('room.list.result');
+    eq('закрытая комната в списке с паролем и лимитом',
+      listLock2.rooms.map((r) => [r.room, r.locked, r.maxPlayers]), [['secret', true, 2]]);
+
   console.log(`\nИтого: ${passed} ok, ${failed} FAIL\n`);
   process.exit(failed ? 1 : 0);
 })();

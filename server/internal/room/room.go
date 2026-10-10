@@ -4,6 +4,9 @@
 package room
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"sort"
 	"sync/atomic"
@@ -28,14 +31,16 @@ type Options struct {
 	Strict     bool          // reject state keys that are not in Schema
 	Schema     map[string]proto.RuleDef
 	Init       map[string]any
+	Password   string // optional password: only its salted hash is kept
 }
 
 // JoinReq is a request to enter (or re-enter) the room.
 type JoinReq struct {
-	ReqID  int64
-	UserID string
-	Name   string
-	Conn   Conn
+	ReqID    int64
+	UserID   string
+	Name     string
+	Conn     Conn
+	Password string // needed to enter a locked room as a new player
 }
 
 // Info is a lock-free summary used by room.list.
@@ -44,6 +49,7 @@ type Info struct {
 	Name       string
 	Players    int
 	MaxPlayers int
+	Locked     bool // true if a password is needed to enter
 }
 
 // Player is a participant. A player whose connection dropped stays in the
@@ -77,6 +83,9 @@ type Room struct {
 	emptySince time.Time
 	closed     bool
 
+	passSalt []byte // set once at creation, read-only afterwards
+	passHash []byte // nil = open room
+
 	inbox   chan func()
 	done    chan struct{}
 	onClose func(*Room)
@@ -107,7 +116,7 @@ func New(key, id, name string, opts Options, cfg config.Config, onClose func(*Ro
 	if err != nil {
 		return nil, err
 	}
-	return &Room{
+	r := &Room{
 		Key:        key,
 		ID:         id,
 		Name:       name,
@@ -122,12 +131,47 @@ func New(key, id, name string, opts Options, cfg config.Config, onClose func(*Ro
 		inbox:      make(chan func(), 256),
 		done:       make(chan struct{}),
 		onClose:    onClose,
-	}, nil
+	}
+	if opts.Password != "" {
+		r.setPassword(opts.Password)
+	}
+	return r, nil
 }
 
 // Info returns a summary; safe to call from any goroutine.
 func (r *Room) Info() Info {
-	return Info{ID: r.ID, Name: r.Name, Players: int(r.count.Load()), MaxPlayers: r.maxPlayers}
+	return Info{
+		ID:         r.ID,
+		Name:       r.Name,
+		Players:    int(r.count.Load()),
+		MaxPlayers: r.maxPlayers,
+		Locked:     len(r.passHash) > 0,
+	}
+}
+
+// setPassword stores a salted hash of the room password. Call only from New.
+func (r *Room) setPassword(pass string) {
+	salt := make([]byte, 16)
+	_, _ = rand.Read(salt)
+	r.passSalt = salt
+	h := sha256.New()
+	h.Write(salt)
+	h.Write([]byte(pass))
+	r.passHash = h.Sum(nil)
+}
+
+// locked reports whether the room needs a password.
+func (r *Room) locked() bool { return len(r.passHash) > 0 }
+
+// passwordOK reports whether pass opens the room; open rooms accept anything.
+func (r *Room) passwordOK(pass string) bool {
+	if !r.locked() {
+		return true
+	}
+	h := sha256.New()
+	h.Write(r.passSalt)
+	h.Write([]byte(pass))
+	return subtle.ConstantTimeCompare(h.Sum(nil), r.passHash) == 1
 }
 
 // Created reports when the room was made; used to pick the oldest room with a name.
@@ -285,6 +329,8 @@ func (p *Player) take(now time.Time, rate, burst float64) bool {
 // ---- public API (safe to call from client goroutines) -----------------
 
 // Join adds the player, or re-attaches a returning one (same user id).
+// A locked room asks for the password only from new players: a suspended player
+// returning with the same user id gets back in without it.
 // On success the room has already sent room.joined to the connection.
 func (r *Room) Join(req JoinReq) *proto.Error {
 	reply := make(chan *proto.Error, 1)
@@ -320,6 +366,9 @@ func (r *Room) doJoin(req JoinReq) *proto.Error {
 		p.suspendedAt = time.Time{}
 		resumed = true
 	} else {
+		if !r.passwordOK(req.Password) {
+			return proto.Err(proto.ErrBadPassword, "wrong room password")
+		}
 		if len(r.players) >= r.maxPlayers {
 			return proto.Err(proto.ErrRoomFull, "room is full")
 		}
@@ -387,6 +436,19 @@ func (r *Room) Leave(c Conn) {
 		if p := r.byConn(c); p != nil {
 			r.removePlayer(p.ID, "left")
 		}
+	})
+}
+
+// Close shuts the room down and disconnects every player. Used by the
+// directory admin (kick) and graceful shutdown; players may rejoin elsewhere.
+func (r *Room) Close() {
+	r.exec(func() {
+		for _, p := range r.players {
+			if p.conn != nil {
+				p.conn.Close()
+			}
+		}
+		r.dispose()
 	})
 }
 

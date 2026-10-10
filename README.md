@@ -15,6 +15,8 @@ services, no sign-ups, no subscriptions.
 - **Shared room state** with per-key rules: `add` is atomic, `min`/`max`/`maxDelta` are clamped by the server.
 - **Relay events** — to all players, to others, or to a single player.
 - **Per-player state** — cursors, ready flags, colours: only the player itself can write, nobody can spoof it.
+- **Object sync** — `Sync object` + `Start sync`: the plugin sends your sprite and creates and moves one for every
+  other player by itself, tag by tag (`On other player's object created`, `For each object`).
 - **Player tokens** (signed, nothing stored on the server): after a dropped connection the player returns to the same
   room with the same identity and state.
 - **Batteries included** — a test client built into the server and a Construct 3 plugin in this repository.
@@ -32,6 +34,17 @@ go run ./cmd/starkflow
 
 Open http://localhost:8080 — that is the built-in test client with two demo modes: boss fight (shared HP) and cursor
 synchronisation. To play with a friend, open the same page in a second browser or in a private window.
+
+### Public address without Docker
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run-public.ps1
+```
+
+The script builds the server, starts it on `localhost:8080`, runs a Cloudflare Tunnel and prints the public page
+(`https://xxxx.trycloudflare.com`) plus the Construct 3 plugin URL `wss://xxxx.trycloudflare.com/ws`. No Docker, no
+Cloudflare account, no open ports: `cloudflared` is downloaded automatically. The address changes on every restart,
+use `-TunnelToken` for a stable hostname. See [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Quick test with a friend (Docker)
 
@@ -103,7 +116,9 @@ Documentation (Russian):
 
 - [docs/DEPLOY.md](docs/DEPLOY.md) — deployment: VPS, own domain and https, tunnels, bot hosting, environment variables
 - [docs/PROTOCOL.md](docs/PROTOCOL.md) — protocol: messages, rooms, state key rules, the two storages
-- [docs/PLUGIN.md](docs/PLUGIN.md) — installing the plugin and a first example in C3
+- [docs/PLUGIN.md](docs/PLUGIN.md) — installing the plugin and a first example in C3 (including how to read the room list)
+- [docs/GAME-GUIDE.md](docs/GAME-GUIDE.md) — building a game step by step: lobby with a room list, room state, player state, events, errors
+- [docs/ACE.md](docs/ACE.md) — every action, condition and expression with parameters, error codes and server limits
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — local run, test client, tests, CI, what is verified and what is not
 
 ## License and support

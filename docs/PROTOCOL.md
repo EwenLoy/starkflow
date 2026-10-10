@@ -9,9 +9,14 @@ URL: `ws(s)://host/ws?v=1&app=APPID`. Все кадры JSON с полем `t`.
 Комната живёт по **id** (8 hex-символов, генерирует сервер), а имя — просто метка для людей:
 в `room.join` поле `room` — это либо id, либо имя; `create: true` **всегда** создаёт новую комнату
 (одинаковые имена разрешены), `create: false` ищет сначала по id, потом по имени (самую старую
-комнату с таким именем). `room.joined` отдаёт `roomId`, `room.list` — массив `{id, room, players, maxPlayers}`,
-`welcome` — `roomNameMax`. Имена пишутся на любом языке; управляющие символы вырезаются, длина считается
-в символах (не в байтах).
+комнату с таким именем). `room.joined` отдаёт `roomId`, `room.list` — массив
+`{id, room, players, maxPlayers, locked}`, `welcome` — `roomNameMax`. Имена пишутся на любом языке;
+управляющие символы вырезаются, длина считается в символах (не в байтах).
+
+Закрытые комнаты: в `room.join` можно передать `password`. Сервер хранит только хэш (SHA-256 с солью комнаты),
+в списке такая комната помечена `locked: true`, а неверный или отсутствующий пароль даёт ошибку **307**.
+Игрок, который возвращается с тем же userId (по своему токену), входит в закрытую комнату **без** пароля:
+это возврат в свою комнату, а не новый вход.
 
 - Клиент: `hello`, `room.join`, `room.leave`, `room.list`, `event`, `state.set`, `state.add`, `state.toggle`, `player.set`, `ping`
 - Сервер: `welcome`, `room.joined`, `player.joined`, `player.left`, `player.suspended`, `player.resumed`, `player.props`, `host.changed`, `event`, `state.changed`, `room.list.result`, `ok`, `err`, `pong`

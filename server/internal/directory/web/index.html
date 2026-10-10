@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StarkFlow · directory</title>
+<style>
+	:root { --bg:#0f1117; --panel:#171a23; --line:#262b3a; --txt:#dfe3ee; --dim:#8b93a7;
+	       --ok:#3ecf72; --bad:#ef5350; --warn:#f2b134; --acc:#5b8cff; }
+	* { box-sizing:border-box; }
+	body { margin:0; background:var(--bg); color:var(--txt);
+	       font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; }
+	header { display:flex; align-items:center; gap:16px; padding:14px 20px;
+	         border-bottom:1px solid var(--line); background:var(--panel);
+	         position:sticky; top:0; }
+	h1 { font-size:16px; margin:0; flex:1; }
+	input,button { background:#10131c; color:var(--txt); border:1px solid var(--line);
+	               border-radius:6px; padding:6px 10px; font:inherit; }
+	button { cursor:pointer; } button:hover { border-color:var(--acc); }
+	main { padding:20px; max-width:1100px; margin:0 auto; }
+	#err { display:none; margin:0 0 14px; padding:10px 14px; border-radius:8px;
+	       background:#3a1620; border:1px solid #6b2233; color:#ffb3c0; }
+	#summary { color:var(--dim); margin-bottom:14px; }
+	table { width:100%; border-collapse:collapse; background:var(--panel);
+	        border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+	th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line);
+	        white-space:nowrap; }
+	th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; }
+	tr:last-child td { border-bottom:none; }
+	.dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:7px; }
+	.on { background:var(--ok); } .off { background:var(--bad); }
+	.badge { font-size:11px; padding:2px 8px; border-radius:99px; border:1px solid var(--line); }
+	.badge.warn { color:var(--warn); border-color:var(--warn); }
+	.dim { color:var(--dim); }
+	#rooms { margin-top:18px; }
+	.room { display:flex; gap:10px; align-items:center; background:var(--panel);
+	        border:1px solid var(--line); border-radius:8px; padding:8px 12px; margin-bottom:6px; }
+	.room .node { color:var(--dim); font-size:12px; }
+	.kick { margin-left:auto; color:#ffb3c0; }
+	#rooms h2 { font-size:13px; color:var(--dim); text-transform:uppercase; }
+</style>
+</head>
+<body>
+<header>
+	<h1>StarkFlow · directory</h1>
+	<input id="token" type="password" placeholder="ADMIN_TOKEN" size="28">
+	<button id="save">Сохранить</button>
+</header>
+<main>
+	<div id="err"></div>
+	<div id="summary">Введите токен, чтобы увидеть кластер.</div>
+	<table id="tbl" style="display:none">
+		<thead><tr>
+			<th>Нода</th><th>Регион</th><th>Статус</th><th>Пинг</th>
+			<th>Комнат</th><th>Игроков</th><th>Heartbeat</th><th></th>
+		</tr></thead>
+		<tbody></tbody>
+	</table>
+	<div id="rooms"></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+	({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+let token = localStorage.getItem("sf-admin-token") || "";
+$("token").value = token;
+$("save").onclick = () => {
+	token = $("token").value.trim();
+	localStorage.setItem("sf-admin-token", token);
+	refresh();
+};
+
+function showError(msg) {
+	$("err").style.display = msg ? "block" : "none";
+	$("err").textContent = msg || "";
+}
+
+async function api(path, body) {
+	const r = await fetch(path, {
+		method: body ? "POST" : "GET",
+		headers: { "Authorization": "Bearer " + token,
+		           "Content-Type": "application/json" },
+		body: body ? JSON.stringify(body) : undefined
+	});
+	if (r.status === 401) throw new Error("неверный ADMIN_TOKEN");
+	if (!r.ok) throw new Error("HTTP " + r.status);
+	return r.json();
+}
+
+async function refresh() {
+	if (!token) { showError("Введите ADMIN_TOKEN (переменная STARKFLOW_ADMIN_TOKEN на directory)."); return; }
+	try {
+		const data = await api("/api/nodes");
+		showError("");
+		render(data.nodes);
+	} catch (e) {
+		showError(e.message);
+	}
+}
+
+function short(url) { return url.replace(/^wss?:\/\//, ""); }
+
+function render(nodes) {
+	let on = 0, rooms = 0, players = 0;
+	for (const n of nodes) {
+		if (n.online) { on++; rooms += n.rooms; players += n.players; }
+	}
+	$("summary").textContent = `Нод: ${nodes.length} · онлайн: ${on} · комнат: ${rooms} · игроков: ${players}`;
+	$("tbl").style.display = nodes.length ? "" : "none";
+
+	const tb = document.querySelector("#tbl tbody");
+	tb.innerHTML = "";
+	let roomsHtml = "<h2>Комнаты</h2>";
+	for (const n of nodes) {
+		const blocked = n.draining || n.drainRequested;
+		const tr = document.createElement("tr");
+		tr.innerHTML =
+			`<td>${esc(short(n.url))}</td>` +
+			`<td>${esc(n.region)}</td>` +
+			`<td><span class="dot ${n.online ? "on" : "off"}"></span>${n.online ? "online" : "offline"}` +
+			(blocked ? ` <span class="badge warn">drain</span>` : "") + `</td>` +
+			`<td>${n.pingMs >= 0 ? n.pingMs + " ms" : '<span class="dim">—</span>'}</td>` +
+			`<td>${n.rooms}</td><td>${n.players}</td>` +
+			`<td class="dim">${n.lastSeenSec.toFixed(1)} с назад</td>` +
+			`<td><button data-url="${esc(n.url)}" data-drain="${blocked ? 0 : 1}">` +
+			(blocked ? "Вернуть в ротацию" : "Drain") + `</button></td>`;
+		tb.appendChild(tr);
+
+		for (const rm of n.roomList) {
+			roomsHtml += `<div class="room">
+				<b>${esc(rm.name || rm.id)}</b>
+				<span class="dim">${esc(rm.id)} · ${rm.players}/${rm.maxPlayers}</span>
+				<span class="node">${esc(short(n.url))}</span>
+				<button class="kick" data-url="${esc(n.url)}" data-room="${esc(rm.app + ":" + rm.id)}">Кикнуть</button>
+			</div>`;
+		}
+	}
+	$("rooms").innerHTML = nodes.some(n => n.roomList && n.roomList.length) ? roomsHtml : "";
+
+	tb.querySelectorAll("button").forEach(b => b.onclick = async () => {
+		try { await api("/api/nodes/drain", { url: b.dataset.url, drain: b.dataset.drain === "1" }); refresh(); }
+		catch (e) { showError(e.message); }
+	});
+	$("rooms").querySelectorAll("button.kick").forEach(b => b.onclick = async () => {
+		if (!confirm("Кикнуть комнату " + b.dataset.room + "?")) return;
+		try { await api("/api/nodes/kick", { url: b.dataset.url, room: b.dataset.room }); refresh(); }
+		catch (e) { showError(e.message); }
+	});
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

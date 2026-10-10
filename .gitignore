@@ -101,3 +101,8 @@ appsettings.Development.json
 certs/
 *.pem
 *.key
+
+# ---- Локальные материалы (не часть репозитория) ----
+gamepushtemplate/
+gp-aces.txt
+server.zip

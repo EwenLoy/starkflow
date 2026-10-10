@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -19,6 +21,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"starkflow/internal/config"
+	"starkflow/internal/directory"
 	"starkflow/internal/proto"
 	"starkflow/internal/room"
 )
@@ -31,8 +34,9 @@ type Server struct {
 	cfg      config.Config
 	upgrader websocket.Upgrader
 
-	mu    sync.Mutex
-	rooms map[string]*room.Room
+	mu       sync.Mutex
+	rooms    map[string]*room.Room
+	draining atomic.Bool
 }
 
 // New creates a server.
@@ -53,6 +57,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
+	mux.HandleFunc("/cluster/admin", s.handleClusterAdmin)
 	sub, err := fs.Sub(webFS, "web")
 	if err == nil {
 		mux.Handle("/", http.FileServer(http.FS(sub)))
@@ -190,6 +195,10 @@ func (s *Server) join(app, ref string, create bool, opts room.Options, req room.
 			rm = s.findLocked(app, ref) // по id, затем по имени
 		}
 		if rm == nil && create {
+			if s.draining.Load() {
+				s.mu.Unlock()
+				return nil, proto.Err(proto.ErrServerBusy, "node is draining, no new rooms here")
+			}
 			if len(s.rooms) >= s.cfg.MaxRooms {
 				s.mu.Unlock()
 				return nil, proto.Err(proto.ErrServerBusy, "server room limit reached")
@@ -250,6 +259,7 @@ func (s *Server) list(app string) []map[string]any {
 	for _, in := range infos {
 		out = append(out, map[string]any{
 			"id": in.ID, "room": in.Name, "players": in.Players, "maxPlayers": in.MaxPlayers,
+			"locked": in.Locked,
 		})
 	}
 	return out
@@ -279,6 +289,109 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		c.fatal(0, proto.Err(proto.ErrBadVersion, "unsupported protocol version, expected v=1"))
 	} else if !validName(app) {
 		c.fatal(0, proto.Err(proto.ErrBadMessage, "bad app id"))
+	} else if len(s.cfg.ClusterSecret) > 0 &&
+		!directory.VerifyTicket(s.cfg.ClusterSecret, r.URL.Query().Get("ticket"), app, time.Now()) {
+		// кластерный режим: /ws принимает только клиентов с билетом от directory
+		c.fatal(0, proto.Err(proto.ErrBadToken, "missing or invalid cluster ticket — connect through the directory"))
 	}
 	c.readPump()
+}
+
+// ---- clustering -------------------------------------------------------
+
+// SetDrain blocks the creation of new rooms on this node; existing rooms
+// keep running until they empty out. Used by the directory (drain) and
+// the /cluster/admin endpoint.
+func (s *Server) SetDrain(on bool) { s.draining.Store(on) }
+
+// Draining reports whether new rooms are blocked on this node.
+func (s *Server) Draining() bool { return s.draining.Load() }
+
+// Report builds the heartbeat snapshot sent to the directory.
+func (s *Server) Report(publicURL, region string) directory.NodeReport {
+	s.mu.Lock()
+	rooms := make([]directory.RoomInfo, 0, len(s.rooms))
+	players := 0
+	for key, r := range s.rooms {
+		in := r.Info()
+		players += in.Players
+		rooms = append(rooms, directory.RoomInfo{
+			App:        strings.TrimSuffix(key, ":"+in.ID),
+			ID:         in.ID,
+			Name:       in.Name,
+			Players:    in.Players,
+			MaxPlayers: in.MaxPlayers,
+		})
+	}
+	s.mu.Unlock()
+	sort.Slice(rooms, func(i, j int) bool {
+		if rooms[i].Name != rooms[j].Name {
+			return rooms[i].Name < rooms[j].Name
+		}
+		return rooms[i].ID < rooms[j].ID
+	})
+	return directory.NodeReport{
+		URL:      publicURL,
+		Region:   region,
+		Draining: s.draining.Load(),
+		Rooms:    rooms,
+		Players:  players,
+	}
+}
+
+// kickRoom closes a room by "app:id" or "app:name" (directory admin kick).
+func (s *Server) kickRoom(app, ref string) bool {
+	s.mu.Lock()
+	rm := s.findLocked(app, ref)
+	s.mu.Unlock()
+	if rm == nil {
+		return false
+	}
+	rm.Close()
+	return true
+}
+
+// handleClusterAdmin executes drain/kick commands from the directory.
+// Protected by the shared cluster key, not by player tokens.
+func (s *Server) handleClusterAdmin(w http.ResponseWriter, r *http.Request) {
+	if len(s.cfg.ClusterSecret) == 0 {
+		http.Error(w, "clustering is not enabled", http.StatusForbidden)
+		return
+	}
+	if !directory.ClusterKeyOK(s.cfg.ClusterSecret, r) {
+		http.Error(w, "bad cluster key", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var m struct {
+		Op   string `json:"op"`
+		Room string `json:"room"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&m); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	switch m.Op {
+	case "drain":
+		s.SetDrain(true)
+		slog.Info("drain enabled by directory: new rooms are rejected")
+	case "undrain":
+		s.SetDrain(false)
+		slog.Info("drain disabled by directory")
+	case "kick":
+		app, ref, ok := strings.Cut(m.Room, ":")
+		if !ok || !s.kickRoom(app, ref) {
+			http.Error(w, "room not found", http.StatusNotFound)
+			return
+		}
+		slog.Info("room kicked by directory", "room", m.Room)
+	default:
+		http.Error(w, "unknown op", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"ok":true}`))
 }

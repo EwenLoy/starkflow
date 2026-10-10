@@ -28,7 +28,9 @@
 				new SDK.PluginProperty("text", "server-url", "ws://localhost:8080/ws"),
 				new SDK.PluginProperty("text", "app-id", "default"),
 				new SDK.PluginProperty("combo", "log-level", { initialValue: "info", items: ["debug", "info", "warn", "error", "off"] }),
-				new SDK.PluginProperty("check", "auto-reconnect", true)
+				new SDK.PluginProperty("check", "auto-reconnect", true),
+				new SDK.PluginProperty("check", "replay-players", true),
+				new SDK.PluginProperty("combo", "send-rate", { initialValue: "medium", items: ["fast", "medium", "slow"] })
 			]);
 			SDK.Lang.PopContext();		// .properties
 

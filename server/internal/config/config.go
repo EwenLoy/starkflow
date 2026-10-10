@@ -16,6 +16,13 @@ type Config struct {
 	Secret         []byte   // signs user tokens (HMAC-SHA256)
 	AllowedOrigins []string // empty = allow all (development only)
 
+	// Кластер (опционально): нода отчитывается в directory, directory выдаёт билеты.
+	DirectoryURL  string // STARKFLOW_DIRECTORY_URL — куда слать heartbeat (нода)
+	PublicURL     string // STARKFLOW_PUBLIC_URL — публичный ws-адрес этой ноды
+	Region        string // STARKFLOW_REGION — регион для роутинга
+	ClusterSecret []byte // STARKFLOW_CLUSTER_SECRET — общий секрет нод и directory
+	AdminToken    string // STARKFLOW_ADMIN_TOKEN — вход в /admin панель directory
+
 	MaxMsgBytes   int64
 	IdleTimeout   time.Duration
 	HelloTimeout  time.Duration
@@ -90,6 +97,22 @@ func Load() Config {
 		_, _ = rand.Read(b)
 		c.Secret = b
 		slog.Warn("STARKFLOW_SECRET is not set: using a random secret, player tokens will stop working after restart")
+	}
+	if v := os.Getenv("STARKFLOW_DIRECTORY_URL"); v != "" {
+		c.DirectoryURL = v
+	}
+	if v := os.Getenv("STARKFLOW_PUBLIC_URL"); v != "" {
+		c.PublicURL = v
+	}
+	c.Region = "default"
+	if v := os.Getenv("STARKFLOW_REGION"); v != "" {
+		c.Region = v
+	}
+	if v := os.Getenv("STARKFLOW_CLUSTER_SECRET"); v != "" {
+		c.ClusterSecret = []byte(v)
+	}
+	if v := os.Getenv("STARKFLOW_ADMIN_TOKEN"); v != "" {
+		c.AdminToken = v
 	}
 	return c
 }

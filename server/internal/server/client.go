@@ -256,15 +256,17 @@ func (c *client) onJoin(m *proto.ClientMsg) {
 		Strict:     m.Strict,
 		Schema:     m.Schema,
 		Init:       m.Init,
+		Password:   m.Password,
 	}
 	if m.EmptyTTL != nil && *m.EmptyTTL >= 0 {
 		opts.EmptyTTL = time.Duration(*m.EmptyTTL) * time.Second
 	}
 	rm, err := c.srv.join(c.app, ref, m.Create, opts, room.JoinReq{
-		ReqID:  m.ID,
-		UserID: c.userID,
-		Name:   c.name,
-		Conn:   c,
+		ReqID:    m.ID,
+		UserID:   c.userID,
+		Name:     c.name,
+		Conn:     c,
+		Password: m.Password,
 	})
 	if err != nil {
 		c.Send(proto.ErrFrame(m.ID, err))

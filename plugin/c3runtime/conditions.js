@@ -25,6 +25,8 @@
 		OnPlayerResumed() { return true; },
 		OnHostChanged() { return true; },
 		OnPlayerPropChanged(key) { return this._ppKey === String(key); },
+		OnAnyPlayerPropChanged() { return true; },
+		ForEachPlayer() { return this._forEachPlayer(); },
 
 		// events
 		OnEvent(code) { return this._evCode === Math.floor(Number(code)); },
@@ -34,7 +36,14 @@
 		OnStateChanged(key) { return this._chKey === String(key); },
 		OnAnyStateChanged() { return true; },
 
+		// object sync
+		IsSyncing() { return this._syncOn; },
+		ForEachEntity(tag) { return this._forEachEntity(tag); },
+		OnProxyCreated(tag) { return this._proxyMatch(tag); },
+		OnProxyDestroyed(tag) { return this._proxyMatch(tag); },
+
 		// errors
+		OnRateLimited() { return true; },
 		OnError() { return true; }
 	};
 }

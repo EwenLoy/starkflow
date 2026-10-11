@@ -9,6 +9,17 @@
 		Disconnect() { this._disconnect(false); },
 		SetAuthToken(token) { this._token = String(token); },
 		SetName(name) { this._name = String(name); },
+		// Clustered mode: pin the region ("eu", "ru", ...) or pass an empty string to
+		// pick the nearest one automatically again (and measure it once more).
+		SetRegion(region)
+		{
+			const r = String(region === undefined || region === null ? "" : region).trim();
+			this._region = r;
+			if (r === "")
+				this._forgetRegion();
+			else
+				this._rememberRegion(r);
+		},
 
 		JoinRoom(room) { this._join(room, false, 0, -1, ""); },
 		JoinOrCreateRoom(room, maxPlayers, emptyTTL) { this._join(room, true, maxPlayers, emptyTTL, ""); },

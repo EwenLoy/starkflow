@@ -55,6 +55,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		// The cluster client measures the latency to each region through this
+		// endpoint, so a browser page on another origin must be allowed to read it.
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("/cluster/admin", s.handleClusterAdmin)

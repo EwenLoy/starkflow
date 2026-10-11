@@ -765,6 +765,103 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.strictEqual(P.Exps.Smoothing.call(S2.inst), 127, "Smoothing must report the interpolation delay");
 	assert.strictEqual(P.Exps.Smoothing.call(S1.inst), 127);
 
+	// ---- clustered mode: the connection mode + the nearest region ---------------
+	// A browser is the only one that knows which region is close to it, so the
+	// plugin asks the directory for its regions, measures /health of each and sends
+	// the nearest region in /assign. The "Connection mode" property forces one of
+	// the two modes when the URL scheme cannot tell them apart.
+	const calls = [];
+	const realFetch = globalThis.fetch;
+	const mk = (props) =>
+	{
+		class C extends P.Instance { _getInitProperties() { return props; } }
+		return new C();
+	};
+	const okJson = (obj) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(obj) });
+
+	// (a) https URL + auto mode: /regions, then the nearest one wins
+	globalThis.fetch = (url, opts) =>
+	{
+		const u = String(url);
+		calls.push({ url: u, body: opts && opts.body ? JSON.parse(opts.body) : null });
+		if (u.endsWith("/regions"))
+			return okJson({ regions: [{ region: "eu", url: "wss://eu.example.com/ws" },
+				{ region: "us", url: "wss://us.example.com/ws" }] });
+		if (u.endsWith("/assign"))
+			return okJson({ url: "wss://us.example.com/ws", ticket: "TK", region: "us" });
+		const ms = u.indexOf("us.example") >= 0 ? 4 : 60;		// "us" answers faster
+		return new Promise((res) => setTimeout(() => res({ ok: true, status: 200, text: () => Promise.resolve("ok") }), ms));
+	};
+	FakeWS.all.length = 0;
+	const dirInst = mk(["https://dir.example.com", "app1", 4, true, true, 2]);
+	dirInst._retryBase = 5;
+	P.Acts.Connect.call(dirInst, "", "");
+	await sleep(150);
+	const wsDir = FakeWS.all[FakeWS.all.length - 1];
+	assert.ok(wsDir && wsDir.url.indexOf("wss://us.example.com/ws") === 0,
+		"the nearest region must be used, got " + (wsDir && wsDir.url));
+	const assignCall = calls.filter((c) => c.url.endsWith("/assign")).pop();
+	assert.strictEqual(assignCall.body.region, "us", "/assign must carry the measured region");
+	assert.strictEqual(assignCall.body.app, "app1");
+	assert.ok(!calls.some((c) => c.url.endsWith("/assign") && c.body.region === "eu"), "the slow region must not be asked for");
+	assert.strictEqual(P.Exps.Region.call(dirInst), "us", "the game must be able to read the region");
+	assert.ok(FakeWS.all.length < 4, "regions are measured over http, not by opening sockets: " + FakeWS.all.length);
+
+	// (b) a remembered region whose nodes are gone (HTTP 503) must not lock the game out
+	globalThis.fetch = (url, opts) =>
+	{
+		const body = opts && opts.body ? JSON.parse(opts.body) : null;
+		if (String(url).endsWith("/assign"))
+			return body.region
+				? Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({}) })
+				: okJson({ url: "wss://any.example.com/ws", ticket: "TK", region: "" });
+		return okJson({ regions: [] });
+	};
+	FakeWS.all.length = 0;
+	const pinInst = mk(["https://dir2.example.com", "app1", 4, true, true, 2]);
+	pinInst._retryBase = 5;
+	P.Acts.SetRegion.call(pinInst, "eu");					// the game pins a region
+	assert.strictEqual(P.Exps.Region.call(pinInst), "eu");
+	P.Acts.Connect.call(pinInst, "", "");
+	await sleep(60);
+	const wsAny = FakeWS.all[FakeWS.all.length - 1];
+	assert.ok(wsAny && wsAny.url.indexOf("wss://any.example.com/ws") === 0,
+		"a dead region must fall back to an unregioned assign, got " + (wsAny && wsAny.url));
+
+	// (c) mode "node": an https URL is a game server, not a directory
+	let nodeFetches = 0;
+	globalThis.fetch = () => { nodeFetches++; return Promise.reject(new Error("no directory calls in node mode")); };
+	FakeWS.all.length = 0;
+	const nodeInst = mk(["https://node.example.com/ws", "app1", 4, true, true, 2, 1]);	// 1 = "node"
+	nodeInst._retryBase = 5;
+	P.Acts.Connect.call(nodeInst, "", "");
+	await sleep(30);
+	assert.strictEqual(nodeFetches, 0, "single-node mode must not call the directory");
+	assert.strictEqual(FakeWS.all.length, 1, "exactly one socket, no probing");
+	assert.ok(FakeWS.all[0].url.indexOf("wss://node.example.com/ws") === 0,
+		"https:// must be spoken to as wss:// for a direct node: " + FakeWS.all[0].url);
+
+	// (d) mode "directory": a wss:// URL is still the directory (http for its calls)
+	const dirCalls = [];
+	globalThis.fetch = (url, opts) =>
+	{
+		dirCalls.push(String(url));
+		return String(url).endsWith("/regions")
+			? okJson({ regions: [] })
+			: okJson({ url: "wss://node7.example.com/ws", ticket: "TK", region: "eu" });
+	};
+	FakeWS.all.length = 0;
+	const dirForced = mk(["wss://dir3.example.com", "app1", 4, true, true, 2, 2]);		// 2 = "directory"
+	dirForced._retryBase = 5;
+	P.Acts.Connect.call(dirForced, "", "");
+	await sleep(40);
+	assert.strictEqual(dirCalls[0], "https://dir3.example.com/regions",
+		"a wss:// directory URL must be asked over https, got " + dirCalls[0]);
+	assert.ok(dirCalls[1].indexOf("https://dir3.example.com/assign") === 0, dirCalls[1]);
+	assert.ok(FakeWS.all.length === 1 && FakeWS.all[0].url.indexOf("wss://node7.example.com/ws") === 0);
+	assert.strictEqual(P.Exps.Region.call(dirForced), "eu");
+	globalThis.fetch = realFetch;
+
 	console.log("Behaviour tests OK");
 	process.exit(0);
 })().catch((e) => { console.error("TEST FAILED:", e.message); process.exit(1); });

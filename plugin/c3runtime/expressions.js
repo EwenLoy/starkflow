@@ -11,6 +11,8 @@
 	{
 		// connection
 		AuthToken() { return this._token; },
+		// Clustered mode: the region the plugin is connected to ("" outside a cluster).
+		Region() { return this._curRegion || this._region; },
 		MyUserId() { return this._userId; },
 		MyName()
 		{

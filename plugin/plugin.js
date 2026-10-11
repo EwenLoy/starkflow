@@ -30,7 +30,8 @@
 				new SDK.PluginProperty("combo", "log-level", { initialValue: "info", items: ["debug", "info", "warn", "error", "off"] }),
 				new SDK.PluginProperty("check", "auto-reconnect", true),
 				new SDK.PluginProperty("check", "replay-players", true),
-				new SDK.PluginProperty("combo", "send-rate", { initialValue: "medium", items: ["fast", "medium", "slow"] })
+				new SDK.PluginProperty("combo", "send-rate", { initialValue: "medium", items: ["fast", "medium", "slow"] }),
+				new SDK.PluginProperty("combo", "connection-mode", { initialValue: "auto", items: ["auto", "node", "directory"] })
 			]);
 			SDK.Lang.PopContext();		// .properties
 

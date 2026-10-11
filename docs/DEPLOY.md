@@ -135,6 +135,11 @@ DNS-запись и сертификат Cloudflare сделает сам. Ад�
   мой контейнер, сертификат на `game.example.com`.» Дальше в Cloudflare: A-запись `game.example.com` → выданный IP,
   **проксирование выключено (серая тучка)**, пока Botohost не выпустит Let's Encrypt; после проверки оранжевую тучку
   можно включить и поставить SSL-режим **Full (strict)**.
+- **Несколько нод в разных регионах** (ближайший выбирает клиент, как в Photon): один бот-распределитель
+  (`STARKFLOW_MODE=directory`) + по боту на регион (`STARKFLOW_REGION=eu`, `ru`, …). В плагине Server URL —
+  адрес распределителя (`https://dir.example.com`), свойство **Connection mode** можно оставить Auto. Каждому
+  боту-ноде свой поддомен (`eu.example.com`), `STARKFLOW_PUBLIC_URL=wss://eu.example.com/ws` и тот же
+  `STARKFLOW_CLUSTER_SECRET`. Подробности и порядок проверки — `docs/CLUSTER.md`.
 - **Если домен отдаёт 404**, это ответ не сервера, а шлюза платформы (`curl` показывает Go-шный
   `404 page not found` с `Content-Type: text/plain` и без заголовка `Server`; наш сервер на `/health` отдаёт
   `ok`, а на `/` — страницу). Значит маршрут «домен → контейнер» не поднят: проверь галочку «Использовать домен»,

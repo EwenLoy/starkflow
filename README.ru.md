@@ -92,7 +92,7 @@ docker compose -f docker-compose.tls.yml --profile caddy up -d --build
 
 ```bash
 cd server && go test ./...       # стейт комнаты и токены
-node tests/plugin-mock-test.js   # плагин: 117 ACE и поведение на заглушке WebSocket
+node tests/plugin-mock-test.js   # плагин: 119 ACE и поведение на заглушке WebSocket
 node tests/server-smoke.mjs      # 75 проверок протокола против запущенного сервера
 ```
 

@@ -63,9 +63,25 @@
 						"initialValue": "\"\""
 					}
 				]
+			},
+			{
+				"id": "set-region",
+				"scriptName": "SetRegion",
+				"params": [
+					{
+						"id": "region",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
 			}
 		],
 		"expressions": [
+			{
+				"id": "region",
+				"expressionName": "Region",
+				"returnType": "string"
+			},
 			{
 				"id": "auth-token",
 				"expressionName": "AuthToken",

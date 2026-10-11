@@ -43,6 +43,15 @@
 							"medium": "Medium (30/s)",
 							"slow": "Slow (15/s)"
 						}
+					},
+					"connection-mode": {
+						"name": "Connection mode",
+						"desc": "Auto (default) decides by the Server URL: ws:// connects to the game server directly, http(s):// means it is a cluster directory. Force one of the two if your URL cannot tell.",
+						"items": {
+							"auto": "Auto (by the URL)",
+							"node": "Single node (direct)",
+							"directory": "Cluster directory"
+						}
 					}
 				},
 				"aceCategories": {
@@ -290,6 +299,17 @@
 							"name": {
 								"name": "Name",
 								"desc": "Player name."
+							}
+						}
+					},
+					"set-region": {
+						"list-name": "Set region",
+						"display-text": "Set region to [i]{0}[/i] (empty = nearest)",
+						"description": "Clustered mode only. Forces the region (\"eu\", \"ru\", ...) instead of measuring the nearest one; pass an empty string to pick the nearest region automatically again.",
+						"params": {
+							"region": {
+								"name": "Region",
+								"desc": "Region name as reported by the nodes, or empty for the nearest one."
 							}
 						}
 					},
@@ -738,6 +758,10 @@
 					"auth-token": {
 						"translated-name": "AuthToken",
 						"description": "Your signed token. Save it to keep the same identity on this device."
+					},
+					"region": {
+						"translated-name": "Region",
+						"description": "Clustered mode: the region you are connected to (\"eu\", \"ru\", ...), empty outside a cluster. Read it after \"On joined room\"."
 					},
 					"my-user-id": {
 						"translated-name": "MyUserId",

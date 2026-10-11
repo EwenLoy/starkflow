@@ -63,6 +63,30 @@ jobs:
           sleep 1
           node tests/server-smoke.mjs
 
+  cluster:
+    name: Live cluster (directory + two regions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: server/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build the server
+        run: cd server && go build -o "$RUNNER_TEMP/starkflow" ./cmd/starkflow
+      - name: Start a directory and two nodes in two regions, then check the cluster
+        run: |
+          STARKFLOW_MODE=directory STARKFLOW_ADDR=:8097 STARKFLOW_CLUSTER_SECRET=ci STARKFLOW_ADMIN_TOKEN=ci "$RUNNER_TEMP/starkflow" &
+          STARKFLOW_ADDR=:8098 STARKFLOW_CLUSTER_SECRET=ci STARKFLOW_REGION=eu \
+            STARKFLOW_PUBLIC_URL=ws://127.0.0.1:8098/ws STARKFLOW_DIRECTORY_URL=http://127.0.0.1:8097 "$RUNNER_TEMP/starkflow" &
+          STARKFLOW_ADDR=:8099 STARKFLOW_CLUSTER_SECRET=ci STARKFLOW_REGION=ru \
+            STARKFLOW_PUBLIC_URL=ws://127.0.0.1:8099/ws STARKFLOW_DIRECTORY_URL=http://127.0.0.1:8097 "$RUNNER_TEMP/starkflow" &
+          sleep 7
+          node tests/cluster-e2e.mjs
+
   docker:
     name: Docker image + smoke test inside the container
     runs-on: ubuntu-latest

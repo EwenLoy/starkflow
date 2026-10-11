@@ -67,6 +67,7 @@ type AssignRequest struct {
 type AssignResponse struct {
 	URL    string `json:"url"`    // e.g. wss://node.example.com/ws
 	Ticket string `json:"ticket"` // HMAC-signed, checked by the node on /ws
+	Region string `json:"region"` // region of the assigned node (so the game can show it)
 }
 
 func mac(secret []byte, s string) []byte {
@@ -158,8 +159,9 @@ func (n *nodeState) blocked() bool {
 
 // Dir is the directory service.
 type Dir struct {
-	secret     []byte // shared cluster key: signs tickets, authenticates nodes
-	adminToken string // bearer token for /api/*
+	secret     []byte   // shared cluster key: signs tickets, authenticates nodes
+	adminToken string   // bearer token for /api/*
+	origins    []string // CORS allow-list for /assign and /regions; empty = any
 
 	mu     sync.Mutex
 	nodes  map[string]*nodeState
@@ -168,10 +170,13 @@ type Dir struct {
 }
 
 // New creates a directory. secret must equal every node's STARKFLOW_CLUSTER_SECRET.
-func New(secret []byte, adminToken string) *Dir {
+// origins is the CORS allow-list for the endpoints a browser page calls (/assign,
+// /regions); an empty list allows any origin, like the node's own Origin check.
+func New(secret []byte, adminToken string, origins []string) *Dir {
 	return &Dir{
 		secret:     secret,
 		adminToken: adminToken,
+		origins:    origins,
 		nodes:      map[string]*nodeState{},
 		byID:       map[string]roomLoc{},
 		byName:     map[string]roomLoc{},
@@ -234,6 +239,7 @@ func (d *Dir) Start(ctx context.Context) {
 func (d *Dir) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/assign", d.handleAssign)
+	mux.HandleFunc("/regions", d.handleRegions)
 	mux.HandleFunc("/report", d.handleReport)
 	mux.HandleFunc("/api/nodes", d.handleAPINodes)
 	mux.HandleFunc("/api/nodes/drain", d.handleDrain)
@@ -249,7 +255,7 @@ func (d *Dir) Handler() http.Handler {
 			http.Redirect(w, r, "/admin/", http.StatusFound)
 		})
 	}
-	return mux
+	return d.withCORS(mux)
 }
 
 func (d *Dir) handleAssign(w http.ResponseWriter, r *http.Request) {
@@ -300,10 +306,94 @@ func (d *Dir) handleAssign(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Dir) writeAssign(w http.ResponseWriter, nodeURL, app string) {
+	region := ""
+	d.mu.Lock()
+	if ns := d.nodes[nodeURL]; ns != nil {
+		region = ns.report.Region
+	}
+	d.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(AssignResponse{
 		URL:    nodeURL,
 		Ticket: SignTicket(d.secret, app, time.Now()),
+		Region: region,
+	})
+}
+
+// handleRegions lists one reachable node per region. The client measures the
+// latency to each of them and picks the nearest one ("best region", like Photon):
+// the directory is in a single place, so only the client can tell which region is
+// actually close to it.
+func (d *Dir) handleRegions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	now := time.Now()
+	d.mu.Lock()
+	seen := map[string]bool{}
+	for _, ns := range d.nodes {
+		if ns.alive(now) && !ns.blocked() && ns.report.Region != "" {
+			seen[ns.report.Region] = true
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for reg := range seen {
+		names = append(names, reg)
+	}
+	sort.Strings(names)
+	out := make([]map[string]string, 0, len(names))
+	for _, reg := range names {
+		if url := d.pickLocked(reg, now); url != "" {
+			out = append(out, map[string]string{"region": reg, "url": url})
+		}
+	}
+	d.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"regions": out})
+}
+
+// corsOK reports whether the browser page at origin may read our answer.
+func (d *Dir) corsOK(origin string) bool {
+	if len(d.origins) == 0 {
+		return true
+	}
+	for _, o := range d.origins {
+		if o == "*" || strings.EqualFold(o, origin) {
+			return true
+		}
+	}
+	return false
+}
+
+// publicPath is an endpoint the game page calls from another origin. A JSON POST
+// from a browser needs a preflight, so without these headers the request never
+// even reaches us (/assign would answer the OPTIONS with 405 and the browser
+// would drop the call).
+func isPublicPath(p string) bool {
+	return p == "/assign" || p == "/regions" || p == "/health"
+}
+
+func (d *Dir) withCORS(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isPublicPath(r.URL.Path) {
+			if origin := r.Header.Get("Origin"); origin != "" && d.corsOK(origin) {
+				w.Header().Set("Vary", "Origin")
+				if len(d.origins) == 0 {
+					w.Header().Set("Access-Control-Allow-Origin", "*")
+				} else {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+				}
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+				w.Header().Set("Access-Control-Max-Age", "600")
+			}
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+		h.ServeHTTP(w, r)
 	})
 }
 

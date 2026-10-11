@@ -96,7 +96,7 @@ Cloudflare Tunnel with your token and creates the DNS record for you. Both optio
 
 ```bash
 cd server && go test ./...       # room state and tokens
-node tests/plugin-mock-test.js   # plugin: 117 ACE and behaviour on a WebSocket stub
+node tests/plugin-mock-test.js   # plugin: 119 ACE and behaviour on a WebSocket stub
 node tests/server-smoke.mjs      # 75 protocol checks against a running server
 ```
 

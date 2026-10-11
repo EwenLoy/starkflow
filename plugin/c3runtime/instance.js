@@ -11,6 +11,7 @@
 	// them), so the plugin never sends more than 58 sync messages per second.
 	const MAX_RATE = 58;
 	const PRESET_IDS = ["fast", "medium", "slow"];	// combo items of the "send rate" ACE/property
+	const CONN_MODES = ["auto", "node", "directory"];	// combo items of the "connection mode" property
 	const HZ_OF = { fast: 58, medium: 30, slow: 15 };
 	const TOKEN_CAP = 20;				// short bursts are fine, the average stays under MAX_RATE
 
@@ -30,6 +31,15 @@
 	// {"t":"batch","items":[...]} if the server supports it (welcome.batch).
 	const BATCH_MAX_ITEMS = 64;			// server limit per batch
 	const BATCH_MAX_BYTES = 48 * 1024;	// below the server frame limit (64 KB)
+
+	// ---- best region (clustered mode) -------------------------------------------
+	// The directory may run several regions; the client measures the latency to one
+	// node of each region and connects to the nearest one, remembering the result
+	// (Photon's "best region"). Only the client can tell which region is close to
+	// it: the directory itself sits in a single place.
+	const REGION_TTL = 10 * 60 * 1000;	// how long a measured region is trusted
+	const PROBE_TIMEOUT = 1500;			// ms per attempt to one region
+	const PROBE_TRIES = 2;				// the second attempt rides the warm connection
 
 	// ---- sync channel (stage 2) ----------------------------------------------
 	// A server with welcome.sync gets the objects as numbered snapshots
@@ -85,7 +95,8 @@
 
 			// Properties, same order as in plugin.js (editor side).
 			const props = this._getInitProperties() || [];
-			this._url = props[0] || "ws://localhost:8080/ws";
+			this._mode = this._pickCombo(CONN_MODES, props[6], "auto");
+			this._url = this._normUrl(props[0] || "ws://localhost:8080/ws");
 			this._appId = props[1] || "default";
 			this._logLevel = this._pickCombo(LOG_LEVELS, props[2], "info");
 			this._autoReconnect = props[3] !== false;
@@ -167,6 +178,11 @@
 			this._syncLast = "";				// JSON of our last snapshot ("" = none sent)
 			this._warnedSync = false;
 			this._snaps = new Map();			// owner id -> { buf: [{ts, states}], off, seq, iv }
+			this._region = "";					// pinned region ("" = pick automatically)
+			this._curRegion = "";				// region we are connected to now
+			this._probedDir = "";				// directory the last measurement belongs to
+			this._probedAt = 0;
+			this._probedRegion = "";
 
 			// The simple API: what to sync, what is mine, what belongs to other players.
 			this._defs = new Map();			// tag -> definition (object type, fields, scope)
@@ -301,7 +317,7 @@
 			this._noReconnect = false;
 			this._attempt = 0;
 			if (url)
-				this._url = url;
+				this._url = this._normUrl(url);
 			if (token)
 				this._token = token;
 			else if (!this._token)
@@ -309,7 +325,137 @@
 			this._openSocket();
 		}
 
-		// Clustered mode: POST /assign {app, room?} → {url: "wss://node/…", ticket}.
+		// ---- best region (clustered mode) ----------------------------
+
+		_dirBase()
+		{
+			return this._url.replace(/\/*$/, "");
+		}
+
+		_regionKey()
+		{
+			return "starkflow:" + this._appId + ":region";
+		}
+
+		_forgetRegion()
+		{
+			this._probedDir = "";
+			this._probedAt = 0;
+			this._probedRegion = "";
+			try
+			{
+				if (typeof localStorage !== "undefined")
+					localStorage.removeItem(this._regionKey());
+			}
+			catch (e) { /* storage not available (worker mode, private mode) */ }
+		}
+
+		_cachedRegion()
+		{
+			try
+			{
+				if (typeof localStorage === "undefined")
+					return "";
+				const o = JSON.parse(localStorage.getItem(this._regionKey()) || "null");
+				if (!o || typeof o.region !== "string" || !o.region)
+					return "";
+				if (!(Number(o.at) > 0) || Date.now() - Number(o.at) > REGION_TTL)
+					return "";
+				return o.region;
+			}
+			catch (e)
+			{
+				return "";
+			}
+		}
+
+		_rememberRegion(region)
+		{
+			try
+			{
+				if (typeof localStorage !== "undefined")
+					localStorage.setItem(this._regionKey(), JSON.stringify({ region: region, at: Date.now() }));
+			}
+			catch (e) { /* ignore */ }
+		}
+
+		// One HTTP round trip to a node of that region: /health answers "ok" and is
+		// readable from another origin. The first attempt pays for TCP+TLS, the next
+		// one rides the warm connection, so the minimum is close to the real RTT.
+		_probeOnce(base, timeout)
+		{
+			const t0 = this._now();
+			const opts = { cache: "no-store" };
+			let timer = 0;
+			try
+			{
+				if (typeof AbortController === "function")
+				{
+					const ctl = new AbortController();
+					opts.signal = ctl.signal;
+					timer = setTimeout(() => { try { ctl.abort(); } catch (e) { /* ignore */ } }, timeout);
+				}
+			}
+			catch (e) { /* no AbortController: the fetch below is on its own */ }
+			const done = () => { if (timer) clearTimeout(timer); };
+			return fetch(base + "/health", opts)
+				.then((res) => res.text())
+				.then(() => { done(); return this._now() - t0; }, (err) => { done(); throw err; });
+		}
+
+		// ws(s)://node/ws -> http(s)://node (the /health probe endpoint)
+		_probeBase(url)
+		{
+			return String(url).replace(/^ws/, "http").replace(/\/ws(\?.*)?$/, "").replace(/\/+$/, "");
+		}
+
+		_probeRegion(url)
+		{
+			const base = this._probeBase(url);
+			const tries = [];
+			for (let i = 0; i < PROBE_TRIES; i++)
+				tries.push(this._probeOnce(base, PROBE_TIMEOUT));
+			return Promise.all(tries).then((ms) => Math.min.apply(null, ms));
+		}
+
+		// Asks the directory for its regions, measures them and returns the nearest
+		// one ("" when the directory has none or nothing answered: then the request
+		// goes out without a region and the directory picks the least loaded node).
+		_pickRegion(dirUrl)
+		{
+			if (dirUrl === this._probedDir && this._probedRegion && Date.now() - this._probedAt < REGION_TTL)
+				return Promise.resolve(this._probedRegion);
+			return fetch(dirUrl + "/regions", { cache: "no-store" })
+				.then((res) => (res.ok ? res.json() : null), () => null)
+				.then((data) =>
+				{
+					const list = (data && Array.isArray(data.regions)) ? data.regions : [];
+					this._probedDir = dirUrl;
+					this._probedAt = Date.now();
+					this._probedRegion = "";
+					if (!list.length)
+						return "";
+					if (list.length === 1)
+						return String(list[0].region || "");
+					return Promise.all(list.map((r) => this._probeRegion(r.url).then(
+						(ms) => ({ region: String(r.region || ""), ms: ms }),
+						() => null)))
+						.then((all) =>
+						{
+							const ok = all.filter((x) => x && x.region && isFinite(x.ms));
+							if (!ok.length)
+								return "";
+							ok.sort((a, b) => a.ms - b.ms);
+							this._probedRegion = ok[0].region;
+							this._log("info", "regions: " + ok.map((x) => x.region + " " + Math.round(x.ms) + "ms").join(", ") +
+								" -> " + this._probedRegion);
+							return this._probedRegion;
+						});
+				});
+		}
+
+
+		// Clustered mode: POST /assign {app, room?, region?} → {url, ticket, region}.
 		// Then we connect to the node directly; the ticket rides in the query
 		// string and is verified by the node. Every (re)connect re-asks the
 		// directory, so drained or dead nodes drop out of rotation by themselves.
@@ -318,22 +464,43 @@
 			this._status = this._attempt > 0 ? "reconnecting" : "connecting";
 			const dirUrl = this._url.replace(/\/*$/, "");
 			const room = (this._lastJoin && this._lastJoin.room) || "";
-			this._log("info", "requesting a node from the directory", dirUrl);
-			fetch(dirUrl + "/assign", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ app: this._appId, room: String(room) })
-			}).then((res) =>
+			const ask = (region) =>
 			{
-				if (!res.ok)
-					throw new Error("directory /assign returned HTTP " + res.status);
-				return res.json();
-			}).then((data) =>
+				this._log("info", "requesting a node from the directory", dirUrl, region ? "(region " + region + ")" : "");
+				return fetch(dirUrl + "/assign", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ app: this._appId, room: String(room), region: region || "" })
+				});
+			};
+			// null = the region we asked for has no live node any more
+			const assign = (region) => ask(region).then((res) =>
+			{
+				if (res.ok)
+					return res.json();
+				if (region && res.status === 503)
+					return null;
+				throw new Error("directory /assign returned HTTP " + res.status);
+			});
+			// An explicit region wins, then the one measured earlier, then a fresh
+			// measurement of every region the directory reports.
+			const wanted = this._region || this._cachedRegion();
+			const pick = wanted ? Promise.resolve(wanted) : this._pickRegion(dirUrl);
+			pick.then((region) => assign(region).then((data) =>
+			{
+				if (data)
+					return data;
+				this._forgetRegion();			// the region is gone: ask without it
+				return assign("");
+			})).then((data) =>
 			{
 				if (this._intentional)
 					return;					// отключились, пока directory отвечал
 				const nodeUrl = String(data.url || "");
 				const ticket = String(data.ticket || "");
+				this._curRegion = String(data.region || "");
+				if (!this._region && this._curRegion)
+					this._rememberRegion(this._curRegion);
 				if (!/^wss?:\/\//i.test(nodeUrl))
 					throw new Error("directory returned a bad node url: " + JSON.stringify(data.url));
 				// подключаемся напрямую к ноде: временно подменяем _url,
@@ -359,11 +526,37 @@
 			});
 		}
 
+		// "Connection mode" property: it decides how the Server URL is read, which
+		// _normUrl turns into a scheme. By the time a socket is opened the scheme
+		// alone says whether it is the cluster manager (http) or a game node (ws) —
+		// the node we get from /assign arrives as ws and must not be re-assigned.
+		_useDirectory()
+		{
+			return /^https?:\/\//i.test(this._url);
+		}
+
+		// The forced mode may need the other scheme: a directory is spoken to over
+		// http(s) (fetch) and a node over ws(s). A URL without a scheme gets the one
+		// of the mode (auto: a directory, the only thing an http address can be).
+		_normUrl(url)
+		{
+			const u = String(url === undefined || url === null ? "" : url).trim();
+			if (!u)
+				return u;
+			if (u.indexOf("://") < 0)
+				return (this._mode === "node" ? "wss://" : "https://") + u;
+			if (this._mode === "directory")
+				return u.replace(/^ws/i, "http");		// wss://dir/  -> https://dir/
+			if (this._mode === "node")
+				return u.replace(/^http/i, "ws");		// https://node/ -> wss://node/
+			return u;
+		}
+
 		_openSocket()
 		{
 			// Clustered mode: an http(s) Server URL is the directory, not a game
 			// node. Ask it for a node (with a signed ticket) and connect there.
-			if (/^https?:\/\//i.test(this._url))
+			if (this._useDirectory())
 			{
 				this._assignAndOpen();
 				return;

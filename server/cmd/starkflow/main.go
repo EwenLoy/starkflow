@@ -64,7 +64,7 @@ func runDirectory(cfg config.Config) {
 	if cfg.AdminToken == "" {
 		slog.Warn("STARKFLOW_ADMIN_TOKEN is not set: /api/* and the admin panel are disabled")
 	}
-	dir := directory.New(cfg.ClusterSecret, cfg.AdminToken)
+	dir := directory.New(cfg.ClusterSecret, cfg.AdminToken, cfg.AllowedOrigins)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir.Start(ctx)

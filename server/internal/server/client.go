@@ -113,7 +113,48 @@ func (c *client) readPump() {
 			c.Send(proto.ErrFrame(0, proto.Err(proto.ErrBadMessage, "invalid JSON")))
 			continue
 		}
+		if m.T == "batch" {
+			c.handleBatch(&m)
+			continue
+		}
 		c.handle(&m)
+	}
+}
+
+// handleBatch runs every item of {"t":"batch","items":[...]} as if it came in
+// its own frame. Each item costs a rate-limit token like a normal message (the
+// frame itself paid for the first one), so batching saves frames, not limits.
+func (c *client) handleBatch(m *proto.ClientMsg) {
+	if !c.hello {
+		c.fatal(m.ID, proto.Err(proto.ErrNotReady, "send hello first"))
+		return
+	}
+	if len(m.Items) == 0 {
+		c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrBadMessage, "empty batch")))
+		return
+	}
+	if len(m.Items) > c.srv.cfg.MaxBatchItems {
+		c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrMsgTooLarge, "too many items in batch")))
+		return
+	}
+	for i, raw := range m.Items {
+		var item proto.ClientMsg
+		if err := json.Unmarshal(raw, &item); err != nil {
+			c.Send(proto.ErrFrame(0, proto.Err(proto.ErrBadMessage, "invalid JSON in batch")))
+			continue
+		}
+		if i > 0 && !c.allow() {
+			// The frame paid for the first item, the rest cost a token each. Once the
+			// limit is hit the remaining items are dropped with ONE error: answering
+			// a 64-item batch with dozens of frames would only make it worse.
+			c.Send(proto.ErrFrame(item.ID, proto.Err(proto.ErrRateLimit, "too many messages")))
+			break
+		}
+		if item.T == "batch" || item.T == "hello" {
+			c.Send(proto.ErrFrame(item.ID, proto.Err(proto.ErrBadMessage, item.T+" is not allowed inside a batch")))
+			continue
+		}
+		c.handle(&item)
 	}
 }
 
@@ -176,7 +217,7 @@ func (c *client) handle(m *proto.ClientMsg) {
 		}
 	case "room.list":
 		c.Send(proto.Marshal(map[string]any{"t": "room.list.result", "id": m.ID, "rooms": c.srv.list(c.app)}))
-	case "event", "state.set", "state.add", "state.toggle", "player.set":
+	case "event", "state.set", "state.add", "state.toggle", "player.set", "sync":
 		if c.rm == nil {
 			c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrNotInRoom, "you are not in a room")))
 			return
@@ -192,6 +233,8 @@ func (c *client) handle(m *proto.ClientMsg) {
 			c.rm.State(c, m.ID, "toggle", m.Key, m.Value)
 		case "player.set":
 			c.rm.SetProp(c, m.ID, m.Key, m.Value)
+		case "sync":
+			c.rm.Sync(c, m.Seq, m.Ts, m.Iv, m.Objs)
 		}
 	default:
 		c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrBadMessage, "unknown message type: "+m.T)))
@@ -222,6 +265,17 @@ func (c *client) onHello(m *proto.ClientMsg) {
 		"serverTime":  time.Now().UnixMilli(),
 		"proto":       proto.Version,
 		"roomNameMax": cfg.MaxRoomNameRunes,
+		// the client may send {"t":"batch"} and must accept it from the server
+		"batch":          true,
+		"maxString":      cfg.MaxStringBytes,
+		"maxPlayerProps": cfg.MaxPlayerProps,
+		// maxMsg is the frame limit the server itself accepts: the client must keep
+		// its batches below it (the plugin sizes its batches from this).
+		"maxMsg": cfg.MaxMsgBytes,
+		// the client may use the "sync" channel for object snapshots
+		"sync":    true,
+		"maxSync": cfg.MaxSyncBytes,
+		"batchMs": cfg.BatchInterval.Milliseconds(),
 	}))
 }
 

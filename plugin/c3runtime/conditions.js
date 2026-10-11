@@ -41,6 +41,8 @@
 		ForEachEntity(tag) { return this._forEachEntity(tag); },
 		OnProxyCreated(tag) { return this._proxyMatch(tag); },
 		OnProxyDestroyed(tag) { return this._proxyMatch(tag); },
+		OnEntityCreated(tag) { return this._proxyMatch(tag); },
+		OnEntityDestroyed(tag) { return this._proxyMatch(tag); },
 
 		// errors
 		OnRateLimited() { return true; },

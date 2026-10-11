@@ -10,18 +10,38 @@
 	// The server allows 60 messages/s per connection (and the ping etc. use some of
 	// them), so the plugin never sends more than 58 sync messages per second.
 	const MAX_RATE = 58;
-	const PRESET_HZ = [58, 30, 15];		// fast, medium, slow (same order as the "send-rate" property)
+	const PRESET_IDS = ["fast", "medium", "slow"];	// combo items of the "send rate" ACE/property
+	const HZ_OF = { fast: 58, medium: 30, slow: 15 };
 	const TOKEN_CAP = 20;				// short bursts are fine, the average stays under MAX_RATE
 
 	// ---- object sync --------------------------------------------------
 	// Synced objects are packed into the owner's player properties "_sf0".."_sf7".
-	// A player may have 16 properties and a string may be 1024 bytes on the server,
-	// so up to 8 chunks of ~1000 bytes are used and 8 properties stay free for the game.
+	// The server tells its string limit in "welcome" (maxString, 4096 by default), a
+	// chunk is a bit smaller than that; an old server without it allows 1024 bytes,
+	// so the chunks are ~1000 bytes there. 8 chunks, the rest of the player
+	// properties stay free for the game.
 	const CHUNK_PREFIX = "_sf";
 	const MAX_CHUNKS = 8;
-	const CHUNK_BYTES = 1000;
+	const CHUNK_BYTES = 1000;			// for a server that does not say its limit
+	const CHUNK_BYTES_MAX = 6000;		// 8 chunks must fit into one batch frame
+
+	// ---- batching -------------------------------------------------------
+	// Messages queued during one sync flush leave as ONE WebSocket frame
+	// {"t":"batch","items":[...]} if the server supports it (welcome.batch).
+	const BATCH_MAX_ITEMS = 64;			// server limit per batch
+	const BATCH_MAX_BYTES = 48 * 1024;	// below the server frame limit (64 KB)
+
+	// ---- sync channel (stage 2) ----------------------------------------------
+	// A server with welcome.sync gets the objects as numbered snapshots
+	// {"t":"sync","seq","ts","iv","objs":[...]} instead of the "_sf" player properties.
+	// The receiver keeps a short buffer of snapshots and draws other players a bit in
+	// the past, interpolating between the two snapshots around that moment (entity
+	// interpolation, G. Gambetta "Fast-Paced Multiplayer III").
+	const SNAP_BUFFER = 64;				// snapshots kept per player
+	const INTERP_MIN = 80;				// ms, auto interpolation delay is kept in 80..300
+	const INTERP_MAX = 300;
 	const TELEPORT = 1000;				// px: a bigger jump is applied at once, without smoothing
-	const F = { X: 1, Y: 2, Z: 4, ANGLE: 8, SIZE: 16, MIRROR: 32, ANIM: 64, FRAME: 128, VISIBLE: 256, OPACITY: 512, TAG: 1024 };
+	const F = { X: 1, Y: 2, Z: 4, ANGLE: 8, SIZE: 16, MIRROR: 32, ANIM: 64, FRAME: 128, VISIBLE: 256, OPACITY: 512, TAG: 1024, VARS: 2048 };
 
 	// ---- the simple object sync API ---------------------------------------
 	// "Sync object" remembers what to sync (tag -> object type + fields), "Bind local
@@ -32,12 +52,18 @@
 		"none": 0,
 		"position": F.X | F.Y,
 		"positionAngle": F.X | F.Y | F.ANGLE,
-		"everything": F.X | F.Y | F.Z | F.ANGLE | F.SIZE | F.MIRROR | F.ANIM | F.FRAME | F.VISIBLE | F.OPACITY
+		"full": F.X | F.Y | F.Z | F.ANGLE | F.SIZE | F.MIRROR | F.ANIM | F.FRAME | F.VISIBLE | F.OPACITY
 	};
+	TRANSFORMS.everything = TRANSFORMS.full;		// old name, still accepted
+	// GamePush calls the scopes "player" and "global"; "host" is the same as "global".
+	const TRANSFORM_IDS = ["none", "position", "positionAngle", "full"];
+	const SCOPE_IDS = ["player", "global"];
+	const SCOPES = { "player": "player", "global": "host", "host": "host" };
 	const RULE_KINDS = ["num", "str", "bool"];
 	const RULE_MODES = ["set", "add", "const", "once", "server"];
 
 	const r1 = (v) => Math.round(v * 10) / 10;
+	const r3 = (v) => Math.round(v * 1000) / 1000;
 	const fin = (v) => (typeof v === "number" && isFinite(v)) ? v : 0;
 	const utf8Len = (str) =>
 	{
@@ -61,7 +87,7 @@
 			const props = this._getInitProperties() || [];
 			this._url = props[0] || "ws://localhost:8080/ws";
 			this._appId = props[1] || "default";
-			this._logLevel = LOG_LEVELS[props[2]] || "info";
+			this._logLevel = this._pickCombo(LOG_LEVELS, props[2], "info");
 			this._autoReconnect = props[3] !== false;
 			this._replayPlayers = props[4] !== false;
 
@@ -115,7 +141,7 @@
 			// MAX_RATE messages per second (token bucket).
 			this._sendHz = 30;
 			this._sendInterval = 1000 / 30;
-			this._setSendRate(PRESET_HZ[props[5]] || 30, true);
+			this._setSendRate(HZ_OF[this._pickCombo(PRESET_IDS, props[5], "medium")] || 30, true);
 			this._lastTick = 0;
 			this._acc = 0;
 			this._tokens = TOKEN_CAP;
@@ -123,12 +149,24 @@
 			this._sentProps = new Map();		// key -> JSON of the value the server already has
 
 			// Object sync.
-			this._smoothMs = 100;
+			this._smoothMs = 70;			// manual smoothing time in ms
+			this._smoothAuto = true;		// auto: 1.4 x the send interval, 70..300 ms
 			this._sync = new Map();			// "owner:slot" -> registered object
 			this._net = new Map();				// owner id -> array of chunks, each a Map(slot -> state)
 			this._sentChunks = [];
 			this._chunkTime = [];
 			this._warnedChunks = false;
+			this._chunkBytes = CHUNK_BYTES;
+			this._srvBatch = false;			// the server accepts and sends {"t":"batch"}
+			this._outBatch = [];				// messages waiting for _flushOut
+			this._batchBytes = BATCH_MAX_BYTES;	// welcome.maxMsg: size of one frame the server accepts
+			this._srvSync = false;			// the server has the "sync" channel (welcome.sync)
+			this._maxSync = 32 * 1024;		// welcome.maxSync: size of one snapshot
+			this._srvBatchMs = 0;			// welcome.batchMs: the server batching window
+			this._syncSeq = 0;				// number of our last snapshot
+			this._syncLast = "";				// JSON of our last snapshot ("" = none sent)
+			this._warnedSync = false;
+			this._snaps = new Map();			// owner id -> { buf: [{ts, states}], off, seq, iv }
 
 			// The simple API: what to sync, what is mine, what belongs to other players.
 			this._defs = new Map();			// tag -> definition (object type, fields, scope)
@@ -140,8 +178,10 @@
 			this._nextSlot = 0;
 			this._syncOn = false;			// "Start sync" was called
 			this._curEntity = null;			// object in "For each object" and its triggers
-			this._curProxy = null;			// object in "On other player's object ..."
+			this._curProxy = null;			// object in "On player proxy / entity ..." triggers
 			this._warnedProxy = false;
+			this._varCache = new Map();		// object type name -> instance variable names
+			this._rebindAt = -1e9;			// last time we re-checked the bindings (self-healing)
 
 			// Room rules, sent when this client creates a room.
 			this._rules = { strict: false, schema: {}, init: {} };
@@ -156,6 +196,19 @@
 		}
 
 		// ---- helpers -------------------------------------------------
+
+		// Construct hands a "combo" value over as the zero-based index of the chosen item
+		// (that is also true for combo properties), but the item id itself is accepted as
+		// well, so hand-written calls and older projects keep working.
+		_pickCombo(ids, value, fallback)
+		{
+			if (value === undefined || value === null || value === "")
+				return fallback;
+			const n = Math.floor(Number(value));
+			if (Number.isFinite(n) && String(n) === String(value).trim() && n >= 0 && n < ids.length)
+				return ids[n];
+			return String(value).trim();
+		}
 
 		_log(level, ...args)
 		{
@@ -223,6 +276,8 @@
 			this._dropProxies(true);
 			this._sync.clear();
 			this._net.clear();
+			this._snaps.clear();
+			this._syncLast = "";
 			this._sentChunks = [];
 			this._chunkTime = [];
 			this._sentProps.clear();
@@ -334,6 +389,10 @@
 			ws.onopen = () =>
 			{
 				if (this._ws !== ws) return;
+				this._outBatch = [];
+				this._srvBatch = false;			// until "welcome" says otherwise
+				this._batchBytes = BATCH_MAX_BYTES;
+				this._srvSync = false;
 				this._log("info", "socket open, sending hello");
 				this._send({ t: "hello", token: this._token, name: this._name });
 				this._startPing();
@@ -445,12 +504,63 @@
 
 		// ---- sending -------------------------------------------------
 
+		// _send sends right away; whatever is queued with _queue goes first, in the same frame.
 		_send(obj)
+		{
+			if (this._outBatch.length)
+			{
+				this._outBatch.push(obj);
+				return this._flushOut();
+			}
+			return this._sendRaw(obj);
+		}
+
+		// _queue holds a message until _flushOut (end of the sync flush) or the next _send.
+		_queue(obj)
+		{
+			if (!this._srvBatch)
+				return this._sendRaw(obj);
+			this._outBatch.push(obj);
+			return true;
+		}
+
+		// _flushOut sends the queued messages: one frame, or several if they are too big for one.
+		_flushOut()
+		{
+			const items = this._outBatch;
+			if (!items.length)
+				return true;
+			this._outBatch = [];
+			let ok = true;
+			let group = [], bytes = 0;
+			const flush = () =>
+			{
+				if (group.length === 1)
+					ok = this._sendRaw(group[0]) && ok;
+				else if (group.length)
+					ok = this._sendRaw({ t: "batch", items: group }) && ok;
+				group = [];
+				bytes = 0;
+			};
+			for (const it of items)
+			{
+				const b = JSON.stringify(it).length;
+				if (group.length && (group.length >= BATCH_MAX_ITEMS || bytes + b > this._batchBytes))
+					flush();
+				group.push(it);
+				bytes += b + 1;
+			}
+			flush();
+			return ok;
+		}
+
+		_sendRaw(obj)
 		{
 			const ws = this._ws;
 			if (!ws || ws.readyState !== 1)
 			{
 				this._log("warn", "not connected, message dropped:", obj.t);
+				this._outBatch = [];
 				return false;
 			}
 			this._lastSend = Date.now();
@@ -533,6 +643,20 @@
 			catch (e) { this._log("warn", "bad message from server"); return; }
 			this._log("debug", "<-", text);
 
+			// Разбор сообщения никогда не должен выбрасывать исключение наружу:
+			// игра не увидит ни диалога, ни падения — только строку в консоли.
+			// The server packs frequent messages into {"t":"batch","items":[...]}:
+			// every item is handled on its own, one bad item does not stop the rest.
+			const list = (m && m.t === "batch" && Array.isArray(m.items)) ? m.items : [m];
+			for (const it of list)
+			{
+				try { this._dispatch(it); }
+				catch (e) { this._log("error", "failed to handle the message " + (it && it.t) + ":", e); }
+			}
+		}
+
+		_dispatch(m)
+		{
 			switch (m.t)
 			{
 				case "welcome": this._onWelcome(m); break;
@@ -542,23 +666,20 @@
 				case "player.suspended": this._onPlayerStatus(m.id, "suspended", "OnPlayerSuspended"); break;
 				case "player.resumed": this._onPlayerResumed(m); break;
 				case "player.props": this._onPlayerProps(m); break;
+				case "sync": this._onSync(m.id, m, false); break;
 				case "host.changed":
 					this._hostId = m.hostId;
 					this._trigger(this._cnd("OnHostChanged"));
 					if (this._syncOn)
 					{
-						// Objects with the "host" scope change hands
+						// Objects with the "global" (host) scope change hands
 						for (const tag of Array.from(this._proxies.keys()))
 						{
 							const def = this._defs.get(tag);
 							if (def && def.scope === "host")
 								this._dropTag(tag, false);
 						}
-						for (const def of this._defs.values())
-						{
-							if (def.scope === "host")
-								this._autoBind(def);
-						}
+						this._rebind();
 					}
 					break;
 				case "event": this._onEvent(m); break;
@@ -582,6 +703,22 @@
 			this._token = m.token;
 			this._saveToken();
 			this._serverOffset = (m.serverTime || Date.now()) - Date.now();
+			this._srvBatch = m.batch === true;
+			// The server knows its own frame limit: keep the batches below it (there is
+			// no point in sending a frame the server would refuse to read). A short
+			// guard is left for the batch wrapper itself.
+			const maxMsg = Number(m.maxMsg);
+			this._batchBytes = maxMsg > 0
+				? Math.max(512, Math.min(BATCH_MAX_BYTES, maxMsg - 256))
+				: BATCH_MAX_BYTES;
+			const maxStr = Number(m.maxString);
+			let chunk = maxStr > 0 ? Math.max(500, Math.min(CHUNK_BYTES_MAX, maxStr - 96)) : CHUNK_BYTES;
+			chunk = Math.min(chunk, Math.max(256, this._batchBytes - 128));		// one chunk must fit into one frame
+			this._chunkBytes = chunk;
+			this._srvSync = m.sync === true;
+			if (Number(m.maxSync) > 0)
+				this._maxSync = Number(m.maxSync);
+			this._srvBatchMs = Math.max(0, Number(m.batchMs) || 0);
 			this._attempt = 0;
 			this._status = this._lastJoin ? "reconnecting" : "connected";
 			this._trigger(this._cnd("OnConnected"));
@@ -602,6 +739,8 @@
 			this._resumed = m.resumed ? 1 : 0;
 			this._players = new Map();
 			this._net.clear();
+			this._snaps.clear();
+			this._syncLast = "";				// send our snapshot again in the new room
 			this._sentChunks = [];
 			this._chunkTime = [];
 			this._sentProps.clear();
@@ -632,8 +771,10 @@
 			{
 				// Returning after a lost connection: the objects are still there, only
 				// the binding has to be checked again.
-				for (const def of this._defs.values())
-					this._autoBind(def);
+				this._rebind();
+				// Players who left while we were away are not in the list any more, so
+				// their objects have to go as well (no phantoms after a reconnect).
+				this._pruneOwners(this._players.keys());
 			}
 		}
 
@@ -649,6 +790,7 @@
 		{
 			this._players.delete(m.id);
 			this._net.delete(m.id);
+			this._snaps.delete(m.id);
 			this._dropOwner(m.id);
 			this._lastPlayerId = m.id;
 			this._trigger(this._cnd("OnPlayerLeft"));
@@ -714,7 +856,11 @@
 		{
 			this._errCode = m.code;
 			this._errMsg = m.msg || "";
-			this._log("warn", "server error", m.code, m.msg);
+			// Настоящие ошибки всегда уходят в консоль с уровнем "error" — их не
+			// отфильтровывает даже "Log level = error". Ложный 300 от пробного входа
+			// «войти или создать» остаётся на уровне "warn".
+			const probe = m.code === 300 && !!this._pendingCreate;
+			this._log(probe ? "warn" : "error", "server error", m.code, m.msg);
 			if (m.code === 500)
 				this._trigger(this._cnd("OnRateLimited"));
 			if (m.code === 200)
@@ -728,13 +874,19 @@
 			{
 				this._noReconnect = true;		// protocol mismatch, retrying is pointless
 			}
-			else if (m.code === 300 && this._pendingCreate)
+			else if (probe)
 			{
-				// комнаты с таким именем нет: создаём её (действие «войти или создать»)
+				// комнаты с таким именем нет: создаём её (действие «войти или создать»).
+				// Это ожидаемая ветка, а не сбой: пробный room.join намеренно уходит с
+				// create=false и обязан получить 300. Дальше создаётся комната и повторный
+				// вход успешен, поэтому On error здесь не срабатывает — иначе игра показала
+				// бы ложное «комната не найдена» посреди нормального входа. Остаётся только
+				// строка в логе (см. this._log выше).
 				const msg = this._pendingCreate;
 				this._pendingCreate = null;
 				this._lastJoin = msg;
 				this._send(Object.assign({ id: this._reqId() }, msg));
+				return;
 			}
 			else if (m.code >= 300 && m.code < 400 && this._status !== "in-room")
 			{
@@ -760,12 +912,52 @@
 				this._log("info", "send rate: " + hz + "/s");
 		}
 
+		// Smoothing of other players' objects. "Auto" follows the send interval, exactly
+		// like the test client on the server does: 1.4 x the interval, kept in 70..300 ms.
+		_autoSmoothMs()
+		{
+			return Math.max(70, Math.min(300, Math.round(this._sendInterval * 1.4)));
+		}
+
+		_smoothValue()
+		{
+			return this._smoothAuto ? this._autoSmoothMs() : this._smoothMs;
+		}
+
 		_tick()
+		{
+			// Тик вызывает движок Construct: исключение отсюда вылезло бы в превью
+			// как ошибка JS, поэтому всё уходит в консоль (не чаще раза в секунду).
+			try { this._tickInner(); }
+			catch (e)
+			{
+				const now = this._now();
+				if (!this._tickErrAt || now - this._tickErrAt > 1000)
+				{
+					this._tickErrAt = now;
+					this._log("error", "sync tick failed:", e);
+				}
+			}
+		}
+
+		_tickInner()
 		{
 			const now = this._now();
 			const dt = this._lastTick ? Math.min(100, Math.max(0, now - this._lastTick)) : 0;
 			this._lastTick = now;
 			this._tokens = Math.min(TOKEN_CAP, this._tokens + dt * MAX_RATE / 1000);
+
+			// self-healing: the bound instance may be gone (layout change, respawn) or may
+			// appear only after "Start sync" - check the bindings twice a second
+			if (this._syncOn && this._defs.size && now - this._rebindAt > 500)
+			{
+				this._rebindAt = now;
+				this._rebind();
+				// The room player list is the truth: an owner who is not in it any more
+				// must not keep his objects (a missed "player left" would leave a phantom).
+				if (this._players.size)
+					this._pruneOwners(this._players.keys());
+			}
 
 			if (this._sync.size)
 				this._applyRemote(dt);
@@ -798,7 +990,7 @@
 					continue;				// the server already has this value
 				this._sentProps.set(key, sig);
 				this._tokens = Math.max(0, this._tokens - 1);
-				this._send({ t: "player.set", key: key, value: value });
+				this._queue({ t: "player.set", key: key, value: value });
 			}
 		}
 
@@ -807,8 +999,14 @@
 			if (!this._canSend())
 				return;
 			this._flushProps(false);
-			if (this._sync.size || this._sentChunks.length)
+			if (this._srvSync)
+			{
+				if (this._sync.size || this._syncLast)
+					this._flushSyncChannel(now);
+			}
+			else if (this._sync.size || this._sentChunks.length)
 				this._flushSync(now);
+			this._flushOut();			// everything of this flush leaves as one frame
 		}
 
 		// ---- object sync: sending ------------------------------------
@@ -826,6 +1024,11 @@
 
 		_encode(inst, rec)
 		{
+			return JSON.stringify(this._encodeArr(inst, rec));
+		}
+
+		_encodeArr(inst, rec)
+		{
 			const f = rec.mask | (rec.tag ? F.TAG : 0);
 			const a = [rec.slot, f];
 			if (f & F.X) a.push(r1(fin(inst.x)));
@@ -839,7 +1042,64 @@
 			if (f & F.VISIBLE) a.push(inst.isVisible ? 1 : 0);
 			if (f & F.OPACITY) a.push(Math.round(fin(inst.opacity) * 100) / 100);
 			if (f & F.TAG) a.push(rec.tag);
-			return JSON.stringify(a);
+			const vars = rec.vars || null;
+			if (vars && vars.length && inst.instVars)
+			{
+				const obj = {};
+				let any = false;
+				for (const v of vars)
+				{
+					const val = inst.instVars[v.name];
+					if (val === undefined || val === null)
+						continue;
+					obj[v.name] = (typeof val === "number" && isFinite(val)) ? (v.interp ? r3(val) : val) : val;
+					any = true;
+				}
+				if (any)
+				{
+					a[1] = f | F.VARS;
+					a.push(obj);
+				}
+			}
+			return a;
+		}
+
+		// Stage 2: all our objects as one numbered snapshot, sent only when something
+		// changed. ts is our clock: the receivers use the time between snapshots, not
+		// the absolute value, so the clocks of the players do not have to match.
+		_flushSyncChannel(now)
+		{
+			const mine = [];
+			for (const rec of this._sync.values())
+			{
+				if (rec.owner !== this._myId)
+					continue;
+				const inst = this._resolve(rec);
+				if (inst)
+					mine.push(this._encodeArr(inst, rec));
+			}
+			mine.sort((a, b) => a[0] - b[0]);
+			if (!mine.length && !this._syncLast)
+				return;
+			let text = JSON.stringify(mine);
+			if (utf8Len(text) > this._maxSync)
+			{
+				if (!this._warnedSync)
+					this._log("warn", "too many synced objects: a snapshot is limited to " + this._maxSync + " bytes, the last objects are not sent");
+				this._warnedSync = true;
+				while (mine.length && utf8Len(text) > this._maxSync)
+				{
+					mine.pop();
+					text = JSON.stringify(mine);
+				}
+			}
+			if (text === this._syncLast || (!mine.length && this._syncLast === ""))
+				return;
+			if (this._tokens < 1)
+				return;
+			this._tokens--;
+			this._syncLast = mine.length ? text : "";
+			this._queue({ t: "sync", seq: ++this._syncSeq, ts: Math.round(now), iv: Math.round(this._sendInterval), objs: mine });
 		}
 
 		_flushSync(now)
@@ -861,7 +1121,7 @@
 			for (const r of mine)
 			{
 				const b = utf8Len(r.str) + 1;
-				if (cur.length && bytes + b > CHUNK_BYTES)
+				if (cur.length && bytes + b > this._chunkBytes)
 				{
 					chunks.push("[" + cur.join(",") + "]");
 					cur = [];
@@ -875,7 +1135,7 @@
 			if (chunks.length > MAX_CHUNKS)
 			{
 				if (!this._warnedChunks)
-					this._log("warn", "too many synced objects: only the first " + MAX_CHUNKS + " chunks (~" + MAX_CHUNKS * CHUNK_BYTES + " bytes) are sent");
+					this._log("warn", "too many synced objects: only the first " + MAX_CHUNKS + " chunks (~" + MAX_CHUNKS * this._chunkBytes + " bytes) are sent");
 				this._warnedChunks = true;
 				chunks.length = MAX_CHUNKS;
 			}
@@ -900,7 +1160,7 @@
 				this._tokens--;
 				this._sentChunks[i] = want;
 				this._chunkTime[i] = now;
-				this._send({ t: "player.set", key: CHUNK_PREFIX + i, value: want });
+				this._queue({ t: "player.set", key: CHUNK_PREFIX + i, value: want });
 			}
 		}
 
@@ -908,13 +1168,127 @@
 
 		_ingestAll(player)
 		{
-			if (!player || !player.props)
+			if (!player)
 				return;
-			for (const k of Object.keys(player.props))
+			if (player.props)
 			{
-				if (k.startsWith(CHUNK_PREFIX))
-					this._ingest(player.id, k, player.props[k]);
+				for (const k of Object.keys(player.props))
+				{
+					if (k.startsWith(CHUNK_PREFIX))
+						this._ingest(player.id, k, player.props[k]);
+				}
 			}
+			if (player.sync)
+				this._onSync(player.id, player.sync, true);	// the last snapshot, for newcomers
+		}
+
+		// A snapshot of another player's objects arrived ("sync" or players[].sync).
+		_onSync(owner, s, reset)
+		{
+			if (!s || owner === this._myId || !Array.isArray(s.objs))
+				return;
+			const states = this._decodeRecords(s.objs);
+			const now = this._now();
+			const ts = fin(s.ts), seq = fin(s.seq);
+			let o = this._snaps.get(owner);
+			// a new buffer: first snapshot, a resume, or the sender started again (seq went back)
+			if (!o || reset || seq <= o.seq)
+			{
+				o = { buf: [], off: undefined, seq: 0, iv: 0 };
+				this._snaps.set(owner, o);
+			}
+			// Clock offset sender -> us: the smallest "arrival - ts" seen is the fastest
+			// delivery; it follows slow drift, and a big jump means a new clock.
+			const off = now - ts;
+			if (o.off === undefined || off < o.off || off - o.off > 1000)
+				o.off = off;
+			else
+				o.off += (off - o.off) * 0.01;
+			o.iv = fin(s.iv) > 0 ? fin(s.iv) : this._sendInterval;
+			o.seq = seq;
+			// The owner sends only changes: after a pause the previous position is held
+			// until one interval before the new one, so the object does not crawl across the pause.
+			const last = o.buf[o.buf.length - 1];
+			if (last && ts - last.ts > o.iv * 2.5)
+				o.buf.push({ ts: ts - o.iv, states: last.states });
+			o.buf.push({ ts: ts, states: states });
+			if (o.buf.length > SNAP_BUFFER)
+				o.buf.splice(0, o.buf.length - SNAP_BUFFER);
+
+			this._net.set(owner, [states]);		// the newest snapshot: creating/removing objects
+			if (this._syncOn)
+			{
+				this._adopt(owner);
+				this._pruneProxies(owner);
+			}
+		}
+
+		// How far in the past other players are drawn. Auto: two send intervals of the
+		// owner plus the server batching window and some margin for jitter.
+		_interpDelay(o)
+		{
+			if (!this._smoothAuto)
+				return this._smoothMs;
+			const iv = o && o.iv > 0 ? o.iv : this._sendInterval;
+			return Math.max(INTERP_MIN, Math.min(INTERP_MAX, Math.round(iv * 2 + this._srvBatchMs + 20)));
+		}
+
+		// The state of one object at the moment t (our clock), between two snapshots.
+		_sample(o, rec, t)
+		{
+			const buf = o.buf;
+			if (!buf.length)
+				return null;
+			const at = (i) => buf[i].ts + o.off;
+			let i = buf.length - 1;
+			while (i > 0 && at(i) > t)
+				i--;
+			if (i > 1)
+			{
+				buf.splice(0, i - 1);			// older snapshots are not needed any more
+				i = 1;
+			}
+			const a = buf[i].states.get(rec.slot);
+			if (i === buf.length - 1 || at(i) > t)
+				return a || null;				// past the newest (or before the oldest): hold it
+			const b = buf[i + 1].states.get(rec.slot);
+			if (!a || !b)
+				return b || a || null;
+			const span = at(i + 1) - at(i);
+			return this._lerpState(a, b, span > 0 ? (t - at(i)) / span : 1, rec);
+		}
+
+		_lerpState(a, b, k, rec)
+		{
+			if (k <= 0)
+				return a;
+			if (k >= 1)
+				return b;
+			const va = a.v, vb = b.v;
+			if (Math.abs(fin(vb.x) - fin(va.x)) > TELEPORT || Math.abs(fin(vb.y) - fin(va.y)) > TELEPORT)
+				return b;						// a jump: no flying across the map
+			const v = Object.assign({}, va);	// animation, frame, visibility: the older snapshot
+			for (const f of ["x", "y", "z", "w", "h", "op"])
+			{
+				if (typeof va[f] === "number" && typeof vb[f] === "number")
+					v[f] = va[f] + (vb[f] - va[f]) * k;
+			}
+			if (typeof va.a === "number" && typeof vb.a === "number")
+			{
+				const d = ((vb.a - va.a + 540) % 360 + 360) % 360 - 180;	// shortest way round
+				v.a = va.a + d * k;
+			}
+			if (va.vars && vb.vars && rec.vars && rec.vars.length)
+			{
+				v.vars = Object.assign({}, va.vars);
+				for (const def of rec.vars)
+				{
+					const x = va.vars[def.name], y = vb.vars[def.name];
+					if (def.interp && typeof x === "number" && typeof y === "number")
+						v.vars[def.name] = x + (y - x) * k;
+				}
+			}
+			return { mask: a.mask, v: v };
 		}
 
 		_ingest(owner, key, value)
@@ -946,6 +1320,13 @@
 			let arr;
 			try { arr = JSON.parse(str); }
 			catch (e) { return out; }
+			return this._decodeRecords(arr);
+		}
+
+		// records: [[slot, flags, ...values], ...] -> Map(slot -> {mask, v})
+		_decodeRecords(arr)
+		{
+			const out = new Map();
 			if (!Array.isArray(arr))
 				return out;
 			for (const r of arr)
@@ -971,6 +1352,11 @@
 					const t = r[i++];
 					v.tag = typeof t === "string" ? t : "";
 				}
+				if (f & F.VARS)
+				{
+					const o = r[i++];
+					v.vars = (o && typeof o === "object") ? o : null;
+				}
 				out.set(slot, { mask: f, v: v });
 			}
 			return out;
@@ -992,10 +1378,21 @@
 
 		_applyRemote(dt)
 		{
+			const now = this._now();
 			for (const rec of this._sync.values())
 			{
 				if (rec.owner === this._myId)
 					continue;
+				const o = this._snaps.get(rec.owner);
+				const delay = o ? this._interpDelay(o) : 0;
+				if (o && delay > 0 && rec.interp !== false)
+				{
+					const sst = this._sample(o, rec, now - delay);
+					const sinst = sst ? this._resolve(rec) : null;
+					if (sinst)
+						this._applyOne(sinst, rec, sst, dt, true);
+					continue;
+				}
 				const st = this._getNet(rec.owner, rec.slot);
 				if (!st)
 					continue;
@@ -1006,12 +1403,14 @@
 			}
 		}
 
-		_applyOne(inst, rec, st, dt)
+		// exact: st is already interpolated (the sync channel), apply it as is.
+		_applyOne(inst, rec, st, dt, exact)
 		{
 			const v = st.v, m = st.mask;
-			const snap = !rec.seen || this._smoothMs <= 0 || rec.interp === false;
+			const smoothMs = this._smoothValue();
+			const snap = exact || !rec.seen || smoothMs <= 0 || rec.interp === false;
 			rec.seen = true;
-			let k = snap ? 1 : 1 - Math.exp(-dt * 3 / this._smoothMs);
+			let k = snap ? 1 : 1 - Math.exp(-dt * 3 / smoothMs);
 			let kp = k;
 			if (!snap && (((m & F.X) && Math.abs(v.x - inst.x) > TELEPORT) || ((m & F.Y) && Math.abs(v.y - inst.y) > TELEPORT)))
 				kp = 1;
@@ -1049,6 +1448,27 @@
 				inst.animationFrame = v.frame;
 			if ((m & F.VISIBLE) && inst.isVisible !== !!v.vis) inst.isVisible = !!v.vis;
 			if ((m & F.OPACITY) && inst.opacity !== v.op) inst.opacity = v.op;
+
+			// instance variables registered with "Register object variable for sync"
+			const vars = rec.vars || null;
+			if (vars && v.vars && inst.instVars)
+			{
+				for (const def of vars)
+				{
+					const target = v.vars[def.name];
+					if (target === undefined)
+						continue;
+					const cur = inst.instVars[def.name];
+					let next = target;
+					if (def.interp && !snap && typeof cur === "number" && isFinite(cur) && typeof target === "number")
+						next = ease(cur, target, k);
+					if (next !== cur)
+					{
+						try { inst.instVars[def.name] = next; }
+						catch (e) { this._log("warn", "cannot write the instance variable " + def.name); }
+					}
+				}
+			}
 		}
 
 		// ---- object sync: registering --------------------------------
@@ -1082,7 +1502,7 @@
 				}
 				const s = slot + i++;
 				const key = owner + ":" + s;
-				this._sync.set(key, { key: key, owner: owner, slot: s, uid: inst.uid, mask: m, interp: null, tag: "", type: objClass.name || "", seen: false });
+				this._sync.set(key, { key: key, owner: owner, slot: s, uid: inst.uid, mask: m, interp: null, tag: "", type: objClass.name || "", vars: null, seen: false });
 				this._log("debug", "synced object registered: owner " + owner + ", slot " + s);
 			}
 		}
@@ -1126,17 +1546,21 @@
 				this._log("warn", "sync object: tag \"" + tag + "\" is already used by " + def.name);
 				return;
 			}
-			const mask = TRANSFORMS[String(transform || "positionAngle")];
+			const tid = this._pickCombo(TRANSFORM_IDS, transform, "positionAngle");
+			const mask = TRANSFORMS[tid];
+			const wanted = SCOPES[this._pickCombo(SCOPE_IDS, scope, "player")] || "player";
 			if (!def)
 			{
 				def = {
 					tag: tag,
 					name: name,
 					cls: objClass,
-					scope: String(scope || "player"),
+					scope: wanted,
 					mask: mask === undefined ? TRANSFORMS.positionAngle : mask,
 					interp: interpolate !== false,
-					layer: String(layer || "")
+					layer: String(layer || ""),
+					varRefs: [],				// "enabled instance variables", filled by Register object variable
+					_vars: null
 				};
 				this._defs.set(tag, def);
 				const list = this._defsByClass.get(name) || [];
@@ -1147,7 +1571,7 @@
 			else
 			{
 				def.cls = objClass;
-				def.scope = String(scope || def.scope);
+				def.scope = SCOPES[this._pickCombo(SCOPE_IDS, scope, "")] || def.scope;
 				def.interp = interpolate !== false;
 				if (mask !== undefined)
 					def.mask = mask;
@@ -1155,6 +1579,87 @@
 					def.layer = String(layer);
 			}
 			this._log("info", "sync object: tag \"" + tag + "\" = " + (def.name || "object") + " (" + def.scope + ")");
+		}
+
+		// ---- instance variables ("Register object variable for sync") ---------
+		//
+		// The variable parameter of Construct is an index: the name is resolved lazily
+		// from the instance variables of the first instance of that object type
+		// (exactly like GamePush does), so renaming a variable does not break the game.
+
+		_varNames(name)
+		{
+			if (this._varCache.has(name))
+				return this._varCache.get(name);
+			const inst = this._allInstances(this._clsByName(name))[0];
+			const out = inst && inst.instVars ? Object.keys(inst.instVars) : null;
+			if (out)
+				this._varCache.set(name, out);
+			return out;
+		}
+
+		_effectiveVars(def)
+		{
+			if (def._vars)
+				return def._vars;
+			const list = [];
+			for (const ref of (def.varRefs || []))
+			{
+				if (!ref.name)
+				{
+					const names = this._varNames(def.name || "");
+					if (names && ref.index >= 0 && ref.index < names.length)
+						ref.name = names[ref.index];
+				}
+				if (ref.name && !list.some((v) => v.name === ref.name))
+					list.push({ name: ref.name, interp: !!ref.interpolate });
+			}
+			def._vars = list;
+			return list;
+		}
+
+		_registerObjectVariable(objClass, variable, interpolate)
+		{
+			if (!objClass)
+				return;
+			const name = objClass.name || "";
+			const tags = this._defsByClass.get(name) || [];
+			if (!tags.length)
+			{
+				this._log("warn", "register object variable: call \"Register object for sync\" for " + (name || "this object") + " first");
+				return;
+			}
+			const index = parseInt(variable, 10);
+			if (!(index >= 0))
+			{
+				this._log("warn", "register object variable: bad variable " + JSON.stringify(String(variable)));
+				return;
+			}
+			for (const tag of tags)
+			{
+				const def = this._defs.get(tag);
+				if (!def)
+					continue;
+				if (!def.varRefs)
+					def.varRefs = [];
+				const have = def.varRefs.find((r) => r.index === index);
+				if (have)
+					have.interpolate = !!interpolate;
+				else
+					def.varRefs.push({ index: index, interpolate: !!interpolate, name: "" });
+				def._vars = null;
+				// apply it right away, also to the records that are already registered,
+				// so no "restart the sync" dance is needed
+				const list = this._effectiveVars(def);
+				for (const rec of this._sync.values())
+				{
+					if (rec.tag === tag)
+						rec.vars = list;
+				}
+			}
+			const names = this._varNames(name);
+			this._log("info", "sync variable #" + index + (names && names[index] ? " (\"" + names[index] + "\")" : "") +
+				" of " + (name || "object") + " registered, interpolate: " + (!!interpolate));
 		}
 
 		// The instance(s) picked by the event become mine (for every tag of that object
@@ -1185,16 +1690,53 @@
 			}
 		}
 
+		// The bound instance can disappear (layout change, respawn, or it is created after
+		// "Start sync"). Re-checking the bindings now and then keeps sync alive instead of
+		// letting it die silently - that is what makes it feel automatic, like GamePush.
+		_rebind()
+		{
+			for (const def of this._defs.values())
+			{
+				// "mine" is the player scope (my id) or the host scope (the host id): the
+				// id is 0 until the room is entered, so a binding created before the join
+				// has to move to the real id afterwards.
+				const owner = def.scope === "host" ? this._hostId : this._myId;
+				const uid = this._bound.get(def.tag);
+				if (uid !== undefined)
+				{
+					if (this._instByUid(uid) && this._sentAs(uid, owner))
+						continue;
+					this._bound.delete(def.tag);
+					for (const [k, r] of Array.from(this._sync))
+					{
+						if (r.uid === uid)
+							this._sync.delete(k);
+					}
+				}
+				this._autoBind(def);
+			}
+		}
+
+		// Was this instance already sent under this owner? (its record exists)
+		_sentAs(uid, owner)
+		{
+			for (const r of this._sync.values())
+			{
+				if (r.uid === uid && r.owner === owner)
+					return true;
+			}
+			return false;
+		}
+
 		_startSync()
 		{
 			if (!this._defs.size)
 			{
-				this._log("warn", "start sync: register an object first (\"Sync object\" action)");
+				this._log("warn", "start sync: register an object first (\"Register object for sync\" action)");
 				return;
 			}
 			this._syncOn = true;
-			for (const def of this._defs.values())
-				this._autoBind(def);
+			this._rebind();
 			// Data that arrived before "Start sync" (or right after joining) is used too.
 			for (const owner of Array.from(this._net.keys()))
 			{
@@ -1223,8 +1765,12 @@
 			for (let i = 0; i < this._sentChunks.length; i++)
 			{
 				if (this._sentChunks[i])
-					this._send({ t: "player.set", key: CHUNK_PREFIX + i, value: "" });
+					this._queue({ t: "player.set", key: CHUNK_PREFIX + i, value: "" });
 			}
+			if (this._srvSync && this._syncLast && this._canSend())
+				this._queue({ t: "sync", seq: ++this._syncSeq, ts: Math.round(this._now()), iv: Math.round(this._sendInterval), objs: [] });
+			this._syncLast = "";
+			this._flushOut();
 			this._sentChunks = [];
 			this._chunkTime = [];
 			this._log("info", "sync stopped");
@@ -1270,7 +1816,7 @@
 			const slot = this._slotFor(owner, def.tag);
 			const key = owner + ":" + slot;
 			this._bound.set(def.tag, uid);
-			this._sync.set(key, { key: key, owner: owner, slot: slot, uid: uid, mask: def.mask, interp: def.interp, tag: def.tag, type: def.name || "", seen: false });
+			this._sync.set(key, { key: key, owner: owner, slot: slot, uid: uid, mask: def.mask, interp: def.interp, tag: def.tag, type: def.name || "", vars: this._effectiveVars(def), seen: false });
 			this._log("info", "sync: \"" + def.tag + "\" = " + (def.name || "object") + " uid " + uid + (owner === this._myId ? " (mine)" : " (host)"));
 		}
 
@@ -1347,10 +1893,11 @@
 			byTag.set(owner, inst.uid);
 			this._proxyUid.set(inst.uid, { tag: def.tag, owner: owner, slot: slot });
 			const key = owner + ":" + slot;
-			this._sync.set(key, { key: key, owner: owner, slot: slot, uid: inst.uid, mask: def.mask, interp: def.interp, tag: def.tag, type: def.name || "", seen: false });
+			this._sync.set(key, { key: key, owner: owner, slot: slot, uid: inst.uid, mask: def.mask, interp: def.interp, tag: def.tag, type: def.name || "", vars: this._effectiveVars(def), seen: false });
 			this._curProxy = { uid: inst.uid, tag: def.tag, owner: owner };
 			this._log("debug", "created " + (def.name || "object") + " for player " + owner + " (tag \"" + def.tag + "\", slot " + slot + ")");
-			this._trigger(this._cnd("OnProxyCreated"));
+			// global (host) objects are entities, player objects are proxies - like in GamePush
+			this._trigger(this._cnd(def.scope === "host" ? "OnEntityCreated" : "OnProxyCreated"));
 			return inst;
 		}
 
@@ -1392,7 +1939,10 @@
 			this._curProxy = { uid: uid, tag: tag, owner: owner };
 			this._log("debug", "removed the object of player " + owner + " (tag \"" + tag + "\")");
 			if (!quiet)
-				this._trigger(this._cnd("OnProxyDestroyed"));
+			{
+				const def = this._defs.get(tag);
+				this._trigger(this._cnd(def && def.scope === "host" ? "OnEntityDestroyed" : "OnProxyDestroyed"));
+			}
 			const inst = this._instByUid(uid);
 			if (inst && typeof inst.destroy === "function")
 			{
@@ -1424,6 +1974,17 @@
 			{
 				if (info.owner === owner)
 					this._dropProxy(info.tag, owner, false);
+			}
+		}
+
+		// Every owner that is not in "keep" (the room player list) loses his objects.
+		_pruneOwners(keep)
+		{
+			const ids = keep instanceof Set ? keep : new Set(keep);
+			for (const info of Array.from(this._proxyUid.values()))
+			{
+				if (!ids.has(info.owner))
+					this._dropProxy(info.tag, info.owner, false);
 			}
 		}
 

@@ -3,6 +3,8 @@ const BASE = process.env.SF_BASE || 'http://127.0.0.1:8080';
 const WS = process.env.SF_WS || 'ws://127.0.0.1:8080/ws';
 // Уникальные app и комната на каждый запуск: иначе повторный прогон подряд попадёт
 // в живую комнату прошлого прогона (emptyTTL по умолчанию 60 с) и тест упадёт.
+// SF_BATCHED=0 — сервер запущен с STARKFLOW_BATCH_MS=0 (без батчинга рассылки).
+const BATCHED = process.env.SF_BATCHED !== '0';
 const APP = 'smoke-' + Date.now().toString(36);
 const ROOM = 'boss-' + Date.now().toString(36);
 
@@ -20,11 +22,18 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function open(url) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url);
-    const c = { ws, inbox: [], waiters: [] };
-    ws.addEventListener('message', (e) => {
-      const m = JSON.parse(e.data);
+    const c = { ws, inbox: [], waiters: [], frames: [] };
+    const deliver = (m) => {
       const i = c.waiters.findIndex(w => w.pred(m));
       if (i >= 0) { const [w] = c.waiters.splice(i, 1); w.resolve(m); } else c.inbox.push(m);
+    };
+    ws.addEventListener('message', (e) => {
+      const m = JSON.parse(e.data);
+      c.frames.push(m);
+      // сервер склеивает state.changed/player.props/ok в {"t":"batch","items":[...]}:
+      // тест смотрит на отдельные сообщения, как и плагин
+      if (m.t === 'batch') for (const it of m.items) deliver(it);
+      else deliver(m);
     });
     ws.addEventListener('error', () => reject(new Error('ws error: ' + url)));
     ws.addEventListener('close', () => { for (const w of c.waiters.splice(0)) w.reject(new Error('closed')); });
@@ -148,6 +157,71 @@ const schema = {
     B.send({ t: 'player.set', id: 20, key: 'color', value: 'red' });
     const pp = await A.nextT('player.props');
     eq('player.props broadcast', [pp.id, pp.key, pp.value], [2, 'color', 'red']);
+
+    // --- batch: несколько сообщений одним кадром в обе стороны ---
+    eq('welcome: batch и лимиты', [wA.batch, wA.maxString > 1024, wA.maxPlayerProps >= 16], [true, true, true]);
+    eq('welcome: maxMsg', wA.maxMsg > 0, true);
+    await sleep(100);
+    A.frames.length = 0;
+    B.send({ t: 'batch', items: [
+      { t: 'player.set', key: 'pos', value: 1 },
+      { t: 'player.set', key: 'pos', value: 2 },
+      { t: 'player.set', key: 'pos', value: 3 },
+      { t: 'player.set', key: 'hp', value: 50 },
+      { t: 'player.set', id: 21, key: 'big', value: 'x'.repeat(3000) },
+    ] });
+    await B.next(m => m.t === 'ok' && m.id === 21);
+    const hp = await A.next(m => m.t === 'player.props' && m.key === 'hp');
+    eq('batch от клиента применён', hp.value, 50);
+    await A.next(m => m.t === 'player.props' && m.key === 'big');
+    await sleep(100);
+    const posSeen = A.inbox.filter(m => m.t === 'player.props' && m.key === 'pos').map(m => m.value);
+    A.inbox = A.inbox.filter(m => !(m.t === 'player.props' && m.key === 'pos'));
+    if (BATCHED) {
+      eq('батчинг: 5 изменений пришли одним кадром', A.frames.length, 1);
+      eq('батчинг: повторные значения ключа склеены', posSeen, [3]);
+    } else {
+      eq('без батчинга: все значения ключа по порядку', posSeen, [1, 2, 3]);
+    }
+    await B.expectErr({ t: 'batch', items: [{ t: 'hello', id: 22 }] }, 101, 'hello внутри batch -> 101');
+    await B.expectErr({ t: 'batch', items: [] }, 101, 'пустой batch -> 101');
+    await B.expectErr({ t: 'batch', items: Array.from({ length: 65 }, () => ({ t: 'ping', ts: 1 })) }, 501, 'слишком длинный batch -> 501');
+
+    // --- лимит кадра: кадр больше welcome.maxMsg рвёт соединение ---
+    // Поэтому плагин и держит свой батч ниже maxMsg: иначе сервер не прочитает кадр.
+    const OV = await open(wsUrl());
+    OV.send({ t: 'hello' });
+    await OV.nextT('welcome');
+    const overClosed = new Promise((res) => {
+      OV.ws.addEventListener('close', () => res(true));
+      setTimeout(() => res(false), 1500);
+    });
+    OV.send({ t: 'player.set', id: 900, key: 'big', value: 'x'.repeat(70000) });
+    eq('кадр больше maxMsg закрывает соединение', await overClosed, true);
+
+    // --- sync: снимки объектов с номером и временем (этап 2) ---
+    eq('welcome: sync и maxSync', [wA.sync, wA.maxSync > 0, typeof wA.batchMs], [true, true, 'number']);
+    B.send({ t: 'sync', seq: 1, ts: 5000, iv: 33, objs: [[0, 3, 10, 20]] });
+    B.send({ t: 'sync', seq: 2, ts: 5033, iv: 33, objs: [[0, 3, 11, 21]] });
+    const s1 = await A.next(m => m.t === 'sync' && m.seq === 1);
+    const s2 = await A.next(m => m.t === 'sync' && m.seq === 2);
+    eq('sync доходит до других по порядку', [s1.id, s1.ts, s2.ts, s2.objs], [2, 5000, 5033, [[0, 3, 11, 21]]]);
+    await sleep(100);
+    eq('отправитель свой sync не получает', B.inbox.some(m => m.t === 'sync'), false);
+    const N = await open(wsUrl());
+    N.send({ t: 'hello', name: 'Newbie' });
+    await N.nextT('welcome');
+    N.send({ t: 'room.join', id: 1, room: jA.roomId });
+    const jN = await N.nextT('room.joined');
+    const bInfo = jN.players.find(p => p.id === 2);
+    eq('вошедший получает последний снимок', bInfo.sync && [bInfo.sync.seq, bInfo.sync.objs], [2, [[0, 3, 11, 21]]]);
+    N.send({ t: 'room.leave', id: 2 });
+    await N.next(m => m.t === 'ok' && m.id === 2);
+    N.ws.close();
+    await B.expectErr({ t: 'sync', seq: 3, ts: 1, objs: { x: 1 } }, 401, 'sync: objs не массив -> 401');
+    B.send({ t: 'sync', seq: 4, ts: 5100, iv: 33, objs: [] });
+    await A.next(m => m.t === 'sync' && m.seq === 4);
+    await A.next(m => m.t === 'player.left');
 
     // --- обрыв и повторный вход после реконнекта ---
     B.ws.close();

@@ -210,6 +210,11 @@ StarkFlow: On event (1)
 
 ## 8. Игроки и хост
 
+`MyName` — свой ник (до входа это то, что задал `Set player name`, после входа — имя, подтверждённое сервером).
+Чужой ник берётся по id: `PlayerName(id)`, в триггере — `PlayerName(LastPlayerId)`, в переборе —
+`PlayerName(CurrentPlayerId)` или сразу `PlayerNameAt(loopindex)`. Подробнее — в [ACE.md](ACE.md#ники-игроков).
+Ник фиксируется при подключении (`hello`): чтобы сменить его, надо переподключиться.
+
 ```
 StarkFlow: On player joined
     → Text Log: Append "вошёл " & StarkFlow.PlayerName(StarkFlow.LastPlayerId)
@@ -267,7 +272,26 @@ StarkFlow: On error
 
 Частые коды: 301 — комната полна, 306 — плохое имя комнаты, 303 — ты уже в комнате, 500 — слишком часто,
 501 — сообщение больше 16 КБ. Полная таблица — в [ACE.md](ACE.md#errors--ошибки-от-сервера).
-Ошибка — не повод перезапускать игру: 300 и 200 плагин обрабатывает сам.
+Ошибка — не повод перезапускать игру: 300 и 200 плагин обрабатывает сам. У «Войти или создать» пробный вход
+заведомо получает 300, и плагин молча переходит к созданию комнаты — `On error` тут не срабатывает, показывать
+игроку «комната не найдена» не нужно. Сам плагин ничего не показывает: ни `alert`, ни своих надписей —
+только строки в консоль браузера (свойство `Log level`).
+
+**Никаких `Browser: Alert` на ошибках.** Модальное окно блокирует игру, останавливает ввод и мешает
+автоматическому реконнекту, а ошибка почти всегда не критична. Всё — в лог, игроку — максимум строчка в HUD:
+
+```
+StarkFlow: On error
+    → Browser: Log "starkflow error " & StarkFlow.ErrorCode & ": " & StarkFlow.ErrorMsg
+    → ErrLabel (HUD): Set text to "ошибка " & StarkFlow.ErrorCode
+    → ErrTimer: Set timer "hide err" to 3
+
+ErrTimer: On timer "hide err"
+    → ErrLabel: Set text to ""
+```
+
+Тот же принцип для остальных «крупных» ошибок — `On disconnected`, `On rate limited`, отказ directory:
+`Browser: Log` плюс строка в HUD, никаких всплывающих окон.
 
 ## 11. Что пока недоступно из плагина (важно знать)
 
@@ -277,7 +301,7 @@ StarkFlow: On error
 
 - любой ключ создаётся первым `set`, тип берётся из первого значения (число/строка/bool) и потом не меняется;
 - значения не зажимаются по `min`/`max`, `maxDelta` не ограничивает прибавку;
-- ограничения остаются только общие: 64 ключа, 64 КБ, 20 записей в секунду, строка до 1024 байт.
+- ограничения остаются только общие: 64 ключа, 64 КБ, 20 записей в секунду, строка до 4096 байт.
 
 Поэтому в игре клампь значения сам (`clamp(hp, 0, 100)`), а если нужны серверные правила — они доступны из
 JS-клиента (тестовая страница работает именно так, `room.join` с `schema`/`init`/`strict`). Скажи, если нужно
@@ -376,44 +400,72 @@ StarkFlow: On connected
     → StarkFlow: Join or create room ("arena", 8, 30)
 
 StarkFlow: On joined room
-    → StarkFlow: Set smoothing (100)
-    → StarkFlow: Sync Player as tag "player" | scope player, fields positionAngle, smoothing yes, layer ""
-    → StarkFlow: Start sync
+    → StarkFlow: Set smoothing (auto)                               // авто-задержка показа (по умолчанию)
+    → StarkFlow: Register Player as "player" in Player state (transform: Position + angle, interpolate: yes, layer: "")
+    → StarkFlow: Sync variable hp of Player (interpolate: no)      // переменные - тоже в синхронизации
+    → StarkFlow: Start auto-sync
 ```
 
 Всё. Спрайт `Player`, который лежит на слое, плагин объявляет твоим (отдельное действие не нужно), а на
 каждого другого игрока сам создаёт такой же спрайт, как только от него придут координаты, и удаляет его,
 когда тот выйдет. Движение своего спрайта делай как обычно (поведение или события) — на синхронизацию это
-не влияет, свой объект плагин не трогает.
+не влияет, свой объект плагин не трогает. Переменные, добавленные через `Register object variable for sync`,
+доезжают до чужих копий тем же чанком (`hp`, `ammo`, счёт); с `interpolate: yes` числа сглаживаются.
 
-**Если спрайт создаётся кодом** (выбор персонажа, респавн), порядок такой: сначала `Sync object`
+Привязка чинится сама: если инстанс удалён (смена layout, респавн) или создан уже после `Start auto-sync`,
+плагин раз в полсекунды перепроверит и привяжет новый инстанс того же типа — раньше синк в этом случае
+молча умирал. Если привязать нечего, в консоли есть строка `no instance of ... to bind as mine`.
+
+Порядок действий не важен: `Register object for sync` и `Start auto-sync` можно вызывать на
+`On start of layout`, до `Connect` — пока комната не открыта, у игрока ещё нет id, но после входа плагин
+сам перевешивает привязку на настоящий id. Раньше в этом порядке синк молча ничего не отправлял, а
+работал только вызов `Start auto-sync` внутри `On joined room`.
+
+**Если спрайт создаётся кодом** (выбор персонажа, респавн), порядок такой: сначала `Register object for sync`
 (определение тега), потом создание, потом `Bind local instance` — созданный инстанс уже выбран, поэтому
 действие применится именно к нему:
 
 ```
 System: On start of layout
-    → StarkFlow: Sync Player as tag "player" | scope player, fields positionAngle, smoothing yes, layer ""
+    → StarkFlow: Register Player as "player" in Player state (transform: Position + angle, interpolate: yes, layer: "")
     → System: Create object Player on layer "Game" at (0, 0)
-    → StarkFlow: Bind local instance: Player
-    → StarkFlow: Start sync
+    → StarkFlow: Bind local instance of Player
+    → StarkFlow: Start auto-sync
 ```
 
 **Что делать с чужими объектами.** Они твои только визуально: имена, тинт, значок хоста — по триггеру
-создания объекта:
+создания объекта. У `scope player` это `On player proxy created`, у `scope global` — `On entity created`:
 
 ```
-StarkFlow: On other player's object created (tag "player")
+StarkFlow: On player proxy created (tag "player")
     → System: Pick instance by unique ID StarkFlow.ProxyUID      // это и есть новый спрайт
     → NameText: Set text to StarkFlow.PlayerName(StarkFlow.ProxyPlayerId)
     → Player: Set color to rgb(StarkFlow.ProxyPlayerId * 60, 80, 200)
 
-StarkFlow: On other player's object destroyed (tag "player")
+StarkFlow: On player proxy destroyed (tag "player")
     → System: Pick instance by unique ID StarkFlow.ProxyUID      // можно успеть прочитать позицию
+
+StarkFlow: On entity created (tag "crate")                        // общие объекты хоста
+    → System: Pick instance by unique ID StarkFlow.EntityUID
 ```
 
 Позже тот же объект находится по `StarkFlow.PlayerProxyUID(playerId, "player")`, свой — по
 `StarkFlow.LocalEntityUID("player")`. Отличить свои события от чужих в одном цикле просто: у объекта есть
 `StarkFlow.EntityOwner`, сравнивай с `StarkFlow.MyId`.
+
+**Когда чужой объект исчезает.** Плагин сверяется со списком игроков комнаты: если владельца в нём уже
+нет, его объекты удаляются и срабатывает `On player proxy destroyed` / `On entity destroyed`. Так фантом
+не останется даже тогда, когда сообщение «вышел» потерялось — например, если ты сам был на реконнекте.
+Нюанс только один: при **обрыве** связи сервер держит игрока в комнате как `suspended` ещё 30 секунд
+(чтобы он мог вернуться тем же id) и только потом шлёт «вышел». Пока он в комнате, его объект на месте.
+Если нужно убрать объект сразу при обрыве — повесь на `On player connection lost`:
+
+```
+StarkFlow: On player connection lost
+    + System: StarkFlow.PlayerStatus(StarkFlow.LastPlayerId) = "suspended"
+        → System: Pick instance by unique ID StarkFlow.PlayerProxyUID(StarkFlow.LastPlayerId, "player")
+        → Player: Set visible to false
+```
 
 **Перебор всех синхронизированных объектов** (например, чтобы посчитать, кто на экране):
 
@@ -429,8 +481,8 @@ Every tick
 `StarkFlow.EntityField("x")` внутри цикла читает поле текущего объекта (`x`, `y`, `angle`, `animation`,
 `frame`, `visible`, `opacity`, `width`, `height`, `mirror`).
 
-Ещё два тега на ту же схему — например пули и ящики: `Sync Bullet as tag "bullet" | fields position` и
-`Sync Crate as tag "crate" | fields everything`. Один тег = один объект на игрока, поэтому «свой» ящик
+Ещё два тега на ту же схему — например пули и ящики: `Register Bullet as "bullet" in Player state (transform:
+Position)` и `Register Crate as "crate" in Player state (transform: Full)`. Один тег = один объект на игрока, поэтому «свой» ящик
 и «своя» пуля живут в отдельных тегах.
 
 ### 16.1 Кого двигать и почему поведение «как есть» не подходит
@@ -456,13 +508,30 @@ Every tick
 
 ### 16.2 Что внутри и когда нужен ручной режим
 
-Плагин режет данные каждого игрока на чанки по ~1000 байт и кладёт их в свойства `_sf0…_sf7` (8 свойств
-игрока остаются свободными для игры). Отправляет только владелец и только то, что менялось, поэтому
-трафик примерно как у ручной схемы, а сглаживание на приёме уже настроено (`Set smoothing`, по умолчанию
-100 мс; скачок больше 1000 px применяется сразу).
+**Канал `sync` (текущий сервер).** Если сервер в `welcome` сообщает `sync: true`, плагин шлёт свои объекты не
+через свойства игрока, а отдельным сообщением `sync` — один пронумерованный снимок всех своих объектов (`seq`,
+время отправки `ts`, интервал отправки `iv`), и только когда что-то изменилось. Сервер ничего в нём не разбирает:
+пересылает остальным и хранит последний снимок для тех, кто войдёт позже. На приёме плагин держит буфер снимков
+каждого игрока и рисует чужие объекты **чуть в прошлом**, плавно проводя их между двумя соседними снимками
+(entity interpolation). Так движение получается ровным, даже если пакеты приходят неравномерно или пачкой после
+задержки. Задержку показа задаёт `Set smoothing`: в режиме `auto` (по умолчанию) это `2 × интервал отправки
+владельца + окно батчинга сервера + 20 мс`, но от 80 до 300 мс (при 30/с — около 125 мс); число — задержка в мс,
+`0` — без задержки, сразу последнее значение. Часы игроков сверять не нужно: плагин сам подстраивается под
+разницу часов каждого отправителя. Лимит снимка — `STARKFLOW_MAX_SYNC_BYTES` (32 КБ). Со старым сервером
+(без `sync` в `welcome`) работает схема ниже.
+
+**Схема через свойства игрока (старый сервер).** Плагин режет данные каждого игрока на чанки (~4000 байт, на старом сервере ~1000) и кладёт их в свойства
+`_sf0…_sf7` (остальные свойства игрока свободны для игры). Все чанки и свойства одного такта уходят на сервер
+**одним** WebSocket-кадром `batch`, а сервер раз в 40 мс отдаёт каждому игроку накопленные изменения тоже одним
+кадром, оставляя у повторяющегося ключа только последнее значение. Отправляет только владелец и только то, что менялось, поэтому
+трафик примерно как у ручной схемы, а сглаживание на приёме уже настроено: по умолчанию работает
+`Set smoothing (auto)` — `1.4 × интервал отправки`, но не меньше 70 и не больше 300 мс (при обычных
+30/с это ровно 70 мс). Скачок больше 1000 px применяется сразу, без догоняния. Хочешь своё значение —
+вызови `Set smoothing` с числом в миллисекундах (`0` — чужие объекты прыгают так же резко, как свои).
+Текущее значение видно в выражении `StarkFlow.Smoothing`.
 
 Если нужен контроль над каждым полем — есть низкоуровневые действия из раздела `Object sync` справочника
-ACE: `Register sync object` (связывает выбранные инстансы с парой «id игрока + слот» и списком галочек),
+ACE: `Register sync object (advanced)` (связывает выбранные инстансы с парой «id игрока + слот» и списком галочек),
 `Unregister sync object`, `Set smoothing`, `Set send rate`. Например, третий чанк-объект одного игрока
 или синхронизация объекта, которым управляет хост, а не игрок:
 

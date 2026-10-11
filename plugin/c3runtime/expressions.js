@@ -12,6 +12,15 @@
 		// connection
 		AuthToken() { return this._token; },
 		MyUserId() { return this._userId; },
+		MyName()
+		{
+			// после входа берём имя из комнаты (его подтвердил сервер),
+			// до входа — то, что игра задала действием "Set player name"
+			const me = this._players.get(this._myId);
+			if (me && typeof me.name === "string" && me.name !== "")
+				return me.name;
+			return this._name;
+		},
 		Ping() { return this._ping; },
 		ServerTime() { return Date.now() + this._serverOffset; },
 		StatusString() { return this._status; },
@@ -50,6 +59,12 @@
 			const id = ids[Math.floor(i)];
 			return id === undefined ? 0 : id;
 		},
+		PlayerNameAt(i)
+		{
+			const ids = Array.from(this._players.keys()).sort((a, b) => a - b);
+			const p = this._players.get(ids[Math.floor(i)]);
+			return p ? (p.name || "") : "";
+		},
 		PlayerName(id) { const p = this._players.get(Math.floor(id)); return p ? (p.name || "") : ""; },
 		PlayerUserId(id) { const p = this._players.get(Math.floor(id)); return p ? (p.userId || "") : ""; },
 		PlayerStatus(id) { const p = this._players.get(Math.floor(id)); return p ? p.status : ""; },
@@ -64,6 +79,9 @@
 
 		// object sync and send rate
 		SendRate() { return this._sendHz; },
+		// The value really in use: on the "sync" channel other players are drawn in the
+		// past by the interpolation delay, on the old "_sf" path by the plain value.
+		Smoothing() { return this._srvSync ? this._interpDelay(null) : this._smoothValue(); },
 		SyncedObjectCount() { return this._sync.size; },
 
 		// object sync: the simple API (inside "For each object" and its triggers)

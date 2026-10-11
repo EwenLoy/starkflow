@@ -170,9 +170,9 @@
 						"description": "Triggered for every state change."
 					},
 					"is-syncing": {
-						"list-name": "Is syncing",
-						"display-text": "Is syncing",
-						"description": "True after \"Start sync\" and until \"Stop sync\"."
+						"list-name": "Is auto-sync active",
+						"display-text": "Multiplayer: Auto-sync is active",
+						"description": "True after \"Start auto-sync\" while auto-sync is running."
 					},
 					"for-each-object": {
 						"list-name": "For each object",
@@ -181,29 +181,51 @@
 						"params": {
 							"tag": {
 								"name": "Tag",
-								"desc": "Tag from \"Sync object\". Empty = all objects."
+								"desc": "Tag from \"Register object for sync\". Empty = all objects."
 							}
 						}
 					},
 					"on-other-object-created": {
-						"list-name": "On other player's object created",
-						"display-text": "On other player's object created (tag [i]{0}[/i])",
-						"description": "Triggered when the plugin creates the object of another player. Read ProxyUID to pick that instance and ProxyPlayerId to know whose it is.",
+						"list-name": "On player proxy created",
+						"display-text": "Multiplayer: On player proxy [b]{0}[/b] created",
+						"description": "A remote player's object was materialized locally. Use ProxyUID with \"Pick by unique ID\". Global (host) objects fire \"On entity created\" instead.",
 						"params": {
 							"tag": {
 								"name": "Tag",
-								"desc": "Tag from \"Sync object\". Empty = any tag."
+								"desc": "Tag from \"Register object for sync\". Empty = any tag."
 							}
 						}
 					},
 					"on-other-object-destroyed": {
-						"list-name": "On other player's object destroyed",
-						"display-text": "On other player's object destroyed (tag [i]{0}[/i])",
-						"description": "Triggered when the object of another player goes away (he left the room or stopped syncing). Fires before the instance is destroyed.",
+						"list-name": "On player proxy destroyed",
+						"display-text": "Multiplayer: On player proxy [b]{0}[/b] destroyed",
+						"description": "A remote player's object is about to be destroyed (the player left or removed it). Global (host) objects fire \"On entity destroyed\" instead.",
 						"params": {
 							"tag": {
 								"name": "Tag",
-								"desc": "Tag from \"Sync object\". Empty = any tag."
+								"desc": "Tag from \"Register object for sync\". Empty = any tag."
+							}
+						}
+					},
+					"on-entity-created": {
+						"list-name": "On entity created",
+						"display-text": "Multiplayer: On entity [b]{0}[/b] created",
+						"description": "A synced global entity appeared (created by the host). Use EntityUID with \"Pick by unique ID\" to pick the instance.",
+						"params": {
+							"tag": {
+								"name": "Tag",
+								"desc": "Tag of a Global state object from \"Register object for sync\". Empty = any tag."
+							}
+						}
+					},
+					"on-entity-destroyed": {
+						"list-name": "On entity destroyed",
+						"display-text": "Multiplayer: On entity [b]{0}[/b] destroyed",
+						"description": "A synced global entity was removed. The instance is destroyed right after this trigger.",
+						"params": {
+							"tag": {
+								"name": "Tag",
+								"desc": "Tag of a Global state object from \"Register object for sync\". Empty = any tag."
 							}
 						}
 					},
@@ -440,69 +462,88 @@
 						}
 					},
 					"sync-object": {
-						"list-name": "Sync object",
-						"display-text": "Sync [i]{0}[/i] as tag [i]{1}[/i] | scope [i]{2}[/i], fields [i]{3}[/i], smoothing [i]{4}[/i], layer [i]{5}[/i]",
-						"description": "What to sync: an object type, a tag and a set of fields. Call it once with the same values on every client (for example on start of layout), then \"Start sync\". One tag = one object per player.",
+						"list-name": "Register object for sync",
+						"display-text": "Multiplayer: Register [b]{0}[/b] as [b]{1}[/b] in [b]{2}[/b] state (transform: [i]{3}[/i], interpolate: [i]{4}[/i], layer: [i]{5}[/i])",
+						"description": "Link an object type to multiplayer sync. Player state: each client owns its instance, others see proxies. Global state: only host simulates, everyone sees copies. Call before Start auto-sync. One tag = one object per player.",
 						"params": {
-							"object": {
+							"objectClass": {
 								"name": "Object",
-								"desc": "The object type to sync."
+								"desc": "Object type to synchronize"
 							},
 							"tag": {
 								"name": "Tag",
-								"desc": "Name of this kind of object, e.g. player, crate, bullet. Same on every client."
+								"desc": "Sync tag, e.g. \"player\", \"enemy\", \"ammo\". Use \"player\" for the main avatar"
 							},
 							"scope": {
 								"name": "Scope",
-								"desc": "Player: every player has his own object. Host: one object controlled by the host.",
+								"desc": "Player state = owned by each player. Global state = simulated by host only",
 								"items": {
-									"player": "Player",
-									"host": "Host"
+									"player": "Player state",
+									"global": "Global state"
 								}
 							},
 							"transform": {
-								"name": "Fields",
-								"desc": "How much of the object is synced.",
+								"name": "Transform",
+								"desc": "Which built-in properties to sync",
 								"items": {
-									"none": "Nothing (the object is only registered)",
-									"position": "Position (X, Y)",
-									"positionAngle": "Position and angle",
-									"everything": "Everything (position, angle, size, mirror, animation, frame, visible, opacity)"
+									"none": "None",
+									"position": "Position (x, y)",
+									"positionAngle": "Position + angle",
+									"full": "Full (position, angle, size, opacity, visibility)"
 								}
 							},
 							"interpolate": {
-								"name": "Smoothing",
-								"desc": "Glide other players' objects to new values instead of jumping."
+								"name": "Interpolate transform",
+								"desc": "Smoothly interpolate synced transform fields between network ticks (position, angle, size, opacity). Visibility is never interpolated"
 							},
-							"layer": {
+							"layerName": {
 								"name": "Layer",
-								"desc": "Layer for the objects created for other players. Empty = the layer of your own object."
+								"desc": "Layer for materialized instances. Empty = auto (layer of pre-placed instances, else bottom layer)"
+							}
+						}
+					},
+					"sync-object-variable": {
+						"list-name": "Register object variable for sync",
+						"display-text": "Multiplayer: Sync variable [b]{1}[/b] of [b]{0}[/b] (interpolate: [i]{2}[/i])",
+						"description": "Add an instance variable of a registered object to multiplayer sync. Pick the variable from the dropdown - no typos, survives renames. Call after \"Register object for sync\" and before \"Start auto-sync\".",
+						"params": {
+							"objectClass": {
+								"name": "Object",
+								"desc": "Object type already registered with \"Register object for sync\"."
+							},
+							"variable": {
+								"name": "Variable",
+								"desc": "Instance variable to synchronize (hp, ammo, score...)."
+							},
+							"interpolate": {
+								"name": "Interpolate variable",
+								"desc": "Smooth numeric changes between network ticks instead of jumping (numbers only)."
 							}
 						}
 					},
 					"bind-local-instance": {
 						"list-name": "Bind local instance",
-						"display-text": "Bind [i]{0}[/i] as my object",
-						"description": "The picked instance(s) become mine and are the ones sent to the other players. Without this action \"Start sync\" takes the instance that is in the layout.",
+						"display-text": "Multiplayer: Bind local instance of [b]{0}[/b]",
+						"description": "Explicitly bind an instance as the local player's object for its registered player-scope tag. By default the first instance is bound automatically.",
 						"params": {
-							"object": {
+							"objectClass": {
 								"name": "Object",
-								"desc": "Object type (pick the instance before this action)."
+								"desc": "Object type registered in player state"
 							}
 						}
 					},
 					"start-sync": {
-						"list-name": "Start sync",
-						"display-text": "Start sync",
-						"description": "Start sending my objects and moving the objects the plugin creates for the other players. Call it after joining the room."
+						"list-name": "Start auto-sync",
+						"display-text": "Multiplayer: Start auto-sync",
+						"description": "Apply schemas from registered objects and start automatic sync: local objects are sent, remote players' and host entities are created/updated/destroyed automatically. Call after \"Register object for sync\"."
 					},
 					"stop-sync": {
-						"list-name": "Stop sync",
-						"display-text": "Stop sync",
-						"description": "Stop sending. The objects created for the other players are removed, the other clients remove mine."
+						"list-name": "Stop auto-sync",
+						"display-text": "Multiplayer: Stop auto-sync",
+						"description": "Stop automatic multiplayer sync loops."
 					},
 					"register-object": {
-						"list-name": "Register sync object",
+						"list-name": "Register sync object (advanced)",
 						"display-text": "Sync [i]{0}[/i]: owner player [i]{1}[/i], slot [i]{2}[/i] | X [i]{3}[/i] Y [i]{4}[/i] Z [i]{5}[/i] angle [i]{6}[/i] size [i]{7}[/i] mirror [i]{8}[/i] animation [i]{9}[/i] frame [i]{10}[/i] visible [i]{11}[/i] opacity [i]{12}[/i]",
 						"description": "Link the picked object(s) to a player. If the owner is you, the object is sent to the others; for any other owner it is moved by that player's data. Pick one instance (e.g. Player.pid = id); with several picked, slots go slot, slot+1, ... Use the same settings on every client.",
 						"params": {
@@ -574,13 +615,18 @@
 					"set-smoothing": {
 						"list-name": "Set smoothing",
 						"display-text": "Set smoothing of other players' objects to [i]{0}[/i] ms",
-						"description": "How long other players' objects take to glide to a new position. 0 = no smoothing (jumps). Default 100.",
+						"description": "How long other players' objects take to glide to a new position. 0 = no smoothing (jumps). Default 70. Turning this on disables \"Set smoothing (auto)\".",
 						"params": {
 							"ms": {
 								"name": "Time (ms)",
 								"desc": "Smoothing time in milliseconds."
 							}
 						}
+					},
+					"set-auto-smoothing": {
+						"list-name": "Set smoothing (auto)",
+						"display-text": "Set smoothing (auto): follows the send interval",
+						"description": "Like the smoothing checkbox in the server test client. On a server with the \"sync\" channel other players are drawn in the past by 2 x their send interval + the server batching window + 20 ms (80..300 ms); on an older server the time follows the send interval (1.4 x it, 70..300 ms). This is the default."
 					},
 					"set-send-rate-preset": {
 						"list-name": "Set send rate (mode)",
@@ -697,6 +743,10 @@
 						"translated-name": "MyUserId",
 						"description": "Your permanent user id."
 					},
+					"my-name": {
+						"translated-name": "MyName",
+						"description": "Your own nickname: what you set with \"Set player name\" (before joining) or the name the server confirmed (after joining)."
+					},
 					"ping": {
 						"translated-name": "Ping",
 						"description": "Round trip time to the server in milliseconds."
@@ -770,6 +820,16 @@
 					"player-id-at": {
 						"translated-name": "PlayerIdAt",
 						"description": "Player id at index (sorted by id).",
+						"params": {
+							"index": {
+								"name": "Index",
+								"desc": "0-based."
+							}
+						}
+					},
+					"player-name-at": {
+						"translated-name": "PlayerNameAt",
+						"description": "Nickname of the player at index (sorted by id). The same order as PlayerIdAt.",
 						"params": {
 							"index": {
 								"name": "Index",
@@ -935,6 +995,10 @@
 						"translated-name": "SendRate",
 						"description": "Current send rate, flushes per second (1-58)."
 					},
+					"smoothing": {
+						"translated-name": "Smoothing",
+						"description": "The delay actually in use for other players' objects, in milliseconds: the interpolation delay on a server with the \"sync\" channel, the smoothing time on an older server."
+					},
 					"synced-object-count": {
 						"translated-name": "SyncedObjectCount",
 						"description": "Number of objects registered for sync."
@@ -975,7 +1039,7 @@
 						"params": {
 							"tag": {
 								"name": "Tag",
-								"desc": "Tag from \"Sync object\". Empty = all objects."
+								"desc": "Tag from \"Register object for sync\". Empty = all objects."
 							}
 						}
 					},
@@ -985,7 +1049,7 @@
 						"params": {
 							"tag": {
 								"name": "Tag",
-								"desc": "Tag from \"Sync object\"."
+								"desc": "Tag from \"Register object for sync\"."
 							}
 						}
 					},
@@ -999,7 +1063,7 @@
 							},
 							"tag": {
 								"name": "Tag",
-								"desc": "Tag from \"Sync object\"."
+								"desc": "Tag from \"Register object for sync\"."
 							}
 						}
 					},

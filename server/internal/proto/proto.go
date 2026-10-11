@@ -80,8 +80,16 @@ type ClientMsg struct {
 	Key   string          `json:"key"`
 	Value json.RawMessage `json:"value"`
 
-	// ping
+	// ping; sync: the sender's clock in ms
 	Ts int64 `json:"ts"`
+
+	// sync: one numbered snapshot of the sender's synced objects
+	Seq  int64           `json:"seq"`
+	Iv   int             `json:"iv"`   // the sender's send interval, ms
+	Objs json.RawMessage `json:"objs"` // array of object records
+
+	// batch: several client messages in one WebSocket frame
+	Items []json.RawMessage `json:"items"`
 }
 
 // Marshal encodes a server message.

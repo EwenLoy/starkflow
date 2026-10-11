@@ -44,18 +44,33 @@ type Config struct {
 	MaxStateKeys      int
 	MaxStateBytes     int
 	MaxStringBytes    int
+	MaxPlayerProps    int
+	MaxSyncBytes      int // size of one "sync" snapshot (objs), bytes
 	StateWritesPerSec float64
+	// SyncBytesPerSec — бюджет объектного синка в байтах в секунду на игрока
+	// (каждый снимок уходит всем остальным, поэтому без бюджета это самый
+	// дорогой канал). 0 — без ограничения.
+	SyncBytesPerSec int
+
+	// BatchInterval — как долго комната копит state.changed/player.props/ok для
+	// одного получателя, прежде чем отправить их одним кадром {"t":"batch"}.
+	// 0 — без батчинга: кадр на каждое сообщение, как раньше.
+	BatchInterval time.Duration
+	// MaxBatchItems — сколько сообщений клиент может положить в один batch.
+	MaxBatchItems int
 }
 
 // Load returns defaults overridden by environment variables:
 // STARKFLOW_MODE (node|directory), STARKFLOW_ADDR, STARKFLOW_SECRET,
 // STARKFLOW_ORIGINS (comma separated),
-// STARKFLOW_ROOM_NAME_MAX (max room name length in characters).
+// STARKFLOW_ROOM_NAME_MAX (max room name length in characters),
+// STARKFLOW_BATCH_MS, STARKFLOW_MAX_STRING_BYTES, STARKFLOW_MAX_PLAYER_PROPS,
+// STARKFLOW_MAX_MSG_BYTES, STARKFLOW_MAX_SYNC_BYTES, STARKFLOW_SYNC_BYTES_PER_SEC.
 func Load() Config {
 	c := Config{
 		Mode:              "node",
 		Addr:              ":8080",
-		MaxMsgBytes:       16 * 1024,
+		MaxMsgBytes:       64 * 1024,
 		IdleTimeout:       45 * time.Second,
 		HelloTimeout:      10 * time.Second,
 		SendQueue:         128,
@@ -70,8 +85,13 @@ func Load() Config {
 		SuspendTTL:        30 * time.Second,
 		MaxStateKeys:      64,
 		MaxStateBytes:     64 * 1024,
-		MaxStringBytes:    1024,
+		MaxStringBytes:    4096,
+		MaxPlayerProps:    24,
+		MaxSyncBytes:      32 * 1024,
 		StateWritesPerSec: 20,
+		SyncBytesPerSec:   512 * 1024,
+		BatchInterval:     40 * time.Millisecond,
+		MaxBatchItems:     64,
 	}
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("STARKFLOW_MODE"))); v != "" {
 		c.Mode = v
@@ -98,6 +118,27 @@ func Load() Config {
 			c.MaxRoomNameRunes = n
 		}
 	}
+	if v, ok := envInt("STARKFLOW_BATCH_MS", 0, 1000); ok {
+		c.BatchInterval = time.Duration(v) * time.Millisecond
+	}
+	if v, ok := envInt("STARKFLOW_MAX_STRING_BYTES", 64, 1<<20); ok {
+		c.MaxStringBytes = v
+	}
+	if v, ok := envInt("STARKFLOW_MAX_PLAYER_PROPS", 1, 1024); ok {
+		c.MaxPlayerProps = v
+	}
+	if v, ok := envInt("STARKFLOW_MAX_MSG_BYTES", 1024, 16<<20); ok {
+		c.MaxMsgBytes = int64(v)
+	}
+	if v, ok := envInt("STARKFLOW_MAX_SYNC_BYTES", 256, 16<<20); ok {
+		c.MaxSyncBytes = v
+	}
+	if v, ok := envInt("STARKFLOW_SYNC_BYTES_PER_SEC", 0, 64<<20); ok {
+		c.SyncBytesPerSec = v
+	}
+	if int64(c.MaxSyncBytes)+1024 > c.MaxMsgBytes {
+		c.MaxMsgBytes = int64(c.MaxSyncBytes) + 1024 // a full snapshot must fit into one frame
+	}
 	if v := os.Getenv("STARKFLOW_SECRET"); v != "" {
 		c.Secret = []byte(v)
 	} else {
@@ -123,4 +164,18 @@ func Load() Config {
 		c.AdminToken = v
 	}
 	return c
+}
+
+// envInt reads an integer variable; values outside [lo, hi] are ignored with a warning.
+func envInt(name string, lo, hi int) (int, bool) {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < lo || n > hi {
+		slog.Warn("ignoring bad value", "var", name, "value", v, "min", lo, "max", hi)
+		return 0, false
+	}
+	return n, true
 }

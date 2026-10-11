@@ -18,7 +18,9 @@ if (Test-Path $out) { Remove-Item $out }
 $archive = [System.IO.Compression.ZipFile]::Open($out, 'Create')
 try
 {
-	foreach ($f in Get-ChildItem -Path $src -Recurse -File)
+	# *.c3addon под plugin/ — это случайные копии готового аддона; внутрь архива они
+	# попадать не должны, иначе в собранном .c3addon лежит лишний устаревший архив.
+	foreach ($f in Get-ChildItem -Path $src -Recurse -File | Where-Object { $_.Extension -ne '.c3addon' })
 	{
 		$rel = $f.FullName.Substring($src.Length + 1).Replace('\', '/')
 		[System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $f.FullName, $rel) | Out-Null

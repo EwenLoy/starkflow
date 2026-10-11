@@ -15,8 +15,10 @@ services, no sign-ups, no subscriptions.
 - **Shared room state** with per-key rules: `add` is atomic, `min`/`max`/`maxDelta` are clamped by the server.
 - **Relay events** — to all players, to others, or to a single player.
 - **Per-player state** — cursors, ready flags, colours: only the player itself can write, nobody can spoof it.
-- **Object sync** — `Sync object` + `Start sync`: the plugin sends your sprite and creates and moves one for every
-  other player by itself, tag by tag (`On other player's object created`, `For each object`).
+- **Object sync** — `Register object for sync` + `Start auto-sync` (the same format as GamePush Channels): the
+  plugin sends your sprite and creates and moves one for every other player by itself, tag by tag
+  (`On other player's object created`, `For each object`). Smoothing of other players' objects is
+  configurable (`Set smoothing`, or the automatic delay by default).
 - **Player tokens** (signed, nothing stored on the server): after a dropped connection the player returns to the same
   room with the same identity and state.
 - **Batteries included** — a test client built into the server and a Construct 3 plugin in this repository.
@@ -94,8 +96,8 @@ Cloudflare Tunnel with your token and creates the DNS record for you. Both optio
 
 ```bash
 cd server && go test ./...       # room state and tokens
-node tests/plugin-mock-test.js   # plugin: 64 ACE and behaviour on a WebSocket stub
-node tests/server-smoke.mjs      # 54 protocol checks against a running server
+node tests/plugin-mock-test.js   # plugin: 117 ACE and behaviour on a WebSocket stub
+node tests/server-smoke.mjs      # 75 protocol checks against a running server
 ```
 
 All of it runs in CI on every push: 4 jobs (server, plugin, live smoke test, Docker image build).

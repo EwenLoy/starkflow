@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"sort"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -63,6 +64,21 @@ type Player struct {
 	suspendedAt time.Time
 	bucket      float64
 	last        time.Time
+
+	// Последний снимок объектного синка игрока ("sync"): его получает каждый,
+	// кто входит в комнату, чтобы сразу увидеть объекты. nil — снимков не было.
+	sync *syncSnap
+
+	// Бюджет объектного синка: байты в секунду (см. cfg.SyncBytesPerSec). Свой
+	// таймер, чтобы не мешать bucket лимита записей стейта.
+	syncBucket float64
+	syncLast   time.Time
+
+	// Исходящая очередь (батчинг): кадры для этого игрока, которые уйдут одним
+	// {"t":"batch"} по таймеру комнаты. nil в out — значение, вытесненное более
+	// свежим (см. queue). outKeys: ключ склейки -> индекс в out.
+	out     [][]byte
+	outKeys map[string]int
 }
 
 // Room is one game session.
@@ -85,6 +101,9 @@ type Room struct {
 
 	passSalt []byte // set once at creation, read-only afterwards
 	passHash []byte // nil = open room
+
+	flushT     *time.Timer // сброс исходящих очередей игроков (батчинг)
+	flushArmed bool
 
 	inbox   chan func()
 	done    chan struct{}
@@ -131,7 +150,9 @@ func New(key, id, name string, opts Options, cfg config.Config, onClose func(*Ro
 		inbox:      make(chan func(), 256),
 		done:       make(chan struct{}),
 		onClose:    onClose,
+		flushT:     time.NewTimer(time.Hour),
 	}
+	r.flushT.Stop() // armed by queue
 	if opts.Password != "" {
 		r.setPassword(opts.Password)
 	}
@@ -181,12 +202,18 @@ func (r *Room) Created() time.Time { return r.created }
 func (r *Room) Run() {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
+	defer r.flushT.Stop()
 	for {
 		select {
 		case fn := <-r.inbox:
 			fn()
 		case <-tick.C:
 			r.housekeeping(time.Now())
+		case <-r.flushT.C:
+			r.flushArmed = false
+			for _, p := range r.players {
+				r.flushPlayer(p, nil)
+			}
 		}
 		if r.closed {
 			return
@@ -269,7 +296,11 @@ func (r *Room) playerInfo(p *Player) map[string]any {
 	if p.conn == nil {
 		status = "suspended"
 	}
-	return map[string]any{"id": p.ID, "userId": p.UserID, "name": p.Name, "status": status, "props": p.Props}
+	info := map[string]any{"id": p.ID, "userId": p.UserID, "name": p.Name, "status": status, "props": p.Props}
+	if p.sync != nil {
+		info["sync"] = p.sync
+	}
+	return info
 }
 
 func (r *Room) playerList() []any {
@@ -285,12 +316,123 @@ func (r *Room) playerList() []any {
 	return out
 }
 
+// broadcast sends b to everyone right away. Frames already queued for a
+// player go out first, in the same WebSocket frame, so the order is kept.
 func (r *Room) broadcast(b []byte, except int) {
 	for id, p := range r.players {
 		if p.conn != nil && id != except {
-			p.conn.Send(b)
+			r.flushPlayer(p, b)
 		}
 	}
+}
+
+// broadcastQueued is broadcast through the batching queue (see queue).
+func (r *Room) broadcastQueued(b []byte, except int, merge string) {
+	for id, p := range r.players {
+		if p.conn != nil && id != except {
+			r.queue(p, b, merge)
+		}
+	}
+}
+
+// send sends b to one player right away, after what is already queued for them.
+func (r *Room) send(p *Player, b []byte) {
+	if p.conn != nil {
+		r.flushPlayer(p, b)
+	}
+}
+
+// queue puts b into the player's outgoing queue; the room timer sends the
+// whole queue as one {"t":"batch"} frame every BatchInterval. A non-empty
+// merge key drops the older queued frame with the same key: only the newest
+// value of a player property is worth sending.
+func (r *Room) queue(p *Player, b []byte, merge string) {
+	if p.conn == nil {
+		return
+	}
+	if r.cfg.BatchInterval <= 0 {
+		p.conn.Send(b)
+		return
+	}
+	if merge != "" {
+		if p.outKeys == nil {
+			p.outKeys = map[string]int{}
+		}
+		if i, ok := p.outKeys[merge]; ok {
+			p.out[i] = nil
+		}
+		p.outKeys[merge] = len(p.out)
+	}
+	p.out = append(p.out, b)
+	if !r.flushArmed {
+		r.flushArmed = true
+		r.flushT.Reset(r.cfg.BatchInterval)
+	}
+}
+
+// flushPlayer sends the player's queue plus extra (may be nil) as one frame, or
+// as several frames if the batch would not fit into MaxMsgBytes.
+func (r *Room) flushPlayer(p *Player, extra []byte) {
+	var items [][]byte
+	for _, b := range p.out {
+		if b != nil {
+			items = append(items, b)
+		}
+	}
+	p.dropQueue()
+	if extra != nil {
+		items = append(items, extra)
+	}
+	if p.conn == nil || len(items) == 0 {
+		return
+	}
+	// A frame the server would not accept as its own input is useless: split the
+	// batch instead of sending one oversized frame (a snapshot is big, and a
+	// player with many objects queues several of them).
+	limit := int(r.cfg.MaxMsgBytes)
+	if limit < 1024 {
+		limit = 1024
+	}
+	for len(items) > 0 {
+		n, size := 0, 24 // 24 = {"t":"batch","items":[]}
+		for n < len(items) {
+			b := len(items[n]) + 1
+			if n > 0 && size+b > limit {
+				break
+			}
+			size += b
+			n++
+		}
+		if n == 1 {
+			p.conn.Send(items[0])
+		} else {
+			p.conn.Send(batchFrame(items[:n]))
+		}
+		items = items[n:]
+	}
+}
+
+// dropQueue forgets everything queued for the player.
+func (p *Player) dropQueue() {
+	p.out = nil
+	p.outKeys = nil
+}
+
+// batchFrame wraps already encoded messages into {"t":"batch","items":[...]}.
+func batchFrame(items [][]byte) []byte {
+	n := 24 + len(items)
+	for _, b := range items {
+		n += len(b)
+	}
+	out := make([]byte, 0, n)
+	out = append(out, `{"t":"batch","items":[`...)
+	for i, b := range items {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		out = append(out, b...)
+	}
+	return append(out, "]}"...)
 }
 
 func (r *Room) removePlayer(id int, reason string) {
@@ -323,6 +465,21 @@ func (p *Player) take(now time.Time, rate, burst float64) bool {
 		return false
 	}
 	p.bucket--
+	return true
+}
+
+// takeSync charges n bytes to the player's snapshot budget: rate bytes per
+// second, the burst is one second of traffic.
+func (p *Player) takeSync(now time.Time, rate float64, n int) bool {
+	p.syncBucket += now.Sub(p.syncLast).Seconds() * rate
+	p.syncLast = now
+	if p.syncBucket > rate {
+		p.syncBucket = rate
+	}
+	if p.syncBucket < float64(n) {
+		return false
+	}
+	p.syncBucket -= float64(n)
 	return true
 }
 
@@ -364,6 +521,7 @@ func (r *Room) doJoin(req JoinReq) *proto.Error {
 		}
 		p.conn = req.Conn
 		p.suspendedAt = time.Time{}
+		p.dropQueue() // room.joined below carries the full snapshot
 		resumed = true
 	} else {
 		if !r.passwordOK(req.Password) {
@@ -424,6 +582,7 @@ func (r *Room) Disconnect(c Conn) {
 		}
 		before := r.hostID()
 		p.conn = nil
+		p.dropQueue()
 		p.suspendedAt = time.Now()
 		r.broadcast(proto.Marshal(map[string]any{"t": "player.suspended", "id": p.ID}), 0)
 		r.checkHost(before)
@@ -472,18 +631,18 @@ func (r *Room) Event(c Conn, reqID int64, code int, data json.RawMessage, to jso
 			case "others":
 				r.broadcast(frame, p.ID)
 			default:
-				p.conn.Send(proto.ErrFrame(reqID, proto.Err(proto.ErrBadMessage, "to must be all, others or a player id")))
+				r.send(p, proto.ErrFrame(reqID, proto.Err(proto.ErrBadMessage, "to must be all, others or a player id")))
 			}
 			return
 		}
 		var id int
 		if json.Unmarshal(to, &id) == nil {
-			if tp := r.players[id]; tp != nil && tp.conn != nil {
-				tp.conn.Send(frame)
+			if tp := r.players[id]; tp != nil {
+				r.send(tp, frame)
 			}
 			return
 		}
-		p.conn.Send(proto.ErrFrame(reqID, proto.Err(proto.ErrBadMessage, "bad target")))
+		r.send(p, proto.ErrFrame(reqID, proto.Err(proto.ErrBadMessage, "bad target")))
 	})
 }
 
@@ -495,19 +654,19 @@ func (r *Room) State(c Conn, reqID int64, op, key string, value json.RawMessage)
 			return
 		}
 		if !p.take(time.Now(), r.cfg.StateWritesPerSec, r.burst()) {
-			p.conn.Send(proto.ErrFrame(reqID, proto.Err(proto.ErrRateLimit, "too many state writes")))
+			r.send(p, proto.ErrFrame(reqID, proto.Err(proto.ErrRateLimit, "too many state writes")))
 			return
 		}
 		ch, err := r.state.Apply(op, key, value)
 		if err != nil {
-			p.conn.Send(proto.ErrFrame(reqID, err))
+			r.send(p, proto.ErrFrame(reqID, err))
 			return
 		}
-		r.broadcast(proto.Marshal(map[string]any{
+		r.broadcastQueued(proto.Marshal(map[string]any{
 			"t": "state.changed", "key": ch.Key, "value": ch.New, "old": ch.Old, "by": p.ID,
-		}), 0)
+		}), 0, "")
 		if reqID != 0 {
-			p.conn.Send(proto.OkFrame(reqID))
+			r.queue(p, proto.OkFrame(reqID), "")
 		}
 	})
 }
@@ -520,26 +679,77 @@ func (r *Room) SetProp(c Conn, reqID int64, key string, value json.RawMessage) {
 			return
 		}
 		if !ValidKey(key) {
-			p.conn.Send(proto.ErrFrame(reqID, proto.Err(proto.ErrUnknownKey, "bad key name")))
+			r.send(p, proto.ErrFrame(reqID, proto.Err(proto.ErrUnknownKey, "bad key name")))
 			return
 		}
 		v, err := DecodeValue(value)
 		if err != nil {
-			p.conn.Send(proto.ErrFrame(reqID, err))
+			r.send(p, proto.ErrFrame(reqID, err))
 			return
 		}
 		if s, ok := v.(string); ok && len(s) > r.cfg.MaxStringBytes {
-			p.conn.Send(proto.ErrFrame(reqID, proto.Err(proto.ErrOutOfLimits, "string is too long")))
+			r.send(p, proto.ErrFrame(reqID, proto.Err(proto.ErrOutOfLimits, "string is too long")))
 			return
 		}
-		if _, exists := p.Props[key]; !exists && len(p.Props) >= 16 {
-			p.conn.Send(proto.ErrFrame(reqID, proto.Err(proto.ErrOutOfLimits, "too many player properties")))
+		if _, exists := p.Props[key]; !exists && len(p.Props) >= r.cfg.MaxPlayerProps {
+			r.send(p, proto.ErrFrame(reqID, proto.Err(proto.ErrOutOfLimits, "too many player properties")))
 			return
 		}
 		p.Props[key] = v
-		r.broadcast(proto.Marshal(map[string]any{"t": "player.props", "id": p.ID, "key": key, "value": v}), 0)
+		r.broadcastQueued(proto.Marshal(map[string]any{"t": "player.props", "id": p.ID, "key": key, "value": v}),
+			0, strconv.Itoa(p.ID)+":"+key)
 		if reqID != 0 {
-			p.conn.Send(proto.OkFrame(reqID))
+			r.queue(p, proto.OkFrame(reqID), "")
 		}
+	})
+}
+
+// syncSnap is one snapshot of a player's synced objects, relayed as is.
+type syncSnap struct {
+	Seq  int64           `json:"seq"`
+	Ts   int64           `json:"ts"`
+	Iv   int             `json:"iv,omitempty"`
+	Objs json.RawMessage `json:"objs"`
+}
+
+// Sync stores the newest snapshot of the player's objects and relays it to the
+// others as {"t":"sync","id":...,"seq":...,"ts":...,"iv":...,"objs":[...]}.
+// The server does not look inside the records: the owner is authoritative,
+// the server only keeps the last snapshot for players who join later.
+func (r *Room) Sync(c Conn, seq, ts int64, iv int, objs json.RawMessage) {
+	r.exec(func() {
+		p := r.byConn(c)
+		if p == nil {
+			return
+		}
+		if len(objs) > r.cfg.MaxSyncBytes {
+			r.send(p, proto.ErrFrame(0, proto.Err(proto.ErrOutOfLimits, "sync snapshot is too big")))
+			return
+		}
+		var arr []json.RawMessage
+		if json.Unmarshal(objs, &arr) != nil {
+			r.send(p, proto.ErrFrame(0, proto.Err(proto.ErrBadType, "sync: objs must be an array")))
+			return
+		}
+		// The snapshot is relayed to every other player, so it is charged to a byte
+		// budget. An empty snapshot ("no objects any more") is always allowed: it
+		// costs nothing and must reach the others, or their copies never go away.
+		if len(arr) > 0 && r.cfg.SyncBytesPerSec > 0 {
+			if !p.takeSync(time.Now(), float64(r.cfg.SyncBytesPerSec), len(objs)) {
+				r.send(p, proto.ErrFrame(0, proto.Err(proto.ErrRateLimit, "sync: too many bytes per second")))
+				return
+			}
+		}
+		if iv < 0 || iv > 60000 {
+			iv = 0
+		}
+		if len(arr) == 0 {
+			p.sync = nil // no objects any more: nothing to show to newcomers
+		} else {
+			p.sync = &syncSnap{Seq: seq, Ts: ts, Iv: iv, Objs: objs}
+		}
+		r.broadcastQueued(proto.Marshal(map[string]any{
+			"t": "sync", "id": p.ID, "seq": seq, "ts": ts, "iv": iv, "objs": objs,
+		}), p.ID, "")
 	})
 }

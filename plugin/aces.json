@@ -77,6 +77,11 @@
 				"returnType": "string"
 			},
 			{
+				"id": "my-name",
+				"expressionName": "MyName",
+				"returnType": "string"
+			},
+			{
 				"id": "ping",
 				"expressionName": "Ping",
 				"returnType": "number"
@@ -416,6 +421,17 @@
 				]
 			},
 			{
+				"id": "player-name-at",
+				"expressionName": "PlayerNameAt",
+				"returnType": "string",
+				"params": [
+					{
+						"id": "index",
+						"type": "number"
+					}
+				]
+			},
+			{
 				"id": "player-name",
 				"expressionName": "PlayerName",
 				"returnType": "string",
@@ -725,6 +741,30 @@
 						"initialValue": "\"\""
 					}
 				]
+			},
+			{
+				"id": "on-entity-created",
+				"scriptName": "OnEntityCreated",
+				"isTrigger": true,
+				"params": [
+					{
+						"id": "tag",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "on-entity-destroyed",
+				"scriptName": "OnEntityDestroyed",
+				"isTrigger": true,
+				"params": [
+					{
+						"id": "tag",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
 			}
 		],
 		"actions": [
@@ -813,7 +853,7 @@
 				"scriptName": "SyncObject",
 				"params": [
 					{
-						"id": "object",
+						"id": "objectClass",
 						"type": "object"
 					},
 					{
@@ -827,7 +867,7 @@
 						"initialValue": "player",
 						"items": [
 							"player",
-							"host"
+							"global"
 						]
 					},
 					{
@@ -838,7 +878,7 @@
 							"none",
 							"position",
 							"positionAngle",
-							"everything"
+							"full"
 						]
 					},
 					{
@@ -847,9 +887,28 @@
 						"initialValue": "true"
 					},
 					{
-						"id": "layer",
+						"id": "layerName",
 						"type": "string",
 						"initialValue": "\"\""
+					}
+				]
+			},
+			{
+				"id": "sync-object-variable",
+				"scriptName": "RegisterObjectVariable",
+				"params": [
+					{
+						"id": "objectClass",
+						"type": "object"
+					},
+					{
+						"id": "variable",
+						"type": "objinstancevar"
+					},
+					{
+						"id": "interpolate",
+						"type": "boolean",
+						"initialValue": "false"
 					}
 				]
 			},
@@ -858,7 +917,7 @@
 				"scriptName": "BindLocalInstance",
 				"params": [
 					{
-						"id": "object",
+						"id": "objectClass",
 						"type": "object"
 					}
 				]
@@ -878,9 +937,13 @@
 					{
 						"id": "ms",
 						"type": "number",
-						"initialValue": "100"
+						"initialValue": "70"
 					}
 				]
+			},
+			{
+				"id": "set-auto-smoothing",
+				"scriptName": "SetAutoSmoothing"
 			},
 			{
 				"id": "set-send-rate-preset",
@@ -914,6 +977,11 @@
 			{
 				"id": "send-rate",
 				"expressionName": "SendRate",
+				"returnType": "number"
+			},
+			{
+				"id": "smoothing",
+				"expressionName": "Smoothing",
 				"returnType": "number"
 			},
 			{

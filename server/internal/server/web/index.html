@@ -323,7 +323,9 @@ function openSocket() {
     log("in", ev.data);
     let m = null;
     try { m = JSON.parse(ev.data); } catch (e) { return; }
-    onMsg(m);
+    // сервер склеивает частые сообщения в {"t":"batch","items":[...]}
+    if (m.t === "batch" && Array.isArray(m.items)) m.items.forEach(onMsg);
+    else onMsg(m);
   };
   ws.onerror = () => log("err", "ошибка WebSocket (сервер недоступен?)");
   ws.onclose = (ev) => {

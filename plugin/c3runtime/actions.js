@@ -47,14 +47,29 @@
 			this._register(obj, owner, slot, mask);
 		},
 		UnregisterObject(obj) { this._unregister(obj); },
-		SetSmoothing(ms) { this._smoothMs = Math.max(0, Number(ms) || 0); },
-		SetSendRatePreset(preset) { this._setSendRate([58, 30, 15][preset] || 30); },
+		// Manual smoothing time in ms ("Set smoothing"). 0 disables smoothing.
+		SetSmoothing(ms) { this._smoothAuto = false; this._smoothMs = Math.max(0, Number(ms) || 0); },
+		// Like the checkbox in the server test client: 1.4 x the send interval, 70..300 ms.
+		SetAutoSmoothing() { this._smoothAuto = true; },
+		// The "preset" combo arrives as the index of the item ("fast","medium","slow");
+		// the item id is accepted too.
+		SetSendRatePreset(preset)
+		{
+			const id = this._pickCombo(["fast", "medium", "slow"], preset, "medium");
+			this._setSendRate({ fast: 58, medium: 30, slow: 15 }[id] || 30);
+		},
 		SetSendRateCustom(hz) { this._setSendRate(hz); },
 
 		// ---- the simple object sync API ----
 		SyncObject(obj, tag, scope, transform, interpolate, layer)
 		{
 			this._syncObject(obj, tag, scope, transform, interpolate, layer);
+		},
+		// GamePush: "Register object variable for sync" - an instance variable of a
+		// registered object joins the sync (interpolate = smooth numeric changes).
+		RegisterObjectVariable(obj, variable, interpolate)
+		{
+			this._registerObjectVariable(obj, variable, interpolate);
 		},
 		BindLocalInstance(obj) { this._bindLocalInstance(obj); },
 		StartSync() { this._startSync(); },

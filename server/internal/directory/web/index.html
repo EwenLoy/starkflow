@@ -37,6 +37,7 @@
 	        border:1px solid var(--line); border-radius:8px; padding:8px 12px; margin-bottom:6px; }
 	.room .node { color:var(--dim); font-size:12px; }
 	.kick { margin-left:auto; color:#ffb3c0; }
+	.kick.armed { color:var(--warn); border-color:var(--warn); font-weight:600; }
 	#rooms h2 { font-size:13px; color:var(--dim); text-transform:uppercase; }
 </style>
 </head>
@@ -63,6 +64,11 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
 	({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 let token = localStorage.getItem("sf-admin-token") || "";
+let lastNodes = [];      // последний ответ /api/nodes — чтобы перерисовать без запроса
+let armedRoom = null;    // комната, подтверждённая первым кликом по «Кикнуть»
+let armedAt = 0;
+const ARM_MS = 5000;     // сколько ждём второй клик
+const isArmed = (key) => armedRoom === key && Date.now() - armedAt < ARM_MS;
 $("token").value = token;
 $("save").onclick = () => {
 	token = $("token").value.trim();
@@ -92,7 +98,8 @@ async function refresh() {
 	try {
 		const data = await api("/api/nodes");
 		showError("");
-		render(data.nodes);
+		lastNodes = data.nodes;
+		render(lastNodes);
 	} catch (e) {
 		showError(e.message);
 	}
@@ -127,11 +134,12 @@ function render(nodes) {
 		tb.appendChild(tr);
 
 		for (const rm of n.roomList) {
+			const key = rm.app + ":" + rm.id;
 			roomsHtml += `<div class="room">
 				<b>${esc(rm.name || rm.id)}</b>
 				<span class="dim">${esc(rm.id)} · ${rm.players}/${rm.maxPlayers}</span>
 				<span class="node">${esc(short(n.url))}</span>
-				<button class="kick" data-url="${esc(n.url)}" data-room="${esc(rm.app + ":" + rm.id)}">Кикнуть</button>
+				<button class="kick${isArmed(key) ? " armed" : ""}" data-url="${esc(n.url)}" data-room="${esc(key)}">${isArmed(key) ? "Кикнуть? да" : "Кикнуть"}</button>
 			</div>`;
 		}
 	}
@@ -142,8 +150,14 @@ function render(nodes) {
 		catch (e) { showError(e.message); }
 	});
 	$("rooms").querySelectorAll("button.kick").forEach(b => b.onclick = async () => {
-		if (!confirm("Кикнуть комнату " + b.dataset.room + "?")) return;
-		try { await api("/api/nodes/kick", { url: b.dataset.url, room: b.dataset.room }); refresh(); }
+		const key = b.dataset.room;
+		if (!isArmed(key)) {            // первый клик только взводит кнопку — без диалогов браузера
+			armedRoom = key; armedAt = Date.now();
+			render(lastNodes);
+			return;
+		}
+		armedRoom = null;               // второй клик за 5 секунд — кикаем
+		try { await api("/api/nodes/kick", { url: b.dataset.url, room: key }); refresh(); }
 		catch (e) { showError(e.message); }
 	});
 }

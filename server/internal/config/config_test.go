@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestAddr(t *testing.T) {
 	cases := []struct {
@@ -51,5 +54,24 @@ func TestBadRoomNameMaxKeepsDefault(t *testing.T) {
 	t.Setenv("STARKFLOW_ROOM_NAME_MAX", "not-a-number")
 	if got := Load().MaxRoomNameRunes; got != 32 {
 		t.Fatalf("MaxRoomNameRunes = %d, want the default 32", got)
+	}
+}
+
+func TestBatchAndLimitOverrides(t *testing.T) {
+	t.Setenv("STARKFLOW_SECRET", "test")
+	t.Setenv("STARKFLOW_BATCH_MS", "0")
+	t.Setenv("STARKFLOW_MAX_STRING_BYTES", "8192")
+	t.Setenv("STARKFLOW_MAX_PLAYER_PROPS", "40")
+	t.Setenv("STARKFLOW_SYNC_BYTES_PER_SEC", "0")
+	c := Load()
+	if c.BatchInterval != 0 || c.MaxStringBytes != 8192 || c.MaxPlayerProps != 40 || c.SyncBytesPerSec != 0 {
+		t.Fatalf("got batch=%v string=%d props=%d syncb=%d", c.BatchInterval, c.MaxStringBytes, c.MaxPlayerProps, c.SyncBytesPerSec)
+	}
+	t.Setenv("STARKFLOW_BATCH_MS", "-5")
+	t.Setenv("STARKFLOW_MAX_PLAYER_PROPS", "zero")
+	t.Setenv("STARKFLOW_SYNC_BYTES_PER_SEC", "-1")
+	c = Load()
+	if c.BatchInterval != 40*time.Millisecond || c.MaxPlayerProps != 24 || c.SyncBytesPerSec != 512*1024 {
+		t.Fatalf("bad values must keep defaults, got batch=%v props=%d syncb=%d", c.BatchInterval, c.MaxPlayerProps, c.SyncBytesPerSec)
 	}
 }

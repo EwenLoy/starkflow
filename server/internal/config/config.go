@@ -58,6 +58,15 @@ type Config struct {
 	BatchInterval time.Duration
 	// MaxBatchItems — сколько сообщений клиент может положить в один batch.
 	MaxBatchItems int
+
+	// WebRTC-канал для "sync" (необязательный). RTCPort — UDP-порт, общий для
+	// всех клиентов (STARKFLOW_RTC_PORT); 0 — WebRTC выключен и не анонсируется
+	// в welcome. RTCPublicIPs (STARKFLOW_RTC_PUBLIC_IP, через запятую) — внешний
+	// адрес сервера для ICE, если сервер за NAT или в Docker. RTCICEServers
+	// (STARKFLOW_RTC_ICE, через запятую, "none" — пусто) уходят клиенту в welcome.
+	RTCPort       int
+	RTCPublicIPs  []string
+	RTCICEServers []string
 }
 
 // Load returns defaults overridden by environment variables:
@@ -65,7 +74,8 @@ type Config struct {
 // STARKFLOW_ORIGINS (comma separated),
 // STARKFLOW_ROOM_NAME_MAX (max room name length in characters),
 // STARKFLOW_BATCH_MS, STARKFLOW_MAX_STRING_BYTES, STARKFLOW_MAX_PLAYER_PROPS,
-// STARKFLOW_MAX_MSG_BYTES, STARKFLOW_MAX_SYNC_BYTES, STARKFLOW_SYNC_BYTES_PER_SEC.
+// STARKFLOW_MAX_MSG_BYTES, STARKFLOW_MAX_SYNC_BYTES, STARKFLOW_SYNC_BYTES_PER_SEC,
+// STARKFLOW_RTC_PORT, STARKFLOW_RTC_PUBLIC_IP, STARKFLOW_RTC_ICE.
 func Load() Config {
 	c := Config{
 		Mode:              "node",
@@ -92,6 +102,7 @@ func Load() Config {
 		SyncBytesPerSec:   512 * 1024,
 		BatchInterval:     40 * time.Millisecond,
 		MaxBatchItems:     64,
+		RTCICEServers:     []string{"stun:stun.l.google.com:19302"},
 	}
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("STARKFLOW_MODE"))); v != "" {
 		c.Mode = v
@@ -136,6 +147,19 @@ func Load() Config {
 	if v, ok := envInt("STARKFLOW_SYNC_BYTES_PER_SEC", 0, 64<<20); ok {
 		c.SyncBytesPerSec = v
 	}
+	if v, ok := envInt("STARKFLOW_RTC_PORT", 1, 65535); ok {
+		c.RTCPort = v
+	}
+	if v := os.Getenv("STARKFLOW_RTC_PUBLIC_IP"); v != "" {
+		c.RTCPublicIPs = splitList(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("STARKFLOW_RTC_ICE")); v != "" {
+		if strings.EqualFold(v, "none") {
+			c.RTCICEServers = nil
+		} else {
+			c.RTCICEServers = splitList(v)
+		}
+	}
 	if int64(c.MaxSyncBytes)+1024 > c.MaxMsgBytes {
 		c.MaxMsgBytes = int64(c.MaxSyncBytes) + 1024 // a full snapshot must fit into one frame
 	}
@@ -164,6 +188,17 @@ func Load() Config {
 		c.AdminToken = v
 	}
 	return c
+}
+
+// splitList splits a comma separated value, dropping empty items.
+func splitList(v string) []string {
+	var out []string
+	for _, s := range strings.Split(v, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // envInt reads an integer variable; values outside [lo, hi] are ignored with a warning.

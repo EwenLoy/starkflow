@@ -25,6 +25,13 @@ type Conn interface {
 	Close()
 }
 
+// UnreliableConn is a Conn that may also have an unreliable side channel
+// (WebRTC). SendUnreliable must never block; false = the channel is not open
+// or congested, and the room sends the frame over Send as usual.
+type UnreliableConn interface {
+	SendUnreliable(b []byte) bool
+}
+
 // Options are chosen when the room is created.
 type Options struct {
 	MaxPlayers int           // 0 = server default
@@ -68,6 +75,10 @@ type Player struct {
 	// Последний снимок объектного синка игрока ("sync"): его получает каждый,
 	// кто входит в комнату, чтобы сразу увидеть объекты. nil — снимков не было.
 	sync *syncSnap
+	// syncSeq — номер последнего принятого снимка. По WebRTC снимки приходят не
+	// по порядку: опоздавший (seq не больше) не пересылается и не сохраняется,
+	// иначе он мог бы прийти после пустого objs: [] и «оживить» объекты.
+	syncSeq int64
 
 	// Бюджет объектного синка: байты в секунду (см. cfg.SyncBytesPerSec). Свой
 	// таймер, чтобы не мешать bucket лимита записей стейта.
@@ -522,6 +533,7 @@ func (r *Room) doJoin(req JoinReq) *proto.Error {
 		p.conn = req.Conn
 		p.suspendedAt = time.Time{}
 		p.dropQueue() // room.joined below carries the full snapshot
+		p.syncSeq = 0 // a reloaded page numbers its snapshots from 1 again
 		resumed = true
 	} else {
 		if !r.passwordOK(req.Password) {
@@ -722,6 +734,9 @@ func (r *Room) Sync(c Conn, seq, ts int64, iv int, objs json.RawMessage) {
 		if p == nil {
 			return
 		}
+		if seq > 0 && seq <= p.syncSeq {
+			return // late (reordered) snapshot: a newer one is already relayed
+		}
 		if len(objs) > r.cfg.MaxSyncBytes {
 			r.send(p, proto.ErrFrame(0, proto.Err(proto.ErrOutOfLimits, "sync snapshot is too big")))
 			return
@@ -743,13 +758,28 @@ func (r *Room) Sync(c Conn, seq, ts int64, iv int, objs json.RawMessage) {
 		if iv < 0 || iv > 60000 {
 			iv = 0
 		}
+		if seq > 0 {
+			p.syncSeq = seq
+		}
 		if len(arr) == 0 {
 			p.sync = nil // no objects any more: nothing to show to newcomers
 		} else {
 			p.sync = &syncSnap{Seq: seq, Ts: ts, Iv: iv, Objs: objs}
 		}
-		r.broadcastQueued(proto.Marshal(map[string]any{
+		frame := proto.Marshal(map[string]any{
 			"t": "sync", "id": p.ID, "seq": seq, "ts": ts, "iv": iv, "objs": objs,
-		}), p.ID, "")
+		})
+		// Each receiver gets it ONE way: its WebRTC channel if open, else the
+		// WebSocket batch. The empty snapshot always goes over the WebSocket:
+		// losing it would leave copies of the objects forever.
+		for id, op := range r.players {
+			if op.conn == nil || id == p.ID {
+				continue
+			}
+			if uc, ok := op.conn.(UnreliableConn); ok && len(arr) > 0 && uc.SendUnreliable(frame) {
+				continue
+			}
+			r.queue(op, frame, "")
+		}
 	})
 }

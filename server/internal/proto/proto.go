@@ -90,6 +90,10 @@ type ClientMsg struct {
 
 	// batch: several client messages in one WebSocket frame
 	Items []json.RawMessage `json:"items"`
+
+	// rtc.offer: the client's SDP offer; rtc.ice: one ICE candidate (RTCIceCandidateInit)
+	Sdp       string          `json:"sdp"`
+	Candidate json.RawMessage `json:"candidate"`
 }
 
 // Marshal encodes a server message.

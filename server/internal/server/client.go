@@ -4,14 +4,24 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pion/webrtc/v4"
 
 	"starkflow/internal/auth"
 	"starkflow/internal/proto"
 	"starkflow/internal/room"
+	"starkflow/internal/rtc"
 )
+
+// maxRTCOffers limits how many WebRTC channels one connection may set up: the
+// plugin makes one, a reconnect is a new connection anyway.
+const maxRTCOffers = 4
+
+// maxSDP is the largest offer accepted (a DataChannel-only offer is ~1 KB).
+const maxSDP = 16 * 1024
 
 // client is one WebSocket connection. It implements room.Conn.
 type client struct {
@@ -30,6 +40,32 @@ type client struct {
 	rm     *room.Room
 	tok    float64
 	last   time.Time
+	offers int // rtc.offer received
+
+	// rmA mirrors rm for the WebRTC goroutine: snapshots from the DataChannel
+	// do not come through the read goroutine.
+	rmA  atomic.Pointer[room.Room]
+	peer atomic.Pointer[rtc.Peer] // nil = no WebRTC channel
+}
+
+// rtcLimit is the rate limit of one WebRTC channel, touched only by its
+// message goroutine (a new channel gets a new one: no sharing between them).
+type rtcLimit struct {
+	tok  float64
+	last time.Time
+}
+
+// setRoom is the only place rm changes.
+func (c *client) setRoom(rm *room.Room) {
+	c.rm = rm
+	c.rmA.Store(rm)
+}
+
+// SendUnreliable sends a "sync" frame over the WebRTC channel if it is open
+// (room.UnreliableConn). false = send it over the WebSocket.
+func (c *client) SendUnreliable(b []byte) bool {
+	p := c.peer.Load()
+	return p != nil && p.Send(b)
 }
 
 // Send queues a frame without blocking. A client that cannot keep up is dropped.
@@ -161,8 +197,9 @@ func (c *client) handleBatch(m *proto.ClientMsg) {
 func (c *client) cleanup() {
 	if c.rm != nil {
 		c.rm.Disconnect(c)
-		c.rm = nil
+		c.setRoom(nil)
 	}
+	c.stopRTC()
 	c.Close()
 }
 
@@ -211,7 +248,7 @@ func (c *client) handle(m *proto.ClientMsg) {
 			return
 		}
 		c.rm.Leave(c)
-		c.rm = nil
+		c.setRoom(nil)
 		if m.ID != 0 {
 			c.Send(proto.OkFrame(m.ID))
 		}
@@ -236,6 +273,12 @@ func (c *client) handle(m *proto.ClientMsg) {
 		case "sync":
 			c.rm.Sync(c, m.Seq, m.Ts, m.Iv, m.Objs)
 		}
+	case "rtc.offer":
+		c.onRTCOffer(m)
+	case "rtc.ice":
+		c.onRTCIce(m)
+	case "rtc.close":
+		c.stopRTC()
 	default:
 		c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrBadMessage, "unknown message type: "+m.T)))
 	}
@@ -258,7 +301,7 @@ func (c *client) onHello(m *proto.ClientMsg) {
 	c.name = cleanName(m.Name)
 	c.hello = true
 	_ = c.conn.SetReadDeadline(time.Now().Add(cfg.IdleTimeout))
-	c.Send(proto.Marshal(map[string]any{
+	welcome := map[string]any{
 		"t":           "welcome",
 		"userId":      uid,
 		"token":       auth.Sign(cfg.Secret, uid, time.Now()),
@@ -276,7 +319,102 @@ func (c *client) onHello(m *proto.ClientMsg) {
 		"sync":    true,
 		"maxSync": cfg.MaxSyncBytes,
 		"batchMs": cfg.BatchInterval.Milliseconds(),
-	}))
+	}
+	if c.srv.rtc != nil {
+		// the client may open the WebRTC channel for "sync" (rtc.offer)
+		welcome["rtc"] = true
+		ice := []any{}
+		if len(cfg.RTCICEServers) > 0 {
+			ice = append(ice, map[string]any{"urls": cfg.RTCICEServers})
+		}
+		welcome["iceServers"] = ice
+	}
+	c.Send(proto.Marshal(welcome))
+}
+
+// ---- WebRTC channel for "sync" ---------------------------------------------
+
+// onRTCOffer answers the client's offer. The previous channel, if any, is dropped.
+func (c *client) onRTCOffer(m *proto.ClientMsg) {
+	if c.srv.rtc == nil {
+		c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrBadMessage, "WebRTC is disabled on this server")))
+		return
+	}
+	if m.Sdp == "" || len(m.Sdp) > maxSDP {
+		c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrBadMessage, "rtc.offer: bad sdp")))
+		return
+	}
+	c.offers++
+	if c.offers > maxRTCOffers {
+		c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrRateLimit, "rtc.offer: too many offers")))
+		return
+	}
+	c.stopRTC()
+	var self atomic.Pointer[rtc.Peer]
+	lim := &rtcLimit{tok: c.srv.cfg.MsgBurst, last: time.Now()}
+	p, answer, err := c.srv.rtc.Answer(m.Sdp, rtc.Handlers{
+		Candidate: func(ci webrtc.ICECandidateInit) {
+			c.Send(proto.Marshal(map[string]any{"t": "rtc.ice", "candidate": ci}))
+		},
+		Message: func(b []byte) { c.onRTCMessage(lim, b) },
+		Closed: func() {
+			// failed or closed by the client's side: tell it to stop using the channel
+			if p := self.Load(); p != nil && c.peer.CompareAndSwap(p, nil) {
+				c.Send(proto.Marshal(map[string]any{"t": "rtc.close"}))
+			}
+		},
+	})
+	if err != nil {
+		c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrBadMessage, "rtc.offer: "+err.Error())))
+		return
+	}
+	self.Store(p)
+	c.peer.Store(p)
+	c.Send(proto.Marshal(map[string]any{"t": "rtc.answer", "sdp": answer}))
+}
+
+func (c *client) onRTCIce(m *proto.ClientMsg) {
+	p := c.peer.Load()
+	if p == nil || len(m.Candidate) == 0 {
+		return // late candidate of a dropped channel: nothing to do
+	}
+	var ci webrtc.ICECandidateInit
+	if json.Unmarshal(m.Candidate, &ci) != nil {
+		c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrBadMessage, "rtc.ice: bad candidate")))
+		return
+	}
+	_ = p.AddCandidate(ci) // a candidate we cannot use is not an error for the client
+}
+
+// stopRTC drops the channel; "sync" goes over the WebSocket again.
+func (c *client) stopRTC() {
+	if p := c.peer.Swap(nil); p != nil {
+		p.Close()
+	}
+}
+
+// onRTCMessage handles one message from the DataChannel. Only "sync" is
+// accepted; it goes through the same Room.Sync checks as from the WebSocket,
+// errors are sent over the WebSocket.
+func (c *client) onRTCMessage(lim *rtcLimit, data []byte) {
+	cfg := c.srv.cfg
+	now := time.Now()
+	lim.tok += now.Sub(lim.last).Seconds() * cfg.MsgRatePerSec
+	lim.last = now
+	if lim.tok > cfg.MsgBurst {
+		lim.tok = cfg.MsgBurst
+	}
+	if lim.tok < 1 {
+		return // over the limit: an unreliable snapshot is simply dropped
+	}
+	lim.tok--
+	var m proto.ClientMsg
+	if json.Unmarshal(data, &m) != nil || m.T != "sync" {
+		return
+	}
+	if rm := c.rmA.Load(); rm != nil {
+		rm.Sync(c, m.Seq, m.Ts, m.Iv, m.Objs)
+	}
 }
 
 func (c *client) onJoin(m *proto.ClientMsg) {
@@ -326,5 +464,5 @@ func (c *client) onJoin(m *proto.ClientMsg) {
 		c.Send(proto.ErrFrame(m.ID, err))
 		return
 	}
-	c.rm = rm
+	c.setRoom(rm)
 }

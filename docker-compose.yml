@@ -14,9 +14,14 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+      # WebRTC-канал для sync (необязательно): тот же номер, что в STARKFLOW_RTC_PORT
+      # - "40000:40000/udp"
     environment:
       STARKFLOW_ADDR: ":8080"
       STARKFLOW_SECRET: "change-me-to-a-long-random-string"
+      # WebRTC: UDP-порт и внешний IP сервера (в Docker без него клиент не достучится).
+      # STARKFLOW_RTC_PORT: "40000"
+      # STARKFLOW_RTC_PUBLIC_IP: "1.2.3.4"
       # Разрешённые Origin через запятую; пусто = разрешено всё (годится для разработки).
       # STARKFLOW_ORIGINS: "https://example.com,http://1.2.3.4:8080"
       # Максимальная длина названия комнаты в символах (любой язык).

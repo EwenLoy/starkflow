@@ -24,6 +24,7 @@ import (
 	"starkflow/internal/directory"
 	"starkflow/internal/proto"
 	"starkflow/internal/room"
+	"starkflow/internal/rtc"
 )
 
 //go:embed web/index.html
@@ -37,6 +38,8 @@ type Server struct {
 	mu       sync.Mutex
 	rooms    map[string]*room.Room
 	draining atomic.Bool
+
+	rtc *rtc.Engine // nil = WebRTC is off (no STARKFLOW_RTC_PORT, or the port failed)
 }
 
 // New creates a server.
@@ -46,6 +49,16 @@ func New(cfg config.Config) *Server {
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
 		CheckOrigin:     s.checkOrigin,
+	}
+	if cfg.RTCPort > 0 {
+		e, err := rtc.New(cfg.RTCPort, cfg.RTCPublicIPs)
+		if err != nil {
+			// not fatal: the clients simply stay on the WebSocket
+			slog.Error("WebRTC is disabled", "err", err)
+		} else {
+			s.rtc = e
+			slog.Info("WebRTC sync channel", "udpPort", cfg.RTCPort, "publicIPs", cfg.RTCPublicIPs)
+		}
 	}
 	return s
 }

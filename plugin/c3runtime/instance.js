@@ -51,6 +51,21 @@
 	const INTERP_MIN = 80;				// ms, auto interpolation delay is kept in 80..300
 	const INTERP_MAX = 300;
 	const TELEPORT = 1000;				// px: a bigger jump is applied at once, without smoothing
+	// A snapshot older than the newest one (lower seq) is late, not a restart of the
+	// sender, if it is close in both seq and time: the unreliable channel reorders.
+	const STALE_SEQ = SNAP_BUFFER;
+	const STALE_MS = 2000;
+
+	// ---- WebRTC (stage 4) -------------------------------------------------------
+	// A server with welcome.rtc opens an unreliable, unordered DataChannel "sync"
+	// next to the WebSocket (signaling goes over the WebSocket: rtc.offer/answer/ice).
+	// Only the "sync" snapshots ride it — a lost one is simply skipped instead of
+	// holding back everything behind it, as TCP does. Everything else, and the empty
+	// "no objects any more" snapshot, stays on the WebSocket. No channel within
+	// RTC_TIMEOUT, or the channel closed: sync goes over the WebSocket, as before.
+	const RTC_TIMEOUT = 3000;
+	const RTC_BUFFERED_MAX = 64 * 1024;	// more waiting in the channel = congested, use the WebSocket
+	const RTC_ICE = [{ urls: "stun:stun.l.google.com:19302" }];	// when the server gives none
 	const F = { X: 1, Y: 2, Z: 4, ANGLE: 8, SIZE: 16, MIRROR: 32, ANIM: 64, FRAME: 128, VISIBLE: 256, OPACITY: 512, TAG: 1024, VARS: 2048 };
 
 	// ---- the simple object sync API ---------------------------------------
@@ -183,6 +198,14 @@
 			this._probedDir = "";				// directory the last measurement belongs to
 			this._probedAt = 0;
 			this._probedRegion = "";
+			this._rtcPc = null;				// RTCPeerConnection of the current socket
+			this._rtcDc = null;				// the "sync" DataChannel, set only while open
+			this._rtcTimer = null;
+			this._rtcRemote = false;			// the answer is applied (candidates can be added)
+			this._rtcIce = [];				// server candidates that came before the answer
+			this._rtcMaxMsg = 0;			// largest message the channel takes
+			this._rtcGaveUp = false;			// did not connect once: do not try again in this session
+			this._rtcWarned = false;
 
 			// The simple API: what to sync, what is mine, what belongs to other players.
 			this._defs = new Map();			// tag -> definition (object type, fields, scope)
@@ -609,6 +632,7 @@
 		_closeSocket()
 		{
 			this._stopPing();
+			this._rtcStop(false);
 			if (this._retryTimer)
 			{
 				clearTimeout(this._retryTimer);
@@ -637,6 +661,7 @@
 		_onClose(ev)
 		{
 			this._stopPing();
+			this._rtcStop(false);
 			this._ws = null;
 			if (!this._intentional && this._autoReconnect && !this._noReconnect)
 			{
@@ -763,6 +788,195 @@
 			return true;
 		}
 
+		// ---- WebRTC channel for "sync" ---------------------------------
+
+		// _sendUnreliable sends over the DataChannel if it is open and not congested;
+		// false = the caller sends over the WebSocket instead.
+		_sendUnreliable(obj)
+		{
+			const dc = this._rtcDc;
+			if (!dc || dc.readyState !== "open" || dc.bufferedAmount > RTC_BUFFERED_MAX)
+				return false;
+			const text = JSON.stringify(obj);
+			if (utf8Len(text) > this._rtcMaxMsg)
+				return false;
+			try { dc.send(text); }
+			catch (e) { return false; }
+			this._log("debug", "=>", text);
+			return true;
+		}
+
+		// The client always makes the offer, the server only answers. Any failure
+		// leaves the WebSocket path untouched.
+		_rtcStart(m)
+		{
+			this._rtcStop(false);
+			if (this._rtcGaveUp)
+				return;
+			if (typeof RTCPeerConnection !== "function")
+			{
+				if (!this._rtcWarned)
+					this._log("info", "WebRTC is not available here (worker mode?), sync stays on the WebSocket");
+				this._rtcWarned = true;
+				return;
+			}
+			const ice = Array.isArray(m.iceServers) ? m.iceServers : RTC_ICE;
+			let pc, dc;
+			try
+			{
+				pc = new RTCPeerConnection({ iceServers: ice });
+				dc = pc.createDataChannel("sync", { ordered: false, maxRetransmits: 0 });
+			}
+			catch (e)
+			{
+				this._log("warn", "cannot start WebRTC, sync stays on the WebSocket:", e);
+				if (pc) { try { pc.close(); } catch (e2) { /* ignore */ } }
+				return;
+			}
+			this._rtcPc = pc;
+			this._rtcRemote = false;
+			this._rtcIce = [];
+			pc.onicecandidate = (ev) =>
+			{
+				if (this._rtcPc !== pc || !ev.candidate)
+					return;
+				this._send({ t: "rtc.ice", candidate: ev.candidate.toJSON() });
+			};
+			pc.onconnectionstatechange = () =>
+			{
+				if (this._rtcPc === pc && pc.connectionState === "failed")
+				{
+					this._log("warn", "WebRTC connection failed, sync goes over the WebSocket");
+					this._rtcStop(true);
+				}
+			};
+			dc.onopen = () =>
+			{
+				if (this._rtcPc !== pc)
+					return;
+				if (this._rtcTimer)
+				{
+					clearTimeout(this._rtcTimer);
+					this._rtcTimer = null;
+				}
+				const mm = pc.sctp && pc.sctp.maxMessageSize;
+				this._rtcMaxMsg = mm > 0 ? Math.min(mm, 256 * 1024) : 64 * 1024;
+				this._rtcDc = dc;
+				this._log("info", "sync goes over WebRTC");
+			};
+			dc.onclose = () =>
+			{
+				if (this._rtcDc !== dc)
+					return;
+				this._log("warn", "WebRTC channel closed, sync goes over the WebSocket");
+				this._rtcStop(true);
+			};
+			dc.onmessage = (ev) =>
+			{
+				if (this._rtcPc === pc)
+					this._onRtcMessage(ev.data);
+			};
+			this._rtcTimer = setTimeout(() =>
+			{
+				this._rtcTimer = null;
+				if (this._rtcPc !== pc || this._rtcDc)
+					return;
+				this._log("info", "WebRTC did not connect in " + RTC_TIMEOUT + " ms, sync stays on the WebSocket");
+				this._rtcGaveUp = true;
+				this._rtcStop(true);
+			}, RTC_TIMEOUT);
+			pc.createOffer()
+				.then((offer) => this._rtcPc === pc ? pc.setLocalDescription(offer) : null)
+				.then(() =>
+				{
+					if (this._rtcPc === pc)
+						this._send({ t: "rtc.offer", sdp: pc.localDescription.sdp });
+				})
+				.catch((e) =>
+				{
+					if (this._rtcPc !== pc)
+						return;
+					this._log("warn", "WebRTC offer failed, sync stays on the WebSocket:", e);
+					this._rtcStop(true);
+				});
+		}
+
+		// _rtcStop drops the channel; notify tells the server to drop its side as well.
+		_rtcStop(notify)
+		{
+			if (this._rtcTimer)
+			{
+				clearTimeout(this._rtcTimer);
+				this._rtcTimer = null;
+			}
+			const pc = this._rtcPc;
+			this._rtcPc = null;			// makes the old handlers ignore everything
+			this._rtcDc = null;
+			this._rtcRemote = false;
+			this._rtcIce = [];
+			if (!pc)
+				return;
+			try { pc.close(); } catch (e) { /* ignore */ }
+			if (notify && this._ws && this._ws.readyState === 1)
+				this._send({ t: "rtc.close" });
+		}
+
+		_onRtcAnswer(m)
+		{
+			const pc = this._rtcPc;
+			if (!pc || typeof m.sdp !== "string")
+				return;
+			pc.setRemoteDescription({ type: "answer", sdp: m.sdp })
+				.then(() =>
+				{
+					if (this._rtcPc !== pc)
+						return;
+					this._rtcRemote = true;
+					for (const c of this._rtcIce)
+						pc.addIceCandidate(c).catch((e) => this._log("debug", "ICE candidate rejected:", e));
+					this._rtcIce = [];
+				})
+				.catch((e) =>
+				{
+					if (this._rtcPc !== pc)
+						return;
+					this._log("warn", "bad WebRTC answer, sync stays on the WebSocket:", e);
+					this._rtcStop(true);
+				});
+		}
+
+		_onRtcIce(m)
+		{
+			const pc = this._rtcPc;
+			if (!pc || !m.candidate || typeof m.candidate !== "object")
+				return;
+			if (!this._rtcRemote)
+			{
+				this._rtcIce.push(m.candidate);
+				return;
+			}
+			pc.addIceCandidate(m.candidate).catch((e) => this._log("debug", "ICE candidate rejected:", e));
+		}
+
+		// Only "sync" is accepted from the DataChannel; a batch of them is unpacked.
+		_onRtcMessage(data)
+		{
+			if (typeof data !== "string")
+				return;
+			let m;
+			try { m = JSON.parse(data); }
+			catch (e) { this._log("warn", "bad WebRTC message from server"); return; }
+			this._log("debug", "<=", data);
+			const list = (m && m.t === "batch" && Array.isArray(m.items)) ? m.items : [m];
+			for (const it of list)
+			{
+				if (!it || it.t !== "sync")
+					continue;
+				try { this._onSync(it.id, it, false); }
+				catch (e) { this._log("error", "failed to handle a WebRTC sync:", e); }
+			}
+		}
+
 		_join(room, create, maxPlayers, emptyTTL, password)
 		{
 			const msg = { t: "room.join", room: String(room), create: create };
@@ -886,6 +1100,9 @@
 					break;
 				case "err": this._onError(m); break;
 				case "ok": break;
+				case "rtc.answer": this._onRtcAnswer(m); break;
+				case "rtc.ice": this._onRtcIce(m); break;
+				case "rtc.close": this._rtcStop(false); break;
 				default: this._log("debug", "unknown message type", m.t);
 			}
 		}
@@ -912,6 +1129,11 @@
 			if (Number(m.maxSync) > 0)
 				this._maxSync = Number(m.maxSync);
 			this._srvBatchMs = Math.max(0, Number(m.batchMs) || 0);
+			// started right away, not on join: ICE has time while the game gets going
+			if (m.rtc === true && this._srvSync)
+				this._rtcStart(m);
+			else
+				this._rtcStop(false);
 			this._attempt = 0;
 			this._status = this._lastJoin ? "reconnecting" : "connected";
 			this._trigger(this._cnd("OnConnected"));
@@ -1292,7 +1514,10 @@
 				return;
 			this._tokens--;
 			this._syncLast = mine.length ? text : "";
-			this._queue({ t: "sync", seq: ++this._syncSeq, ts: Math.round(now), iv: Math.round(this._sendInterval), objs: mine });
+			const msg = { t: "sync", seq: ++this._syncSeq, ts: Math.round(now), iv: Math.round(this._sendInterval), objs: mine };
+			// the empty snapshot removes our objects for the others: it must not get lost
+			if (!mine.length || !this._sendUnreliable(msg))
+				this._queue(msg);
 		}
 
 		_flushSync(now)
@@ -1384,6 +1609,11 @@
 			const now = this._now();
 			const ts = fin(s.ts), seq = fin(s.seq);
 			let o = this._snaps.get(owner);
+			// A late snapshot (the unreliable channel reorders, and a switch between the
+			// WebSocket and WebRTC can too) is dropped: a newer one is already in the buffer.
+			const newest = o && o.buf[o.buf.length - 1];
+			if (o && !reset && newest && seq <= o.seq && o.seq - seq <= STALE_SEQ && newest.ts - ts >= 0 && newest.ts - ts <= STALE_MS)
+				return;
 			// a new buffer: first snapshot, a resume, or the sender started again (seq went back)
 			if (!o || reset || seq <= o.seq)
 			{

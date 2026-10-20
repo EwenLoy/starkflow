@@ -196,6 +196,11 @@
 						"id": "matching",
 						"type": "combo",
 						"items": ["fillroom", "randommatching", "serialmatching"]
+					},
+					{
+						"id": "lobby",
+						"type": "string",
+						"initialValue": "\"\""
 					}
 				]
 			},

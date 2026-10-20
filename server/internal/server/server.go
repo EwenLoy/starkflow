@@ -251,15 +251,21 @@ func (s *Server) join(app, ref string, create bool, opts room.Options, req room.
 	return nil, proto.Err(proto.ErrRoomClosed, "room is closing, try again")
 }
 
-// list returns up to 100 rooms of one app.
-func (s *Server) list(app string) []map[string]any {
+// list returns up to 100 rooms of one app. lobby != "" keeps only the rooms
+// of that lobby; "" lists every room.
+func (s *Server) list(app, lobby string) []map[string]any {
 	prefix := app + ":"
 	s.mu.Lock()
 	infos := make([]room.Info, 0, len(s.rooms))
 	for k, r := range s.rooms {
-		if strings.HasPrefix(k, prefix) {
-			infos = append(infos, r.Info())
+		if !strings.HasPrefix(k, prefix) {
+			continue
 		}
+		in := r.Info()
+		if lobby != "" && in.Lobby != lobby {
+			continue
+		}
+		infos = append(infos, in)
 	}
 	s.mu.Unlock()
 	sort.Slice(infos, func(i, j int) bool {
@@ -273,10 +279,14 @@ func (s *Server) list(app string) []map[string]any {
 	}
 	out := make([]map[string]any, 0, len(infos))
 	for _, in := range infos {
-		out = append(out, map[string]any{
+		m := map[string]any{
 			"id": in.ID, "room": in.Name, "players": in.Players, "maxPlayers": in.MaxPlayers,
 			"locked": in.Locked,
-		})
+		}
+		if in.Lobby != "" {
+			m["lobby"] = in.Lobby
+		}
+		out = append(out, m)
 	}
 	return out
 }

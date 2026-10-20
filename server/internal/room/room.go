@@ -43,6 +43,7 @@ type Options struct {
 	Schema     map[string]proto.RuleDef
 	Init       map[string]any
 	Password   string // optional password: only its salted hash is kept
+	Lobby      string // optional matchmaking lobby, "" = none
 }
 
 // JoinReq is a request to enter (or re-enter) the room.
@@ -60,7 +61,8 @@ type Info struct {
 	Name       string
 	Players    int
 	MaxPlayers int
-	Locked     bool // true if a password is needed to enter
+	Locked     bool   // true if a password is needed to enter
+	Lobby      string // "" = the room is in no lobby
 }
 
 // Player is a participant. A player whose connection dropped stays in the
@@ -100,6 +102,9 @@ type Room struct {
 	Key  string // app-qualified key (app:id), unique on the server
 	ID   string // короткий хэш комнаты: одинаковые имена не мешают друг другу
 	Name string // отображаемое имя, любой язык
+	// Лобби — необязательная метка для матчмейкинга: room.list можно попросить
+	// только комнаты одного лобби. Пусто — комната без лобби.
+	Lobby string
 
 	cfg        config.Config
 	created    time.Time
@@ -161,6 +166,7 @@ func New(key, id, name string, opts Options, cfg config.Config, onClose func(*Ro
 		Key:        key,
 		ID:         id,
 		Name:       name,
+		Lobby:      opts.Lobby,
 		cfg:        cfg,
 		created:    time.Now(),
 		state:      st,
@@ -190,6 +196,7 @@ func (r *Room) Info() Info {
 		Players:    int(r.count.Load()),
 		MaxPlayers: r.maxPlayers,
 		Locked:     len(r.passHash) > 0,
+		Lobby:      r.Lobby,
 	}
 }
 

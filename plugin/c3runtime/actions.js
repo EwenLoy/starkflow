@@ -30,7 +30,7 @@
 		// Matchmaking: enter a room that still has a free slot (not locked), otherwise
 		// create one with this name. The choice is made from the room list, no new
 		// protocol: "matching" is the index of fillroom / randommatching / serialmatching.
-		JoinRandomOrCreateRoom(room, maxPlayers, emptyTTL, matching) { this._joinRandom(room, maxPlayers, emptyTTL, matching); },
+		JoinRandomOrCreateRoom(room, maxPlayers, emptyTTL, matching, lobby) { this._joinRandom(room, maxPlayers, emptyTTL, matching, lobby); },
 		JoinRoomWithPassword(room, password) { this._join(room, false, 0, -1, password); },
 		JoinOrCreateRoomWithPassword(room, password, maxPlayers, emptyTTL) { this._join(room, true, maxPlayers, emptyTTL, password); },
 		LeaveRoom() { this._leave(); },

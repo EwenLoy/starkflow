@@ -62,15 +62,18 @@ type ClientMsg struct {
 	Name  string `json:"name"`
 
 	// room.join
-	Room       string             `json:"room"`
-	Create     bool               `json:"create"`
-	Password   string             `json:"password"` // opens a locked room; also sets it when creating
-	MaxPlayers int                `json:"maxPlayers"`
-	EmptyTTL   *int               `json:"emptyTTL"`   // seconds; nil = server default
-	SuspendTTL *int               `json:"suspendTTL"` // seconds; 0 = drop at once; nil = server default
-	Strict     bool               `json:"strict"`
-	Schema     map[string]RuleDef `json:"schema"`
-	Init       map[string]any     `json:"init"`
+	Room       string `json:"room"`
+	Create     bool   `json:"create"`
+	Password   string `json:"password"` // opens a locked room; also sets it when creating
+	MaxPlayers int    `json:"maxPlayers"`
+	EmptyTTL   *int   `json:"emptyTTL"`   // seconds; nil = server default
+	SuspendTTL *int   `json:"suspendTTL"` // seconds; 0 = drop at once; nil = server default
+	// room.join: the lobby of the created room. room.list: show only this
+	// lobby ("" = all rooms of the app).
+	Lobby  string             `json:"lobby"`
+	Strict bool               `json:"strict"`
+	Schema map[string]RuleDef `json:"schema"`
+	Init   map[string]any     `json:"init"`
 
 	// event
 	Code int             `json:"code"`

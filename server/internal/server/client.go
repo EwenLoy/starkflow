@@ -253,7 +253,7 @@ func (c *client) handle(m *proto.ClientMsg) {
 			c.Send(proto.OkFrame(m.ID))
 		}
 	case "room.list":
-		c.Send(proto.Marshal(map[string]any{"t": "room.list.result", "id": m.ID, "rooms": c.srv.list(c.app)}))
+		c.Send(proto.Marshal(map[string]any{"t": "room.list.result", "id": m.ID, "rooms": c.srv.list(c.app, cleanName(m.Lobby))}))
 	case "event", "state.set", "state.add", "state.toggle", "player.set", "sync":
 		if c.rm == nil {
 			c.Send(proto.ErrFrame(m.ID, proto.Err(proto.ErrNotInRoom, "you are not in a room")))
@@ -450,6 +450,7 @@ func (c *client) onJoin(m *proto.ClientMsg) {
 		Schema:     m.Schema,
 		Init:       m.Init,
 		Password:   m.Password,
+		Lobby:      cleanName(m.Lobby),
 	}
 	if m.EmptyTTL != nil && *m.EmptyTTL >= 0 {
 		opts.EmptyTTL = time.Duration(*m.EmptyTTL) * time.Second

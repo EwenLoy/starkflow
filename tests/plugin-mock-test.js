@@ -916,6 +916,43 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.ok(/^room-[0-9a-z]{5}$/.test(jr.room), "an empty name must become a generated one: " + jr.room);
 	assert.strictEqual(jr.maxPlayers, undefined, "0 max players = server default, not sent");
 
+	// lobby: only rooms of that lobby are taken, and the created room gets it
+	const R4 = await mkRandom("R4");
+	P.Acts.JoinRandomOrCreateRoom.call(R4.inst, "arena", 8, -1, 0, "eu");
+	jr = R4.ws.sent[R4.ws.sent.length - 1];
+	assert.deepStrictEqual([jr.t, jr.lobby], ["room.list", "eu"], "a lobby must be sent with room.list");
+	R4.ws.recv({ t: "room.list.result", rooms: [
+		{ id: "22222222", room: "arena", players: 1, maxPlayers: 8 },					// no lobby
+		{ id: "33333333", room: "arena", players: 2, maxPlayers: 8, lobby: "us" },		// another lobby
+		{ id: "44444444", room: "arena", players: 3, maxPlayers: 8, lobby: "eu" },		// ours
+	] });
+	jr = R4.ws.sent[R4.ws.sent.length - 1];
+	assert.deepStrictEqual([jr.t, jr.room, jr.create, jr.lobby], ["room.join", "44444444", false, undefined],
+		"only the room of our lobby may be taken, and a join by id needs no lobby");
+
+	// nothing in our lobby: the new room is created in the same lobby
+	const R5 = await mkRandom("R5");
+	P.Acts.JoinRandomOrCreateRoom.call(R5.inst, "arena", 0, -1, 0, "  eu  ");
+	jr = R5.ws.sent[R5.ws.sent.length - 1];
+	assert.deepStrictEqual([jr.t, jr.lobby], ["room.list", "eu"], "the lobby must be trimmed");
+	R5.ws.recv({ t: "room.list.result", rooms: [
+		{ id: "55555555", room: "arena", players: 1, maxPlayers: 8, lobby: "us" },
+	] });
+	jr = R5.ws.sent[R5.ws.sent.length - 1];
+	assert.deepStrictEqual([jr.t, jr.room, jr.create, jr.lobby], ["room.join", "arena", true, "eu"],
+		"a room created by a lobby action must carry the lobby");
+
+	// an old server ignores the field and sends every room: the client filters too
+	const R6 = await mkRandom("R6");
+	P.Acts.JoinRandomOrCreateRoom.call(R6.inst, "arena", 8, -1, 0, "eu");
+	R6.ws.recv({ t: "room.list.result", rooms: [
+		{ id: "66666666", room: "arena", players: 1, maxPlayers: 8 },
+		{ id: "77777777", room: "arena", players: 2, maxPlayers: 8, lobby: "eu" },
+	] });
+	jr = R6.ws.sent[R6.ws.sent.length - 1];
+	assert.deepStrictEqual([jr.t, jr.room, jr.create], ["room.join", "77777777", false],
+		"rooms without our lobby (or of another lobby) must be skipped by the client too");
+
 	// ---- clustered mode: the connection mode + the nearest region ---------------
 	// A browser is the only one that knows which region is close to it, so the
 	// plugin asks the directory for its regions, measures /health of each and sends

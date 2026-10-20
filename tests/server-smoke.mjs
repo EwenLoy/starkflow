@@ -293,6 +293,21 @@ const schema = {
     eq('в списке две комнаты с одинаковым именем', lobby.rooms.filter((r) => r.room === 'дубликат').length, 2);
     eq('у каждой комнаты в списке есть id', lobby.rooms.every((r) => /^[0-9a-f]{8}$/.test(r.id)), true);
 
+    // --- лобби: метка комнаты и фильтр списка ---
+    const L1 = await open(IDURL);
+    L1.send({ t: 'hello', name: 'N' });
+    await L1.nextT('welcome');
+    L1.send({ t: 'room.join', id: 1, room: 'лобби-комната', create: true, maxPlayers: 4, lobby: 'eu' });
+    await L1.nextT('room.joined');
+    R1.send({ t: 'room.list', id: 3, lobby: 'eu' });
+    const rlEu = await R1.nextT('room.list.result');
+    eq('room.list с lobby: только комнаты этого лобби', rlEu.rooms.map((r) => [r.room, r.lobby]), [['лобби-комната', 'eu']]);
+    R1.send({ t: 'room.list', id: 4 });
+    const rlAll = await R1.nextT('room.list.result');
+    eq('room.list без lobby: все комнаты приложения', rlAll.rooms.length, 3);
+    eq('room.list: у комнаты с лобби есть поле lobby', rlAll.rooms.filter((r) => r.lobby === 'eu').length, 1);
+    eq('room.list: у комнат без лобби поля lobby нет', rlAll.rooms.filter((r) => r.lobby === undefined).length, 2);
+
     const R3 = await open(IDURL);
     R3.send({ t: 'hello', name: 'M' });
     await R3.nextT('welcome');

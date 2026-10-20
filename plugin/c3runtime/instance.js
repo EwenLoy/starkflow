@@ -1034,8 +1034,9 @@
 		// «Войти в случайную комнату или создать» (как Join random or create room в
 		// Photon). Решается на клиенте: спрашиваем у сервера список комнат, выбираем
 		// подходящую по режиму и входим по id. Свободных нет — создаём свою с этим
-		// именем. Новых сообщений протокола не нужно, старый сервер тоже подходит.
-		_joinRandom(room, maxPlayers, emptyTTL, matching)
+		// именем. Лобби — необязательная метка: room.list с lobby отдаёт только
+		// комнаты этого лобби, и создаваемая комната получает ту же метку.
+		_joinRandom(room, maxPlayers, emptyTTL, matching, lobby)
 		{
 			const max = Math.floor(Number(maxPlayers));
 			const ttl = Math.floor(Number(emptyTTL));
@@ -1044,10 +1045,23 @@
 				room: String(room === undefined || room === null ? "" : room).trim(),
 				maxPlayers: max > 0 ? max : 0,
 				emptyTTL: Number.isFinite(ttl) ? ttl : -1,
-				mode: this._pickCombo(RANDOM_MODES, matching, "fillroom")
+				mode: this._pickCombo(RANDOM_MODES, matching, "fillroom"),
+				lobby: String(lobby === undefined || lobby === null ? "" : lobby).trim()
 			};
-			this._log("info", "join random: asking for the room list (" + this._randomJoin.mode + ")");
-			this._send({ t: "room.list", id: this._reqId() });
+			this._log("info", "join random: asking for the room list (" + this._randomJoin.mode
+				+ (this._randomJoin.lobby ? ", lobby \"" + this._randomJoin.lobby + "\"" : "") + ")");
+			this._askRooms();
+		}
+
+		// room.list для «случайной или своей»: лобби сужает список до одного лобби,
+		// без лобби — все комнаты приложения. Ответ приходит как room.list.result.
+		_askRooms()
+		{
+			const msg = { t: "room.list", id: this._reqId() };
+			const lobby = this._randomJoin && this._randomJoin.lobby;
+			if (lobby)
+				msg.lobby = lobby;
+			this._send(msg);
 		}
 
 		// The server answered room.list: pick a room with a free slot and join it.
@@ -1063,6 +1077,10 @@
 			for (const r of this._roomList)
 			{
 				if (!r || !r.id || r.locked === true)
+					continue;
+				// A server without lobby support returns every room, so the
+				// lobby is checked here as well (the server already filters).
+				if (req.lobby && String(r.lobby || "") !== req.lobby)
 					continue;
 				const max = Number(r.maxPlayers) || 0;
 				const have = Number(r.players) || 0;
@@ -1090,7 +1108,7 @@
 			if (!pick)
 			{
 				this._log("info", "join random: no free room, creating one");
-				this._createRoom(req.room, req.maxPlayers, req.emptyTTL);
+				this._createRoom(req.room, req.maxPlayers, req.emptyTTL, req.lobby);
 				return;
 			}
 			this._randomRetry = req;
@@ -1101,12 +1119,14 @@
 
 		// Create a room right away: create=true always makes a NEW room (equal names are
 		// allowed), so unlike JoinOrCreateRoom there is no probe join by name first.
-		_createRoom(room, maxPlayers, emptyTTL)
+		_createRoom(room, maxPlayers, emptyTTL, lobby)
 		{
 			let name = String(room === undefined || room === null ? "" : room).trim();
 			if (!name)
 				name = "room-" + Math.floor(Math.random() * 60466176).toString(36).padStart(5, "0");	// 36^5
 			const msg = this._buildJoin(name, true, maxPlayers, emptyTTL, "");
+			if (lobby)
+				msg.lobby = String(lobby);
 			Object.assign(msg, this._rulesPayload());
 			this._pendingCreate = null;
 			this._lastJoin = msg;
@@ -1256,7 +1276,7 @@
 			if (this._lastJoin)
 				this._send(Object.assign({ id: this._reqId() }, this._lastJoin));
 			else if (this._randomJoin)
-				this._send({ t: "room.list", id: this._reqId() });	// the list was lost with the old socket
+				this._askRooms();	// the list was lost with the old socket
 		}
 
 		_onJoined(m)
@@ -1433,7 +1453,7 @@
 				const req = this._randomRetry;
 				this._randomRetry = null;
 				this._log("warn", "join random: that room is gone (" + m.code + "), creating one");
-				this._createRoom(req.room, req.maxPlayers, req.emptyTTL);
+				this._createRoom(req.room, req.maxPlayers, req.emptyTTL, req.lobby);
 				return;
 			}
 			if (m.code === 500)

@@ -18,6 +18,12 @@ URL: `ws(s)://host/ws?v=1&app=APPID`. Все кадры JSON с полем `t`.
 Игрок, который возвращается с тем же userId (по своему токену), входит в закрытую комнату **без** пароля:
 это возврат в свою комнату, а не новый вход.
 
+Обрыв связи: по умолчанию сервер держит место за игроком, у которого пропала связь, 30 секунд
+(остальные получают `player.suspended`, потом `player.left` с `reason: "timeout"`). Поле `room.join.suspendTTL`
+меняет это для создаваемой комнаты: секунды, `0` — удалять сразу, как при `room.leave` (тогда `player.left`
+с `reason: "left"` приходит в момент обрыва, а `player.suspended` не приходит вовсе). `room.joined` возвращает
+`suspendTTL` комнаты, серверное значение по умолчанию задаёт `STARKFLOW_SUSPEND_TTL`.
+
 - Клиент: `hello`, `room.join`, `room.leave`, `room.list`, `event`, `state.set`, `state.add`, `state.toggle`, `player.set`, `ping`, `batch`, `sync`
 - Сервер: `welcome`, `room.joined`, `player.joined`, `player.left`, `player.suspended`, `player.resumed`, `player.props`, `host.changed`, `event`, `state.changed`, `room.list.result`, `ok`, `err`, `pong`, `batch`, `sync`
 

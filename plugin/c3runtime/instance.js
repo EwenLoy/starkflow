@@ -150,6 +150,10 @@
 			this._state = new Map();
 			this._roomList = [];
 			this._maxPlayers = 0;
+			// "Set player timeout": сколько секунд сервер держит место за игроком
+			// с оборванной связью. -1 — серверное значение (30 с), 0 — удалять
+			// сразу, чтобы остальные получили «On player left» в момент обрыва.
+			this._suspendTTL = -1;
 
 			// Values read by expressions inside triggers.
 			this._lastPlayerId = 0;
@@ -988,6 +992,8 @@
 				msg.maxPlayers = Math.floor(maxPlayers);
 			if (emptyTTL >= 0)
 				msg.emptyTTL = Math.floor(emptyTTL);
+			if (this._suspendTTL >= 0)
+				msg.suspendTTL = Math.floor(this._suspendTTL);
 			if (password)
 				msg.password = String(password);
 			this._pendingCreate = null;
@@ -1009,6 +1015,12 @@
 			}
 			this._lastJoin = msg;
 			this._send(Object.assign({ id: this._reqId() }, msg));
+		}
+
+		_setPlayerTimeout(seconds)
+		{
+			const n = Math.floor(Number(seconds));
+			this._suspendTTL = Number.isFinite(n) ? Math.max(-1, n) : -1;
 		}
 
 		_leave()
@@ -1152,6 +1164,8 @@
 			this._pendingCreate = null;
 			// после обрыва возвращаемся по id: имена комнат не уникальны
 			this._lastJoin = this._roomId ? { t: "room.join", room: this._roomId, create: false, name: this._name } : null;
+			if (this._lastJoin && this._suspendTTL >= 0)
+				this._lastJoin.suspendTTL = Math.floor(this._suspendTTL);
 			this._myId = m.you;
 			this._hostId = m.hostId;
 			this._maxPlayers = m.maxPlayers || 0;

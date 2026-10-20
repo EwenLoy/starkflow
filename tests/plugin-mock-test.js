@@ -664,6 +664,19 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.strictEqual(wN.sent.filter((m) => m.t === "room.join").pop().name, "Nina",
 		"a name set before joining must go out with room.join");
 
+	// "Set player timeout": 0 = the room drops a lost player at once, the value
+	// goes out with room.join; -1 keeps the server default (no field at all).
+	const T = mkClient();
+	const wT = await joinClient(T, 1, [{ id: 1, name: "T", props: {} }]);
+	P.Acts.SetPlayerTimeout.call(T.inst, 0);
+	P.Acts.JoinOrCreateRoom.call(T.inst, "instant", 8, 30);
+	assert.strictEqual(wT.sent.filter((m) => m.t === "room.join").pop().suspendTTL, 0,
+		"Set player timeout 0 must go out with room.join");
+	P.Acts.SetPlayerTimeout.call(T.inst, -1);
+	P.Acts.JoinOrCreateRoom.call(T.inst, "instant", 8, 30);
+	assert.ok(!("suspendTTL" in wT.sent.filter((m) => m.t === "room.join").pop()),
+		"-1 must keep the server default: no suspendTTL in room.join");
+
 	// ---- 5. batch: a server with welcome.batch gets one frame per flush ------
 	const G = mkClient();
 	P.Acts.Connect.call(G.inst, "", "");

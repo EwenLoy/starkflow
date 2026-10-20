@@ -40,6 +40,7 @@ type Config struct {
 	EmptyTTLDefault   time.Duration
 	EmptyTTLCap       time.Duration
 	SuspendTTL        time.Duration
+	SuspendTTLCap     time.Duration // предел для per-room override (room.join.suspendTTL)
 
 	MaxStateKeys      int
 	MaxStateBytes     int
@@ -75,6 +76,7 @@ type Config struct {
 // STARKFLOW_ROOM_NAME_MAX (max room name length in characters),
 // STARKFLOW_BATCH_MS, STARKFLOW_MAX_STRING_BYTES, STARKFLOW_MAX_PLAYER_PROPS,
 // STARKFLOW_MAX_MSG_BYTES, STARKFLOW_MAX_SYNC_BYTES, STARKFLOW_SYNC_BYTES_PER_SEC,
+// STARKFLOW_SUSPEND_TTL (seconds a lost player keeps his place; 0 = remove at once),
 // STARKFLOW_RTC_PORT, STARKFLOW_RTC_PUBLIC_IP, STARKFLOW_RTC_ICE.
 func Load() Config {
 	c := Config{
@@ -93,6 +95,7 @@ func Load() Config {
 		EmptyTTLDefault:   60 * time.Second,
 		EmptyTTLCap:       24 * time.Hour,
 		SuspendTTL:        30 * time.Second,
+		SuspendTTLCap:     5 * time.Minute,
 		MaxStateKeys:      64,
 		MaxStateBytes:     64 * 1024,
 		MaxStringBytes:    4096,
@@ -128,6 +131,9 @@ func Load() Config {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			c.MaxRoomNameRunes = n
 		}
+	}
+	if v, ok := envInt("STARKFLOW_SUSPEND_TTL", 0, 3600); ok {
+		c.SuspendTTL = time.Duration(v) * time.Second
 	}
 	if v, ok := envInt("STARKFLOW_BATCH_MS", 0, 1000); ok {
 		c.BatchInterval = time.Duration(v) * time.Millisecond

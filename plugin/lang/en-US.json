@@ -481,6 +481,17 @@
 							}
 						}
 					},
+					"set-player-timeout": {
+						"list-name": "Set player timeout",
+						"display-text": "Set player timeout to [b]{0}[/b] s (0 = leave at once)",
+						"description": "How long the room keeps the place of a player whose connection dropped. 0 removes him at once: the others get On player left in the same moment, not On player connection lost plus 30 seconds. Applies to the room this client creates.",
+						"params": {
+							"seconds": {
+								"name": "Seconds",
+								"desc": "Seconds to keep the place for a lost player (0 = remove at once, default 30)."
+							}
+						}
+					},
 					"sync-object": {
 						"list-name": "Register object for sync",
 						"display-text": "Multiplayer: Register [b]{0}[/b] as [b]{1}[/b] in [b]{2}[/b] state (transform: [i]{3}[/i], interpolate: [i]{4}[/i], layer: [i]{5}[/i])",

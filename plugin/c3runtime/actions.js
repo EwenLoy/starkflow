@@ -9,6 +9,10 @@
 		Disconnect() { this._disconnect(false); },
 		SetAuthToken(token) { this._token = String(token); },
 		SetName(name) { this._name = String(name); },
+		// Сколько секунд сервер держит место за игроком с оборванной связью
+		// (0 — удалять сразу: остальные получают «On player left» в момент обрыва).
+		// Действует на комнату, которую создаёт этот клиент.
+		SetPlayerTimeout(seconds) { this._setPlayerTimeout(seconds); },
 		// Clustered mode: pin the region ("eu", "ru", ...) or pass an empty string to
 		// pick the nearest one automatically again (and measure it once more).
 		SetRegion(region)

@@ -36,7 +36,10 @@ type UnreliableConn interface {
 type Options struct {
 	MaxPlayers int           // 0 = server default
 	EmptyTTL   time.Duration // <0 = server default; 0 = delete as soon as empty
-	Strict     bool          // reject state keys that are not in Schema
+	// SuspendTTL — сколько держать место за игроком с оборванной связью:
+	// <0 = серверное значение, 0 = удалять сразу (как обычный выход).
+	SuspendTTL time.Duration
+	Strict     bool // reject state keys that are not in Schema
 	Schema     map[string]proto.RuleDef
 	Init       map[string]any
 	Password   string // optional password: only its salted hash is kept
@@ -106,6 +109,7 @@ type Room struct {
 	nextID     int
 	maxPlayers int
 	emptyTTL   time.Duration
+	suspendTTL time.Duration
 	everJoined bool
 	emptySince time.Time
 	closed     bool
@@ -138,6 +142,13 @@ func New(key, id, name string, opts Options, cfg config.Config, onClose func(*Ro
 	if ttl > cfg.EmptyTTLCap {
 		ttl = cfg.EmptyTTLCap
 	}
+	suspend := opts.SuspendTTL
+	if suspend < 0 {
+		suspend = cfg.SuspendTTL
+	}
+	if cfg.SuspendTTLCap > 0 && suspend > cfg.SuspendTTLCap {
+		suspend = cfg.SuspendTTLCap
+	}
 	st, err := NewState(opts.Schema, opts.Init, opts.Strict, Limits{
 		MaxKeys:   cfg.MaxStateKeys,
 		MaxBytes:  cfg.MaxStateBytes,
@@ -157,6 +168,7 @@ func New(key, id, name string, opts Options, cfg config.Config, onClose func(*Ro
 		byUser:     map[string]int{},
 		maxPlayers: maxP,
 		emptyTTL:   ttl,
+		suspendTTL: suspend,
 		emptySince: time.Now(),
 		inbox:      make(chan func(), 256),
 		done:       make(chan struct{}),
@@ -249,7 +261,7 @@ func (r *Room) exec(fn func()) bool {
 
 func (r *Room) housekeeping(now time.Time) {
 	for id, p := range r.players {
-		if p.conn == nil && now.Sub(p.suspendedAt) >= r.cfg.SuspendTTL {
+		if p.conn == nil && r.suspendTTL > 0 && now.Sub(p.suspendedAt) >= r.suspendTTL {
 			r.removePlayer(id, "timeout")
 		}
 	}
@@ -577,6 +589,7 @@ func (r *Room) doJoin(req JoinReq) *proto.Error {
 		"you":        p.ID,
 		"hostId":     r.hostID(),
 		"maxPlayers": r.maxPlayers,
+		"suspendTTL": int(r.suspendTTL / time.Second),
 		"players":    r.playerList(),
 		"state":      r.state.Snapshot(),
 		"resumed":    resumed,
@@ -594,7 +607,9 @@ func (r *Room) doJoin(req JoinReq) *proto.Error {
 	return nil
 }
 
-// Disconnect marks the player of conn as suspended (connection lost).
+// Disconnect marks the player of conn as suspended (connection lost). A room
+// created with SuspendTTL 0 removes him right away, so the others get
+// player.left at the moment of the drop instead of 30 seconds later.
 func (r *Room) Disconnect(c Conn) {
 	r.exec(func() {
 		p := r.byConn(c)
@@ -604,6 +619,10 @@ func (r *Room) Disconnect(c Conn) {
 		before := r.hostID()
 		p.conn = nil
 		p.dropQueue()
+		if r.suspendTTL == 0 {
+			r.removePlayer(p.ID, "left")
+			return
+		}
 		p.suspendedAt = time.Now()
 		r.broadcast(proto.Marshal(map[string]any{"t": "player.suspended", "id": p.ID}), 0)
 		r.checkHost(before)

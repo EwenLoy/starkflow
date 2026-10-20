@@ -445,6 +445,7 @@ func (c *client) onJoin(m *proto.ClientMsg) {
 	opts := room.Options{
 		MaxPlayers: m.MaxPlayers,
 		EmptyTTL:   -1,
+		SuspendTTL: -1,
 		Strict:     m.Strict,
 		Schema:     m.Schema,
 		Init:       m.Init,
@@ -452,6 +453,9 @@ func (c *client) onJoin(m *proto.ClientMsg) {
 	}
 	if m.EmptyTTL != nil && *m.EmptyTTL >= 0 {
 		opts.EmptyTTL = time.Duration(*m.EmptyTTL) * time.Second
+	}
+	if m.SuspendTTL != nil && *m.SuspendTTL >= 0 {
+		opts.SuspendTTL = time.Duration(*m.SuspendTTL) * time.Second
 	}
 	joinName := m.Name
 	if joinName == "" {

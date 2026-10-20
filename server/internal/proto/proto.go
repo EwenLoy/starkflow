@@ -66,7 +66,8 @@ type ClientMsg struct {
 	Create     bool               `json:"create"`
 	Password   string             `json:"password"` // opens a locked room; also sets it when creating
 	MaxPlayers int                `json:"maxPlayers"`
-	EmptyTTL   *int               `json:"emptyTTL"` // seconds; nil = server default
+	EmptyTTL   *int               `json:"emptyTTL"`   // seconds; nil = server default
+	SuspendTTL *int               `json:"suspendTTL"` // seconds; 0 = drop at once; nil = server default
 	Strict     bool               `json:"strict"`
 	Schema     map[string]RuleDef `json:"schema"`
 	Init       map[string]any     `json:"init"`

@@ -48,8 +48,10 @@
 	// the past, interpolating between the two snapshots around that moment (entity
 	// interpolation, G. Gambetta "Fast-Paced Multiplayer III").
 	const SNAP_BUFFER = 64;				// snapshots kept per player
-	const INTERP_MIN = 80;				// ms, auto interpolation delay is kept in 80..300
-	const INTERP_MAX = 300;
+	const INTERP_MIN = 80;				// ms, auto interpolation delay is kept in 80..400
+	const INTERP_MAX = 400;
+	const EXTRAP_MAX = 250;				// ms of coasting on the last velocity when snapshots stop coming
+	const BLEND_AFTER_GAP = 250;		// ms of easing back onto the sampled track after a gap
 	const TELEPORT = 1000;				// px: a bigger jump is applied at once, without smoothing
 	// A snapshot older than the newest one (lower seq) is late, not a restart of the
 	// sender, if it is close in both seq and time: the unreliable channel reorders.
@@ -151,6 +153,7 @@
 
 			// Values read by expressions inside triggers.
 			this._lastPlayerId = 0;
+			this._lastPlayerName = "";
 			this._evCode = 0;
 			this._evData = "";
 			this._evFrom = 0;
@@ -192,7 +195,8 @@
 			this._syncSeq = 0;				// number of our last snapshot
 			this._syncLast = "";				// JSON of our last snapshot ("" = none sent)
 			this._warnedSync = false;
-			this._snaps = new Map();			// owner id -> { buf: [{ts, states}], off, seq, iv }
+			this._snaps = new Map();			// owner id -> { buf, off, seq, iv, jit, delay }
+			this._statAt = 0;					// last "buffer:" diagnostics line
 			this._region = "";					// pinned region ("" = pick automatically)
 			this._curRegion = "";				// region we are connected to now
 			this._probedDir = "";				// directory the last measurement belongs to
@@ -979,7 +983,7 @@
 
 		_join(room, create, maxPlayers, emptyTTL, password)
 		{
-			const msg = { t: "room.join", room: String(room), create: create };
+			const msg = { t: "room.join", room: String(room), create: create, name: this._name };
 			if (maxPlayers > 0)
 				msg.maxPlayers = Math.floor(maxPlayers);
 			if (emptyTTL >= 0)
@@ -1016,8 +1020,8 @@
 			if (wasIn)
 			{
 				this._status = "connected";
-				this._clearRoom();
 				this._trigger(this._cnd("OnLeftRoom"));
+				this._clearRoom();
 			}
 		}
 
@@ -1147,7 +1151,7 @@
 			this._roomName = m.room;
 			this._pendingCreate = null;
 			// после обрыва возвращаемся по id: имена комнат не уникальны
-			this._lastJoin = this._roomId ? { t: "room.join", room: this._roomId, create: false } : null;
+			this._lastJoin = this._roomId ? { t: "room.join", room: this._roomId, create: false, name: this._name } : null;
 			this._myId = m.you;
 			this._hostId = m.hostId;
 			this._maxPlayers = m.maxPlayers || 0;
@@ -1164,9 +1168,22 @@
 				this._players.set(p.id, p);
 				this._ingestAll(p);
 			}
+			// Initialize state from server: m.state contains initial values set by room creator
 			this._state = new Map(Object.entries(m.state || {}));
+			this._log("info", "joined room, received state:", JSON.stringify(m.state));
 			this._status = "in-room";
 			this._trigger(this._cnd("OnJoinedRoom"));
+
+			// Trigger "On state changed" for each initial state value so the game can react
+			for (const [key, value] of this._state.entries())
+			{
+				this._chKey = key;
+				this._chValue = value;
+				this._chOld = 0;
+				this._chBy = 0;
+				this._trigger(this._cnd("OnStateChanged"));
+				this._trigger(this._cnd("OnAnyStateChanged"));
+			}
 
 			// Players that were in the room before us: fire "On player joined" for each
 			// (including ourselves), so one event can create all player objects.
@@ -1176,9 +1193,11 @@
 				const ids = Array.from(this._players.keys()).sort((a, b) => a - b);
 				for (const id of ids)
 				{
-					if (!this._players.has(id))
+					const p = this._players.get(id);
+					if (!p)
 						continue;
 					this._lastPlayerId = id;
+					this._lastPlayerName = p.name || "";
 					this._trigger(this._cnd("OnPlayerJoined"));
 				}
 			}
@@ -1198,17 +1217,25 @@
 			this._players.set(m.player.id, m.player);
 			this._ingestAll(m.player);
 			this._lastPlayerId = m.player.id;
+			this._lastPlayerName = m.player.name || "";
 			this._trigger(this._cnd("OnPlayerJoined"));
 		}
 
 		_onPlayerLeft(m)
 		{
+			const p = this._players.get(m.id);
+			// Имя приходит и в самом player.left: ушедшего могло не быть в списке
+			// (вошёл и вышел, пока мы были offline), а после trigger его уже нет.
+			const name = (typeof m.name === "string" && m.name !== "") ? m.name : (p ? (p.name || "") : "");
+			if (p && name !== "" && !p.name)
+				p.name = name;
+			this._lastPlayerId = m.id;
+			this._lastPlayerName = name;
+			this._trigger(this._cnd("OnPlayerLeft"));
 			this._players.delete(m.id);
 			this._net.delete(m.id);
 			this._snaps.delete(m.id);
 			this._dropOwner(m.id);
-			this._lastPlayerId = m.id;
-			this._trigger(this._cnd("OnPlayerLeft"));
 		}
 
 		_onPlayerStatus(id, status, trigger)
@@ -1217,6 +1244,7 @@
 			if (p)
 				p.status = status;
 			this._lastPlayerId = id;
+			this._lastPlayerName = p ? (p.name || "") : "";
 			this._trigger(this._cnd(trigger));
 		}
 
@@ -1225,6 +1253,7 @@
 			this._players.set(m.player.id, m.player);
 			this._ingestAll(m.player);
 			this._lastPlayerId = m.player.id;
+			this._lastPlayerName = m.player.name || "";
 			this._trigger(this._cnd("OnPlayerResumed"));
 		}
 
@@ -1300,6 +1329,10 @@
 				const msg = this._pendingCreate;
 				this._pendingCreate = null;
 				this._lastJoin = msg;
+				delete msg.schema;
+				delete msg.strict;
+				delete msg.init;
+				Object.assign(msg, this._rulesPayload());
 				this._send(Object.assign({ id: this._reqId() }, msg));
 				return;
 			}
@@ -1376,6 +1409,17 @@
 
 			if (this._sync.size)
 				this._applyRemote(dt);
+
+			// Diagnostics: one line every 5 s at the debug level, to tell what the
+			// smoothness is limited by - a small buffer with a big jitter means the
+			// delay must grow, an empty buffer means a burst it did not cover.
+			if (this._snaps.size && now - this._statAt > 5000)
+			{
+				this._statAt = now;
+				this._log("debug", "buffer: delay " + Math.round(this._bufferDelay()) + " ms, " +
+					this._bufferSize() + " snapshot(s), jitter " + Math.round(this._jitter()) +
+					" ms, ping " + Math.round(this._ping) + " ms, smoothing " + Math.round(this._smoothValue()) + " ms");
+			}
 
 			this._acc += dt;
 			if (this._acc < this._sendInterval)
@@ -1617,7 +1661,7 @@
 			// a new buffer: first snapshot, a resume, or the sender started again (seq went back)
 			if (!o || reset || seq <= o.seq)
 			{
-				o = { buf: [], off: undefined, seq: 0, iv: 0 };
+				o = { buf: [], off: undefined, seq: 0, iv: 0, jit: 0, arr: undefined, ts: undefined, delay: undefined };
 				this._snaps.set(owner, o);
 			}
 			// Clock offset sender -> us: the smallest "arrival - ts" seen is the fastest
@@ -1628,7 +1672,21 @@
 			else
 				o.off += (off - o.off) * 0.01;
 			o.iv = fin(s.iv) > 0 ? fin(s.iv) : this._sendInterval;
+			// Jitter (RFC 3550): how much the arrival spacing deviates from the send
+			// spacing. A steady latency gives 0 here even when it is a second long -
+			// only the unevenness of the channel has to be absorbed by the buffer.
+			// A pause (the sender stopped for a while) is not unevenness: skip it.
+			if (o.arr !== undefined && ts - o.ts <= (o.iv || 0) * 4)
+			{
+				const d = (now - o.arr) - (ts - o.ts);
+				o.jit += (Math.abs(d) - o.jit) * 0.0625;	// EMA 1/16, like RTP
+				if (o.jit > 4000)
+					o.jit = 4000;
+			}
+			o.arr = now;
+			o.ts = ts;
 			o.seq = seq;
+			this._updateDelay(o);
 			// The owner sends only changes: after a pause the previous position is held
 			// until one interval before the new one, so the object does not crawl across the pause.
 			const last = o.buf[o.buf.length - 1];
@@ -1646,17 +1704,85 @@
 			}
 		}
 
-		// How far in the past other players are drawn. Auto: two send intervals of the
-		// owner plus the server batching window and some margin for jitter.
+		// How far in the past other players are drawn. Auto: a jitter buffer - one
+		// send interval of the owner plus three measured jitters and the server
+		// batching window (see _delayTarget), measured on real arrivals. Manual
+		// "Set smoothing" overrides it.
 		_interpDelay(o)
 		{
 			if (!this._smoothAuto)
 				return this._smoothMs;
+			if (o && o.delay !== undefined)
+				return o.delay;
+			return this._delayTarget(o);
+		}
+
+		// The delay the buffer should have now: two send intervals (one to receive the
+		// next snapshot, one to interpolate into) plus three measured jitters and the
+		// server batching window - enough to cover a burst, not more (every extra
+		// millisecond is a millisecond the player sees in the past).
+		_delayTarget(o)
+		{
 			const iv = o && o.iv > 0 ? o.iv : this._sendInterval;
-			return Math.max(INTERP_MIN, Math.min(INTERP_MAX, Math.round(iv * 2 + this._srvBatchMs + 20)));
+			const jit = o && o.jit > 0 ? o.jit : 0;
+			return Math.max(INTERP_MIN, Math.min(INTERP_MAX, Math.round(iv * 2 + jit * 3 + this._srvBatchMs)));
+		}
+
+		// Called once per arrived snapshot: the delay jumps up at once (a burst must
+		// not empty the buffer) and comes down slowly (~1 s time constant), so a
+		// short lull above the average does not yank the drawn moment forward.
+		_updateDelay(o)
+		{
+			const want = this._delayTarget(o);
+			if (o.delay === undefined || want > o.delay)
+				o.delay = want;
+			else
+				o.delay += (want - o.delay) * (1 - Math.exp(-(o.iv || this._sendInterval) / 1000));
+			o.delay = Math.max(INTERP_MIN, Math.min(INTERP_MAX, o.delay));
+		}
+
+		// Diagnostics of the buffers, worst owner first: the largest delay in use, the
+		// smallest buffer (the closest to running dry) and the largest jitter. Like
+		// GamePush's MultiplayerBufferDelay / MultiplayerBufferSize / NetworkPing.
+		_bufferDelay()
+		{
+			let max = 0;
+			for (const o of this._snaps.values())
+			{
+				const d = this._interpDelay(o);
+				if (d > max)
+					max = d;
+			}
+			return max || this._interpDelay(null);
+		}
+
+		_bufferSize()
+		{
+			let min = -1;
+			for (const o of this._snaps.values())
+			{
+				if (min < 0 || o.buf.length < min)
+					min = o.buf.length;
+			}
+			return min < 0 ? 0 : min;
+		}
+
+		_jitter()
+		{
+			let max = 0;
+			for (const o of this._snaps.values())
+			{
+				if ((o.jit || 0) > max)
+					max = o.jit;
+			}
+			return max;
 		}
 
 		// The state of one object at the moment t (our clock), between two snapshots.
+		// Past the newest one it coasts on the last velocity for EXTRAP_MAX ms
+		// (extrapolation) instead of freezing: that is what keeps a player moving
+		// through a network hiccup, and the flag "ex" tells _applyOne to glide back
+		// when fresh data is there again.
 		_sample(o, rec, t)
 		{
 			const buf = o.buf;
@@ -1672,13 +1798,73 @@
 				i = 1;
 			}
 			const a = buf[i].states.get(rec.slot);
-			if (i === buf.length - 1 || at(i) > t)
-				return a || null;				// past the newest (or before the oldest): hold it
+			if (!a)
+				return null;
+			if (at(i) > t)
+				return a;						// before the oldest snapshot: hold it
+			if (i === buf.length - 1)
+			{
+				// past the newest: coast on the last velocity
+				const over = t - at(i);
+				const span = i > 0 ? at(i) - at(i - 1) : 0;
+				return this._extrapolate(i > 0 ? buf[i - 1].states.get(rec.slot) : null, a, over, span, rec,
+					over >= (o.iv || 0));
+			}
 			const b = buf[i + 1].states.get(rec.slot);
-			if (!a || !b)
-				return b || a || null;
+			if (!b)
+				return a;
 			const span = at(i + 1) - at(i);
 			return this._lerpState(a, b, span > 0 ? (t - at(i)) / span : 1, rec);
+		}
+
+		// Continue the movement of the last two snapshots. over = ms since the newest
+		// snapshot, span = ms between those two. Nothing is sent during a pause, so
+		// over stays 0 for a standing player: only a moving one coasts. mark says the
+		// coasting has outgrown one interval - a real gap that _applyOne has to glide
+		// back from; the usual edge of the buffer is not one.
+		_extrapolate(prev, cur, over, span, rec, mark)
+		{
+			if (!prev || over <= 0 || span <= 0)
+				return cur;
+			let held = false;
+			if (over > EXTRAP_MAX)
+			{
+				over = EXTRAP_MAX;			// hold the coasted position, do not fly away
+				held = true;				// a hold is not a gap any more
+			}
+			const pa = prev.v, cb = cur.v;
+			if (Math.abs(fin(cb.x) - fin(pa.x)) > TELEPORT || Math.abs(fin(cb.y) - fin(pa.y)) > TELEPORT)
+				return cur;						// a jump: no flying across the map
+			const f = over / span;
+			const v = Object.assign({}, cb);	// animation, frame, visibility: the newest
+			for (const key of ["x", "y", "z", "op"])
+			{
+				if (typeof pa[key] === "number" && typeof cb[key] === "number")
+					v[key] = cb[key] + (cb[key] - pa[key]) * f;
+			}
+			if (typeof pa.a === "number" && typeof cb.a === "number")
+			{
+				const d = ((cb.a - pa.a + 540) % 360 + 360) % 360 - 180;	// shortest way round
+				v.a = cb.a + d * f;
+			}
+			if (pa.vars && cb.vars && rec.vars && rec.vars.length)
+			{
+				v.vars = Object.assign({}, cb.vars);
+				for (const def of rec.vars)
+				{
+					const x = pa.vars[def.name], y = cb.vars[def.name];
+					if (def.interp && typeof x === "number" && typeof y === "number")
+						v.vars[def.name] = y + (y - x) * f;
+				}
+			}
+			// A hold keeps the gap flag: the object sits ahead of the fresh track and
+			// _applyOne glides it back once data returns.
+			const out = { mask: cur.mask, v: v };
+			if (mark && !held)
+				out.ex = over;
+			else if (held)
+				out.hold = true;
+			return out;
 		}
 
 		_lerpState(a, b, k, rec)
@@ -1813,7 +1999,7 @@
 					const sst = this._sample(o, rec, now - delay);
 					const sinst = sst ? this._resolve(rec) : null;
 					if (sinst)
-						this._applyOne(sinst, rec, sst, dt, true);
+						this._applyOne(sinst, rec, sst, dt, true, now);
 					continue;
 				}
 				const st = this._getNet(rec.owner, rec.slot);
@@ -1827,26 +2013,81 @@
 		}
 
 		// exact: st is already interpolated (the sync channel), apply it as is.
-		_applyOne(inst, rec, st, dt, exact)
+		_applyOne(inst, rec, st, dt, exact, now)
 		{
 			const v = st.v, m = st.mask;
 			const smoothMs = this._smoothValue();
-			const snap = exact || !rec.seen || smoothMs <= 0 || rec.interp === false;
+			const raw = !rec.seen || smoothMs <= 0 || rec.interp === false;
 			rec.seen = true;
-			let k = snap ? 1 : 1 - Math.exp(-dt * 3 / smoothMs);
-			let kp = k;
-			if (!snap && (((m & F.X) && Math.abs(v.x - inst.x) > TELEPORT) || ((m & F.Y) && Math.abs(v.y - inst.y) > TELEPORT)))
-				kp = 1;
+			const t = now === undefined ? this._now() : now;
+
+			// The speed of the entity itself, taken from the track the interpolator
+			// moves along (px/ms). It limits how fast a correction is allowed to run.
+			let speed = rec.speed || 0;
+			if (rec.tt !== undefined && t > rec.tt && typeof v.x === "number" && typeof rec.tx === "number")
+			{
+				const sp = Math.hypot(fin(v.x) - rec.tx, fin(v.y) - rec.ty) / (t - rec.tt);
+				if (isFinite(sp))
+					speed += (sp - speed) * 0.3;
+			}
+			if (typeof v.x === "number")
+			{
+				rec.tx = fin(v.x);
+				rec.ty = fin(v.y);
+				rec.tt = t;
+				rec.speed = speed;
+			}
+
+			// Fresh data after an extrapolation: the drawn object may sit a bit ahead
+			// of the fresh track. Glide back over BLEND_AFTER_GAP, never faster than
+			// 1.5x the entity's own speed (Rune's maxSpeed), so no jump and no rubber
+			// band; the flag is cleared once it is back on the track.
+			if (exact)
+			{
+				if (st.ex)
+					rec.gap = BLEND_AFTER_GAP;			// a gap: glide back once data is fresh
+				else if (!st.hold && rec.gap > 0)
+				{
+					if (Math.abs(fin(v.x) - fin(inst.x)) < 1 && Math.abs(fin(v.y) - fin(inst.y)) < 1)
+						rec.gap = 0;					// back on the track
+					else
+						rec.gap = Math.max(0, rec.gap - dt * 0.2);	// a safety stop after ~1.2 s
+				}
+			}
+			const catching = exact && !st.ex && !st.hold && rec.gap > 0;
+
+			let k, kp, maxStep = 0;
+			if (exact)
+			{
+				k = catching ? 1 - Math.exp(-dt / (BLEND_AFTER_GAP / 3)) : 1;
+				kp = k;
+				if (catching)
+					maxStep = Math.max(0.02, speed * 1.5) * dt;	// px this frame may cover
+			}
+			else
+			{
+				k = raw ? 1 : 1 - Math.exp(-dt * 3 / smoothMs);
+				kp = k;
+				if (!raw && (((m & F.X) && Math.abs(v.x - inst.x) > TELEPORT) || ((m & F.Y) && Math.abs(v.y - inst.y) > TELEPORT)))
+					kp = 1;
+			}
 
 			const ease = (cur, target, kk) =>
 			{
 				const d = target - cur;
 				return Math.abs(d) < 0.05 ? target : cur + d * kk;
 			};
+			const clamp = (next, cur) =>
+			{
+				if (!maxStep)
+					return next;
+				const d = next - cur;
+				return Math.abs(d) <= maxStep ? next : cur + Math.sign(d) * maxStep;
+			};
 
-			if (m & F.X) { const nx = ease(inst.x, v.x, kp); if (nx !== inst.x) inst.x = nx; }
-			if (m & F.Y) { const ny = ease(inst.y, v.y, kp); if (ny !== inst.y) inst.y = ny; }
-			if ((m & F.Z) && typeof inst.zElevation === "number") inst.zElevation = ease(inst.zElevation, v.z, kp);
+			if (m & F.X) { const nx = clamp(ease(inst.x, v.x, kp), inst.x); if (nx !== inst.x) inst.x = nx; }
+			if (m & F.Y) { const ny = clamp(ease(inst.y, v.y, kp), inst.y); if (ny !== inst.y) inst.y = ny; }
+			if ((m & F.Z) && typeof inst.zElevation === "number") inst.zElevation = clamp(ease(inst.zElevation, v.z, kp), inst.zElevation);
 			if (m & F.ANGLE)
 			{
 				const cur = angleOf(inst);
@@ -1883,7 +2124,7 @@
 						continue;
 					const cur = inst.instVars[def.name];
 					let next = target;
-					if (def.interp && !snap && typeof cur === "number" && isFinite(cur) && typeof target === "number")
+					if (def.interp && (!exact || catching) && typeof cur === "number" && isFinite(cur) && typeof target === "number")
 						next = ease(cur, target, k);
 					if (next !== cur)
 					{

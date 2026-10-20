@@ -630,6 +630,40 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.ok(fired(B.inst, "OnProxyDestroyed"), "the proxy must be destroyed when the player leaves");
 	assert.strictEqual(P.Exps.PlayerProxyUID.call(B.inst, 1, "player"), 0);
 
+	// ---- 4g. nicknames at join and at leave ---------------------------------
+	// The name travels inside the event itself: it must be readable inside the trigger
+	// even when the player is already gone from the room list.
+	const N = mkClient();
+	const wN = await joinClient(N, 1, [{ id: 1, name: "Ann", props: {} }]);
+	N.inst.triggered.length = 0;
+	wN.recv({ t: "player.joined", player: { id: 2, name: "Bob", props: {} } });
+	assert.ok(fired(N.inst, "OnPlayerJoined"));
+	assert.strictEqual(P.Exps.LastPlayerName.call(N.inst), "Bob", "LastPlayerName must hold the joined player");
+	assert.strictEqual(P.Exps.PlayerName.call(N.inst, P.Exps.LastPlayerId.call(N.inst)), "Bob");
+
+	N.inst.triggered.length = 0;
+	wN.recv({ t: "player.left", id: 2, name: "Bob" });
+	assert.ok(fired(N.inst, "OnPlayerLeft"));
+	assert.strictEqual(P.Exps.LastPlayerName.call(N.inst), "Bob", "LastPlayerName must hold the player who left");
+	assert.strictEqual(P.Exps.PlayerName.call(N.inst, P.Exps.LastPlayerId.call(N.inst)), "Bob",
+		"the name must stay readable after the player has been removed from the room");
+	assert.strictEqual(N.inst._players.has(2), false, "a player who left must not stay in the room");
+
+	// a player we never saw (joined and left while we were offline) still comes with a name
+	N.inst.triggered.length = 0;
+	wN.recv({ t: "player.left", id: 7, name: "Ghost" });
+	assert.ok(fired(N.inst, "OnPlayerLeft"));
+	assert.strictEqual(P.Exps.PlayerName.call(N.inst, P.Exps.LastPlayerId.call(N.inst)), "Ghost",
+		"a player unknown to us must still give his name from player.left");
+
+	// my own name goes out with room.join, so the other clients see it right away
+	assert.strictEqual(wN.sent.filter((m) => m.t === "room.join").pop().name, "",
+		"the join must carry a name field (empty until Set player name)");
+	P.Acts.SetName.call(N.inst, "Nina");
+	P.Acts.JoinOrCreateRoom.call(N.inst, "arena", 8, 30);
+	assert.strictEqual(wN.sent.filter((m) => m.t === "room.join").pop().name, "Nina",
+		"a name set before joining must go out with room.join");
+
 	// ---- 5. batch: a server with welcome.batch gets one frame per flush ------
 	const G = mkClient();
 	P.Acts.Connect.call(G.inst, "", "");
@@ -738,18 +772,51 @@ console.log("ACE consistency OK (" + n + " entries)");
 	clock = 10100; wS2.recv({ t: "sync", id: 1, seq: 2, ts: 1100, iv: 100, objs: [[0, 1035, 100, 50, 90, "player"]] });
 	const proxyS = S2.rt.byUid.get(P.Exps.PlayerProxyUID.call(S2.inst, 1, "player"));
 	assert.ok(proxyS, "the proxy of player 1 must exist");
-	// delay = 2 x 100 + 40 (server batching) + 20 = 260 ms: at 10310 we draw 10050, half way
-	clock = 10310; S2.inst._applyRemote(16);
-	assert.ok(Math.abs(proxyS.x - 50) < 0.01 && Math.abs(proxyS.y - 25) < 0.01, "half way between snapshots, got " + proxyS.x + "," + proxyS.y);
-	assert.ok(Math.abs(proxyS.angleDegrees - 45) < 0.01, "the angle is interpolated too");
-	clock = 10400; S2.inst._applyRemote(16);
-	assert.strictEqual(proxyS.x, 100, "past the newest snapshot the object holds it");
-	// after a pause the object does not crawl: it waits, then moves over one interval
+	// the auto delay on a steady channel: 2 x the send interval (100) + the server
+	// batching window (40) = 240 ms - the measured jitter is 0, so no extra margin
+	assert.strictEqual(P.Exps.BufferDelay.call(S2.inst), 240, "a steady channel needs no extra delay");
+	assert.strictEqual(P.Exps.Jitter.call(S2.inst), 0, "a steady channel has no jitter");
+	assert.strictEqual(P.Exps.BufferSize.call(S2.inst), 2, "two snapshots are buffered");
+	// delay = 240: at 10320 we draw 10080, 80% of the way between the snapshots
+	clock = 10320; S2.inst._applyRemote(16);
+	assert.ok(Math.abs(proxyS.x - 80) < 0.01 && Math.abs(proxyS.y - 40) < 0.01, "interpolated between the snapshots, got " + proxyS.x + "," + proxyS.y);
+	assert.ok(Math.abs(proxyS.angleDegrees - 72) < 0.01, "the angle is interpolated too");
+	// after a pause the object does not crawl across it: it waits, then moves over
+	// one interval (the sender's clock went on, so a fresh offset is learned)
 	clock = 15000; wS2.recv({ t: "sync", id: 1, seq: 3, ts: 6000, iv: 100, objs: [[0, 1035, 200, 50, 90, "player"]] });
-	clock = 15000 + 260 - 100; S2.inst._applyRemote(16);
+	clock = 15000 + 240 - 100; S2.inst._applyRemote(16);
 	assert.strictEqual(proxyS.x, 100, "the old position is held until one interval before the new snapshot");
-	clock = 15000 + 260 - 50; S2.inst._applyRemote(16);
+	clock = 15000 + 240 - 50; S2.inst._applyRemote(16);
 	assert.ok(Math.abs(proxyS.x - 150) < 0.01, "then it moves over one interval, got " + proxyS.x);
+	// a hiccup: the snapshots stop - the object coasts on the last velocity instead of
+	// freezing (a fresh buffer, as if the sender started over)
+	clock = 20000; S2.inst._onSync(1, { seq: 1, ts: 1000, iv: 100, objs: [[0, 1035, 0, 0, 0, "player"]] }, true);
+	clock = 20100; S2.inst._onSync(1, { seq: 2, ts: 1100, iv: 100, objs: [[0, 1035, 100, 50, 90, "player"]] }, false);
+	clock = 20360; S2.inst._applyRemote(16);
+	assert.ok(Math.abs(proxyS.x - 120) < 0.01, "past the newest snapshot the object coasts on, got " + proxyS.x);
+	clock = 20450; S2.inst._applyRemote(16);
+	assert.ok(Math.abs(proxyS.x - 210) < 0.01, "it coasts at the same speed, got " + proxyS.x);
+	// ...but at most EXTRAP_MAX (250 ms) ahead: a lost connection must not fly it away
+	for (clock = 20466; clock < 20600; clock += 16)
+		S2.inst._applyRemote(16);
+	assert.ok(Math.abs(proxyS.x - 350) < 1, "the coasting stops after 250 ms, got " + proxyS.x);
+	// the measured jitter widens the delay at once and lets it down slowly
+	const bufS = S2.inst._snaps.get(1);
+	bufS.jit = 50;
+	S2.inst._updateDelay(bufS);
+	assert.strictEqual(P.Exps.BufferDelay.call(S2.inst), 390, "jitter widens the delay at once");
+	bufS.jit = 0;
+	S2.inst._updateDelay(bufS);
+	assert.ok(bufS.delay > 360 && bufS.delay < 390, "the delay comes down slowly, got " + bufS.delay);
+	// the correction after a gap is capped at 1.5x the entity's own speed
+	const recS = S2.inst._sync.get("1:0");
+	recS.gap = 250;
+	recS.speed = 0.5;
+	clock += 16;
+	recS.tx = proxyS.x + 92; recS.ty = proxyS.y; recS.tt = clock - 16;	// 0.5 px/ms on the track
+	const xBefore = proxyS.x;
+	S2.inst._applyOne(proxyS, recS, { mask: 3, v: { x: proxyS.x + 100, y: proxyS.y } }, 16, true, clock);
+	assert.ok(Math.abs(proxyS.x - xBefore - 12) < 0.01, "a catch-up may not run faster than 1.5x the entity speed, moved " + (proxyS.x - xBefore));
 	// an empty snapshot removes the objects
 	S2.inst.triggered.length = 0;
 	wS2.recv({ t: "sync", id: 1, seq: 4, ts: 6100, iv: 100, objs: [] });
@@ -759,11 +826,11 @@ console.log("ACE consistency OK (" + n + " entries)");
 	P.Acts.StopSync.call(S1.inst);
 	assert.deepStrictEqual(wS1.sent.map((m) => [m.t, m.objs && m.objs.length]), [["sync", 0]], "stop sync must send an empty snapshot");
 
-	// the expression reports the delay really in use: in the "sync" mode that is the
-	// interpolation delay (2 x our interval + the server batching window + 20 ms),
-	// not the "_sf" smoothing value (1.4 x the interval, 70)
-	assert.strictEqual(P.Exps.Smoothing.call(S2.inst), 127, "Smoothing must report the interpolation delay");
-	assert.strictEqual(P.Exps.Smoothing.call(S1.inst), 127);
+	// the expressions report what the buffers really do: the worst owner first, and
+	// the plain smoothing target on a server without remote data (no "sync" snapshots)
+	assert.strictEqual(Math.round(P.Exps.BufferDelay.call(S2.inst)), Math.round(S2.inst._snaps.get(1).delay),
+		"BufferDelay reports the interpolation delay in use");
+	assert.strictEqual(P.Exps.Smoothing.call(S1.inst), 107, "Smoothing without owners: the target for our own interval");
 
 	// ---- clustered mode: the connection mode + the nearest region ---------------
 	// A browser is the only one that knows which region is close to it, so the

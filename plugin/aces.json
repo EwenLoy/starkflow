@@ -501,6 +501,11 @@
 				"returnType": "number"
 			},
 			{
+				"id": "last-player-name",
+				"expressionName": "LastPlayerName",
+				"returnType": "string"
+			},
+			{
 				"id": "current-player-id",
 				"expressionName": "CurrentPlayerId",
 				"returnType": "number"
@@ -1003,6 +1008,21 @@
 			{
 				"id": "synced-object-count",
 				"expressionName": "SyncedObjectCount",
+				"returnType": "number"
+			},
+			{
+				"id": "buffer-delay",
+				"expressionName": "BufferDelay",
+				"returnType": "number"
+			},
+			{
+				"id": "buffer-size",
+				"expressionName": "BufferSize",
+				"returnType": "number"
+			},
+			{
+				"id": "jitter",
+				"expressionName": "Jitter",
 				"returnType": "number"
 			},
 			{

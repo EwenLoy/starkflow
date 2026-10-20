@@ -645,8 +645,8 @@
 					},
 					"set-auto-smoothing": {
 						"list-name": "Set smoothing (auto)",
-						"display-text": "Set smoothing (auto): follows the send interval",
-						"description": "Like the smoothing checkbox in the server test client. On a server with the \"sync\" channel other players are drawn in the past by 2 x their send interval + the server batching window + 20 ms (80..300 ms); on an older server the time follows the send interval (1.4 x it, 70..300 ms). This is the default."
+						"display-text": "Set smoothing (auto): follows the send interval and the measured jitter",
+						"description": "Like the smoothing checkbox in the server test client, plus a jitter buffer. On a server with the \"sync\" channel other players are drawn in the past by 2 x their send interval + the server batching window + 3 x the measured jitter of the arrivals (80..400 ms): the delay grows at once when the channel bursts and comes down slowly when it calms down. On an older server the time follows the send interval (1.4 x it, 70..300 ms). This is the default."
 					},
 					"set-send-rate-preset": {
 						"list-name": "Set send rate (mode)",
@@ -909,6 +909,10 @@
 						"translated-name": "LastPlayerId",
 						"description": "Player id from the last player trigger."
 					},
+					"last-player-name": {
+						"translated-name": "LastPlayerName",
+						"description": "Nickname of the player from the last player trigger (empty if the server did not send one)."
+					},
 					"event-code": {
 						"translated-name": "EventCode",
 						"description": "Code of the last event."
@@ -1026,6 +1030,18 @@
 					"synced-object-count": {
 						"translated-name": "SyncedObjectCount",
 						"description": "Number of objects registered for sync."
+					},
+					"buffer-delay": {
+						"translated-name": "BufferDelay",
+						"description": "How far in the past other players are drawn, in milliseconds: the adaptive interpolation delay on a server with the \"sync\" channel, the smoothing time on an older server."
+					},
+					"buffer-size": {
+						"translated-name": "BufferSize",
+						"description": "How many snapshots of other players are buffered (the emptiest buffer of them). 0 means nothing to interpolate from."
+					},
+					"jitter": {
+						"translated-name": "Jitter",
+						"description": "How uneven the arrival of snapshots is, in milliseconds: what the interpolation delay has to absorb. A steady latency, even a big one, gives a small number."
 					},
 					"entity-uid": {
 						"translated-name": "EntityUID",

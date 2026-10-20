@@ -455,7 +455,16 @@ func (r *Room) removePlayer(id int, reason string) {
 	delete(r.players, id)
 	delete(r.byUser, p.UserID)
 	r.count.Store(int32(len(r.players)))
-	r.broadcast(proto.Marshal(map[string]any{"t": "player.left", "id": id, "reason": reason}), 0)
+	// Имя уходит вместе с player.left: клиент мог не знать этого игрока (вошёл,
+	// пока нас не было, или уже вычистил его у себя), а после удаления из комнаты
+	// взять его больше негде.
+	r.broadcast(proto.Marshal(map[string]any{
+		"t":      "player.left",
+		"id":     id,
+		"userId": p.UserID,
+		"name":   p.Name,
+		"reason": reason,
+	}), 0)
 	r.checkHost(before)
 }
 

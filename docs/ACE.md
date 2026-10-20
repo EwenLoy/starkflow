@@ -275,11 +275,14 @@
 | Register sync object (advanced) | действие | Связать выбранные инстансы с парой «id игрока + слот». Больше 10 галочек — точный список полей |
 | Unregister sync object | действие | Перестать синхронизировать выбранные инстансы |
 | Set smoothing | действие | Сколько миллисекунд чужие объекты доезжают до новых значений (0 — рывком). На сервере с каналом `sync` — на сколько мс в прошлом рисуются чужие объекты (буфер интерполяции) |
-| Set smoothing (auto) | действие | Сглаживание по частоте отправки: `1.4 × интервал`, но не меньше 70 и не больше 300 мс. На сервере с каналом `sync` — `2 × интервал отправки владельца + окно батчинга + 20 мс`, 80…300 мс. Это значение стоит по умолчанию |
+| Set smoothing (auto) | действие | Сглаживание по частоте отправки: `1.4 × интервал`, но не меньше 70 и не больше 300 мс. На сервере с каналом `sync` — адаптивный буфер: `2 × интервал отправки владельца + окно батчинга + 3 × измеренный джиттер`, 80…400 мс. Джиттер — насколько неравномерно приходят снимки: задержка мгновенно растёт при всплеске сети и медленно опускается, когда сеть успокоилась. Это значение стоит по умолчанию |
 | Set send rate (mode) | действие | Как часто слать: fast 58/с, medium 30/с, slow 15/с |
 | Set send rate (custom) | действие | Своя частота, 1–60 (выше 58 обрезается) |
 | `SendRate` | число | Текущая частота отправки |
 | `Smoothing` | число | Задержка, с которой сейчас рисуются чужие объекты, в мс: буфер интерполяции на сервере с каналом `sync`, «сколько мс доезжают» на старом сервере |
+| `BufferDelay` | число | То же, что `Smoothing`, но в стиле GamePush-диагностики: худшая (наибольшая) задержка буфера среди игроков |
+| `BufferSize` | число | Сколько снимков лежит в буфере (самый пустой из буферов). `0` — интерполировать не из чего |
+| `Jitter` | число | Измеренная неравномерность прихода снимков в мс (у худшего игрока). Ровная сеть, даже с большим пингом, даёт маленькое число |
 | `SyncedObjectCount` | число | Сколько объектов зарегистрировано |
 
 Низкоуровневый уровень — это то, что делает `Register object for sync` внутри: `owner` = id игрока, `slot` — номер
@@ -330,7 +333,7 @@
 | On reconnecting / On disconnected | `StatusString` — показать «переподключаюсь…» |
 | On joined room | `RoomId`, `RoomName`, `MyId`, `HostId`, `Resumed` |
 | On room list received | `RoomCount` и в цикле по `loopindex`: `RoomNameAt`, `RoomIdAt`, `RoomPlayersAt`, `RoomMaxAt` |
-| On player joined / left / connection lost / resumed | `LastPlayerId` → `PlayerName`, `PlayerUserId`, `PlayerStatus` |
+| On player joined / left / connection lost / resumed | `LastPlayerId` + `LastPlayerName` (или `PlayerName(LastPlayerId)`) |
 | On player prop (key) changed | `LastPlayerId` + ключ из условия → `PlayerProp(LastPlayerId, key)` |
 | On host changed | `HostId`, `Is host` |
 | On event (code) | `EventData`, `EventFrom` |
@@ -352,6 +355,8 @@ StarkFlow: On joined room    → Text Me: Set text to StarkFlow.MyName      // �
 ```
 StarkFlow: On player joined
     → Text Join: Set text to StarkFlow.PlayerName(StarkFlow.LastPlayerId) & " зашёл"
+StarkFlow: On player left
+    → Text Join: Set text to StarkFlow.LastPlayerName & " вышел"
 
 StarkFlow: On other player's object created (tag "player")
     → NameTag: Set text to StarkFlow.PlayerName(StarkFlow.ProxyPlayerId)
@@ -365,8 +370,11 @@ Repeat StarkFlow.PlayerCount times:
     → Text Row: Set text to StarkFlow.PlayerNameAt(loopindex) & " (" & StarkFlow.PlayerIdAt(loopindex) & ")"
 ```
 
-Ник фиксируется в момент `hello` (из `Set player name`), другого способа его поменять на лету нет — чтобы
-сменить ник, отключись и подключись заново. Постоянный id устройства — `MyUserId`, в комнате — `MyId`.
+Ник фиксируется сервером при входе в комнату (`Set player name` до `Join`/`Connect`) и уходит остальным
+вместе с `player.joined`; в `player.left` сервер тоже присылает имя, поэтому `LastPlayerName` не пустой
+даже у игрока, которого мы не успели увидеть. Имя из `room.joined`/`player.*` читается и после ухода
+игрока из списка. Поменять ник на лету нельзя — отключись и подключись заново. Постоянный id устройства —
+`MyUserId`, в комнате — `MyId`.
 
 ## Перебор игроков
 

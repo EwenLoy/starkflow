@@ -67,7 +67,18 @@
 			const p = this._players.get(ids[Math.floor(i)]);
 			return p ? (p.name || "") : "";
 		},
-		PlayerName(id) { const p = this._players.get(Math.floor(id)); return p ? (p.name || "") : ""; },
+		PlayerName(id)
+		{
+			const n = Math.floor(id);
+			const p = this._players.get(n);
+			if (p && typeof p.name === "string" && p.name !== "")
+				return p.name;
+			// Игрока уже нет в комнате (например, внутри On player left): имя
+			// последнего триггера остаётся доступным и после удаления из списка.
+			if (n === this._lastPlayerId)
+				return this._lastPlayerName;
+			return p ? (p.name || "") : "";
+		},
 		PlayerUserId(id) { const p = this._players.get(Math.floor(id)); return p ? (p.userId || "") : ""; },
 		PlayerStatus(id) { const p = this._players.get(Math.floor(id)); return p ? p.status : ""; },
 		PlayerProp(id, key)
@@ -76,6 +87,7 @@
 			return this._plain(p && p.props ? p.props[String(key)] : undefined);
 		},
 		LastPlayerId() { return this._lastPlayerId; },
+		LastPlayerName() { return this._lastPlayerName; },
 		CurrentPlayerId() { return this._curPlayer; },
 		ChangedPropKey() { return this._ppKey; },
 
@@ -83,8 +95,16 @@
 		SendRate() { return this._sendHz; },
 		// The value really in use: on the "sync" channel other players are drawn in the
 		// past by the interpolation delay, on the old "_sf" path by the plain value.
-		Smoothing() { return this._srvSync ? this._interpDelay(null) : this._smoothValue(); },
+		Smoothing() { return this._srvSync ? this._bufferDelay() : this._smoothValue(); },
 		SyncedObjectCount() { return this._sync.size; },
+
+		// Diagnostics of the interpolation buffers (GamePush-style): how far in the
+		// past the others are drawn, how many snapshots are buffered (0 = nothing to
+		// interpolate) and how uneven the channel is. BufferDelay falls back to the
+		// smoothing value on a server without the "sync" channel.
+		BufferDelay() { return this._srvSync ? this._bufferDelay() : this._smoothValue(); },
+		BufferSize() { return this._bufferSize(); },
+		Jitter() { return Math.round(this._jitter()); },
 
 		// object sync: the simple API (inside "For each object" and its triggers)
 		EntityUID() { return this._curEntity ? this._curEntity.uid : 0; },

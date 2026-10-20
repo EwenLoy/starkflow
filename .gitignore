@@ -106,3 +106,5 @@ certs/
 gamepushtemplate/
 gp-aces.txt
 server.zip
+game sdk.zip
+plugin/*.c3addon

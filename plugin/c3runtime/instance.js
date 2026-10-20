@@ -12,6 +12,8 @@
 	const MAX_RATE = 58;
 	const PRESET_IDS = ["fast", "medium", "slow"];	// combo items of the "send rate" ACE/property
 	const CONN_MODES = ["auto", "node", "directory"];	// combo items of the "connection mode" property
+	// combo items of "Join random or create room"
+	const RANDOM_MODES = ["fillroom", "randommatching", "serialmatching"];
 	const HZ_OF = { fast: 58, medium: 30, slow: 15 };
 	const TOKEN_CAP = 20;				// short bursts are fine, the average stays under MAX_RATE
 
@@ -139,6 +141,8 @@
 			this._nextReq = 0;
 			this._lastJoin = null;				// replayed after a reconnect
 			this._pendingCreate = null;			// "join or create": создаём, если комнаты нет
+			this._randomJoin = null;			// «случайная или своя»: чего ждём от room.list
+			this._randomRetry = null;			// выбранная комната пропала -> создаём свою
 
 			// Room.
 			this._roomId = "";
@@ -661,6 +665,8 @@
 			this._closeSocket();
 			this._status = "disconnected";
 			this._lastJoin = null;
+			this._randomJoin = null;
+			this._randomRetry = null;
 			this._clearRoom();
 			if (wasOpen && !silent)
 				this._trigger(this._cnd("OnDisconnected"));
@@ -985,7 +991,9 @@
 			}
 		}
 
-		_join(room, create, maxPlayers, emptyTTL, password)
+		// room.join as the server expects it: create = "always make a new room",
+		// maxPlayers 0 and emptyTTL -1 mean "server default" and are not sent.
+		_buildJoin(room, create, maxPlayers, emptyTTL, password)
 		{
 			const msg = { t: "room.join", room: String(room), create: create, name: this._name };
 			if (maxPlayers > 0)
@@ -996,6 +1004,12 @@
 				msg.suspendTTL = Math.floor(this._suspendTTL);
 			if (password)
 				msg.password = String(password);
+			return msg;
+		}
+
+		_join(room, create, maxPlayers, emptyTTL, password)
+		{
+			const msg = this._buildJoin(room, create, maxPlayers, emptyTTL, password);
 			this._pendingCreate = null;
 			if (create)
 			{
@@ -1017,6 +1031,89 @@
 			this._send(Object.assign({ id: this._reqId() }, msg));
 		}
 
+		// «Войти в случайную комнату или создать» (как Join random or create room в
+		// Photon). Решается на клиенте: спрашиваем у сервера список комнат, выбираем
+		// подходящую по режиму и входим по id. Свободных нет — создаём свою с этим
+		// именем. Новых сообщений протокола не нужно, старый сервер тоже подходит.
+		_joinRandom(room, maxPlayers, emptyTTL, matching)
+		{
+			const max = Math.floor(Number(maxPlayers));
+			const ttl = Math.floor(Number(emptyTTL));
+			this._randomRetry = null;
+			this._randomJoin = {
+				room: String(room === undefined || room === null ? "" : room).trim(),
+				maxPlayers: max > 0 ? max : 0,
+				emptyTTL: Number.isFinite(ttl) ? ttl : -1,
+				mode: this._pickCombo(RANDOM_MODES, matching, "fillroom")
+			};
+			this._log("info", "join random: asking for the room list (" + this._randomJoin.mode + ")");
+			this._send({ t: "room.list", id: this._reqId() });
+		}
+
+		// The server answered room.list: pick a room with a free slot and join it.
+		// Free means "not locked" (no password is sent by this action) and
+		// players < maxPlayers. No free room = create our own.
+		_pickRandomRoom()
+		{
+			const req = this._randomJoin;
+			if (!req)
+				return;
+			this._randomJoin = null;
+			const free = [];
+			for (const r of this._roomList)
+			{
+				if (!r || !r.id || r.locked === true)
+					continue;
+				const max = Number(r.maxPlayers) || 0;
+				const have = Number(r.players) || 0;
+				if (max > 0 && have >= max)
+					continue;
+				free.push({ id: String(r.id), room: String(r.room || ""), players: have });
+			}
+			let pick = null;
+			if (free.length)
+			{
+				// fill = the fullest room with a free slot (fewest rooms in use),
+				// random = any of them, serial = the first one in the list (name, then id).
+				if (req.mode === "fillroom")
+				{
+					pick = free[0];
+					for (const r of free)
+						if (r.players > pick.players)
+							pick = r;
+				}
+				else if (req.mode === "randommatching")
+					pick = free[Math.floor(Math.random() * free.length)];
+				if (!pick)
+					pick = free[0];
+			}
+			if (!pick)
+			{
+				this._log("info", "join random: no free room, creating one");
+				this._createRoom(req.room, req.maxPlayers, req.emptyTTL);
+				return;
+			}
+			this._randomRetry = req;
+			this._log("info", "join random: entering \"" + pick.room + "\" (" + pick.id + ", "
+				+ pick.players + " players)");
+			this._join(pick.id, false, 0, -1, "");
+		}
+
+		// Create a room right away: create=true always makes a NEW room (equal names are
+		// allowed), so unlike JoinOrCreateRoom there is no probe join by name first.
+		_createRoom(room, maxPlayers, emptyTTL)
+		{
+			let name = String(room === undefined || room === null ? "" : room).trim();
+			if (!name)
+				name = "room-" + Math.floor(Math.random() * 60466176).toString(36).padStart(5, "0");	// 36^5
+			const msg = this._buildJoin(name, true, maxPlayers, emptyTTL, "");
+			Object.assign(msg, this._rulesPayload());
+			this._pendingCreate = null;
+			this._lastJoin = msg;
+			this._log("info", "creating room \"" + name + "\"");
+			this._send(Object.assign({ id: this._reqId() }, msg));
+		}
+
 		_setPlayerTimeout(seconds)
 		{
 			const n = Math.floor(Number(seconds));
@@ -1027,6 +1124,8 @@
 		{
 			this._lastJoin = null;
 			this._pendingCreate = null;
+			this._randomJoin = null;
+			this._randomRetry = null;
 			const wasIn = this._status === "in-room";
 			this._send({ t: "room.leave", id: this._reqId() });
 			if (wasIn)
@@ -1110,6 +1209,7 @@
 				case "room.list.result":
 					this._roomList = Array.isArray(m.rooms) ? m.rooms : [];
 					this._trigger(this._cnd("OnRoomList"));
+					this._pickRandomRoom();		// «случайная или своя» ждёт именно этого ответа
 					break;
 				case "pong":
 					this._ping = Math.max(0, Date.now() - (m.ts || Date.now()));
@@ -1155,6 +1255,8 @@
 			this._trigger(this._cnd("OnConnected"));
 			if (this._lastJoin)
 				this._send(Object.assign({ id: this._reqId() }, this._lastJoin));
+			else if (this._randomJoin)
+				this._send({ t: "room.list", id: this._reqId() });	// the list was lost with the old socket
 		}
 
 		_onJoined(m)
@@ -1162,6 +1264,8 @@
 			this._roomId = m.roomId || "";
 			this._roomName = m.room;
 			this._pendingCreate = null;
+			this._randomJoin = null;
+			this._randomRetry = null;
 			// после обрыва возвращаемся по id: имена комнат не уникальны
 			this._lastJoin = this._roomId ? { t: "room.join", room: this._roomId, create: false, name: this._name } : null;
 			if (this._lastJoin && this._suspendTTL >= 0)
@@ -1318,7 +1422,20 @@
 			// отфильтровывает даже "Log level = error". Ложный 300 от пробного входа
 			// «войти или создать» остаётся на уровне "warn".
 			const probe = m.code === 300 && !!this._pendingCreate;
-			this._log(probe ? "warn" : "error", "server error", m.code, m.msg);
+			// «Случайная или своя»: пока входили, выбранная комната исчезла или
+			// заполнилась (300/301/302/307) — создаём свою, как Join random or create
+			// room в Photon. 303 (уже в комнате) сюда не входит: это ошибка вызывающего.
+			const pickLost = !!this._randomRetry && this._status !== "in-room"
+				&& (m.code === 300 || m.code === 301 || m.code === 302 || m.code === 307);
+			this._log(probe || pickLost ? "warn" : "error", "server error", m.code, m.msg);
+			if (pickLost)
+			{
+				const req = this._randomRetry;
+				this._randomRetry = null;
+				this._log("warn", "join random: that room is gone (" + m.code + "), creating one");
+				this._createRoom(req.room, req.maxPlayers, req.emptyTTL);
+				return;
+			}
 			if (m.code === 500)
 				this._trigger(this._cnd("OnRateLimited"));
 			if (m.code === 200)

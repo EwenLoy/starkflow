@@ -845,6 +845,77 @@ console.log("ACE consistency OK (" + n + " entries)");
 		"BufferDelay reports the interpolation delay in use");
 	assert.strictEqual(P.Exps.Smoothing.call(S1.inst), 107, "Smoothing without owners: the target for our own interval");
 
+	// ---- 7. "Join random or create room" ------------------------------------
+	// Client-side matchmaking: ask for the room list, pick a room with a free slot
+	// and join it by id; no free room = create one with the given name. Nothing new
+	// goes to the server, so an old node works as well.
+	const mkRandom = async (id) =>
+	{
+		const C = mkClient();
+		P.Acts.Connect.call(C.inst, "", "");
+		await sleep(5);
+		const ws = FakeWS.all[FakeWS.all.length - 1];
+		ws.recv({ t: "welcome", userId: "u" + id, token: "t" + id, serverTime: Date.now(), proto: 1 });
+		return { inst: C.inst, ws: ws };
+	};
+	const R1 = await mkRandom("R1");
+	P.Acts.JoinRandomOrCreateRoom.call(R1.inst, "arena", 8, 30, 0);		// 0 = fillroom
+	let jr = R1.ws.sent[R1.ws.sent.length - 1];
+	assert.strictEqual(jr.t, "room.list", "the action must ask for the room list first");
+	R1.ws.recv({ t: "room.list.result", rooms: [
+		{ id: "aaaaaaaa", room: "arena", players: 8, maxPlayers: 8 },				// full
+		{ id: "bbbbbbbb", room: "vip", players: 1, maxPlayers: 8, locked: true },	// password
+		{ id: "cccccccc", room: "arena", players: 2, maxPlayers: 8 },				// free
+		{ id: "dddddddd", room: "arena", players: 5, maxPlayers: 8 },				// free, fuller
+	] });
+	jr = R1.ws.sent[R1.ws.sent.length - 1];
+	assert.deepStrictEqual([jr.t, jr.room, jr.create], ["room.join", "dddddddd", false],
+		"fillroom must take the fullest free room, by id, without a create flag");
+	assert.ok(!fired(R1.inst, "OnError"));
+
+	// the picked room is gone while we join (full / closed): create our own instead
+	R1.ws.recv({ t: "err", code: 301, msg: "room is full" });
+	jr = R1.ws.sent[R1.ws.sent.length - 1];
+	assert.deepStrictEqual([jr.t, jr.room, jr.create, jr.maxPlayers, jr.emptyTTL],
+		["room.join", "arena", true, 8, 30]);
+	assert.ok(!fired(R1.inst, "OnError"), "a lost random room is not an error: a new room is created");
+
+	// serialmatching: the first free room in the list order, not the fullest one
+	const R2 = await mkRandom("R2");
+	P.Acts.JoinRandomOrCreateRoom.call(R2.inst, "boss", 4, -1, 2);		// 2 = serialmatching
+	R2.ws.recv({ t: "room.list.result", rooms: [
+		{ id: "eeeeeeee", room: "boss", players: 3, maxPlayers: 4 },
+		{ id: "ffffffff", room: "boss", players: 1, maxPlayers: 4 },
+	] });
+	jr = R2.ws.sent[R2.ws.sent.length - 1];
+	assert.deepStrictEqual([jr.t, jr.room, jr.create], ["room.join", "eeeeeeee", false]);
+	// and if that room is gone too, the created room keeps "server default" for emptyTTL
+	R2.ws.recv({ t: "err", code: 300, msg: "room not found" });
+	jr = R2.ws.sent[R2.ws.sent.length - 1];
+	assert.deepStrictEqual([jr.t, jr.room, jr.create, jr.maxPlayers], ["room.join", "boss", true, 4]);
+	assert.strictEqual(jr.emptyTTL, undefined, "-1 must stay out of the frame");
+
+	// no free room at all: create at once (no probe join by name), empty name = generated
+	const R3 = await mkRandom("R3");
+	P.Acts.JoinRandomOrCreateRoom.call(R3.inst, "", 0, -1, 1);			// 1 = randommatching
+	// the list is lost with the socket: after the reconnect the action asks again
+	R3.ws.readyState = 3;
+	R3.ws.onclose({ code: 1006 });
+	await sleep(40);
+	const wR3 = FakeWS.all[FakeWS.all.length - 1];
+	assert.ok(wR3 && wR3 !== R3.ws, "no reconnect happened");
+	wR3.recv({ t: "welcome", userId: "uR3", token: "tR3b", serverTime: Date.now(), proto: 1 });
+	jr = wR3.sent[wR3.sent.length - 1];
+	assert.strictEqual(jr.t, "room.list", "a pending random join must ask again after a reconnect");
+	wR3.recv({ t: "room.list.result", rooms: [
+		{ id: "11111111", room: "full", players: 2, maxPlayers: 2 },
+	] });
+	jr = wR3.sent[wR3.sent.length - 1];
+	assert.strictEqual(jr.t, "room.join");
+	assert.strictEqual(jr.create, true, "no free room must create one right away");
+	assert.ok(/^room-[0-9a-z]{5}$/.test(jr.room), "an empty name must become a generated one: " + jr.room);
+	assert.strictEqual(jr.maxPlayers, undefined, "0 max players = server default, not sent");
+
 	// ---- clustered mode: the connection mode + the nearest region ---------------
 	// A browser is the only one that knows which region is close to it, so the
 	// plugin asks the directory for its regions, measures /health of each and sends

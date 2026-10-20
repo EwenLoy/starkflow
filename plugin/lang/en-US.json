@@ -343,6 +343,34 @@
 							}
 						}
 					},
+					"join-random-or-create": {
+						"list-name": "Join random or create room",
+						"display-text": "Join a random room or create [i]{0}[/i] (max players [i]{1}[/i], [i]{3}[/i])",
+						"description": "Enter any room that still has a free slot, otherwise create a room with this name. Locked rooms (with a password) are skipped. The client picks the room from the room list, so the server needs nothing new.",
+						"params": {
+							"room": {
+								"name": "Room",
+								"desc": "Name of the room created when there is no free room. Empty = a random name like room-x7k2p."
+							},
+							"max-players": {
+								"name": "Max players",
+								"desc": "Max players of the created room. 0 = server default."
+							},
+							"empty-ttl": {
+								"name": "Delete when empty (s)",
+								"desc": "Delete time of the created room: -1 = server default, 0 = at once."
+							},
+							"matching": {
+								"name": "Matching",
+								"desc": "How to choose among the rooms with a free slot.",
+								"items": {
+									"fillroom": "Fill rooms: the fullest one first",
+									"randommatching": "Random: any free room",
+									"serialmatching": "In list order: the first free room"
+								}
+							}
+						}
+					},
 					"leave-room": {
 						"list-name": "Leave room",
 						"display-text": "Leave room",

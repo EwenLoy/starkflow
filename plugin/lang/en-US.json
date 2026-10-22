@@ -345,7 +345,7 @@
 					},
 					"join-random-or-create": {
 						"list-name": "Join random or create room",
-						"display-text": "Join a random room in lobby [i]{4}[/i] or create [i]{0}[/i] (max players [i]{1}[/i], [i]{3}[/i])",
+						"display-text": "Join a random room in lobby [i]{4}[/i] or create [i]{0}[/i] (max players [i]{1}[/i], delete when empty after [i]{2}[/i] s, [i]{3}[/i])",
 						"description": "Enter any room of this lobby that still has a free slot, otherwise create a room with this name in the same lobby. Locked rooms (with a password) are skipped. Empty lobby = every room of the app.",
 						"params": {
 							"room": {
@@ -689,7 +689,7 @@
 					"set-auto-smoothing": {
 						"list-name": "Set smoothing (auto)",
 						"display-text": "Set smoothing (auto): follows the send interval and the measured jitter",
-						"description": "Like the smoothing checkbox in the server test client, plus a jitter buffer. On a server with the \"sync\" channel other players are drawn in the past by 2 x their send interval + the server batching window + 3 x the measured jitter of the arrivals (80..400 ms): the delay grows at once when the channel bursts and comes down slowly when it calms down. On an older server the time follows the send interval (1.4 x it, 70..300 ms). This is the default."
+						"description": "Like the smoothing checkbox in the server test client, plus a jitter buffer. On a server with the \"sync\" channel other players are drawn in the past by 1.5 x their send interval + 3 x the measured jitter of the arrivals (40..400 ms; the batching window is added only by an older server that relays snapshots through its queue - a server that reports syncNow relays them at once): the delay grows at once when the channel bursts and comes down slowly when it calms down. On an older server the time follows the send interval (1.4 x it, 70..300 ms). This is the default."
 					},
 					"set-send-rate-preset": {
 						"list-name": "Set send rate (mode)",

@@ -805,8 +805,11 @@ func (r *Room) Sync(c Conn, seq, ts int64, iv int, objs json.RawMessage) {
 			"t": "sync", "id": p.ID, "seq": seq, "ts": ts, "iv": iv, "objs": objs,
 		})
 		// Each receiver gets it ONE way: its WebRTC channel if open, else the
-		// WebSocket batch. The empty snapshot always goes over the WebSocket:
-		// losing it would leave copies of the objects forever.
+		// WebSocket right away. Not through the batching queue: a snapshot that
+		// waits for the window is a snapshot the others draw a window later, and
+		// the client cannot even tell when the wait happened. The empty snapshot
+		// always goes over the WebSocket: losing it would leave copies of the
+		// objects forever.
 		for id, op := range r.players {
 			if op.conn == nil || id == p.ID {
 				continue
@@ -814,7 +817,7 @@ func (r *Room) Sync(c Conn, seq, ts int64, iv int, objs json.RawMessage) {
 			if uc, ok := op.conn.(UnreliableConn); ok && len(arr) > 0 && uc.SendUnreliable(frame) {
 				continue
 			}
-			r.queue(op, frame, "")
+			r.send(op, frame)
 		}
 	})
 }

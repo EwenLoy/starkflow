@@ -195,6 +195,7 @@
 					{
 						"id": "matching",
 						"type": "combo",
+						"initialValue": "fillroom",
 						"items": ["fillroom", "randommatching", "serialmatching"]
 					},
 					{

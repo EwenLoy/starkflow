@@ -50,7 +50,7 @@
 	// the past, interpolating between the two snapshots around that moment (entity
 	// interpolation, G. Gambetta "Fast-Paced Multiplayer III").
 	const SNAP_BUFFER = 64;				// snapshots kept per player
-	const INTERP_MIN = 80;				// ms, auto interpolation delay is kept in 80..400
+	const INTERP_MIN = 40;				// ms, auto interpolation delay is kept in 40..400
 	const INTERP_MAX = 400;
 	const EXTRAP_MAX = 250;				// ms of coasting on the last velocity when snapshots stop coming
 	const BLEND_AFTER_GAP = 250;		// ms of easing back onto the sampled track after a gap
@@ -200,6 +200,7 @@
 			this._srvSync = false;			// the server has the "sync" channel (welcome.sync)
 			this._maxSync = 32 * 1024;		// welcome.maxSync: size of one snapshot
 			this._srvBatchMs = 0;			// welcome.batchMs: the server batching window
+			this._srvSyncNow = false;		// welcome.syncNow: "sync" is relayed at once
 			this._syncSeq = 0;				// number of our last snapshot
 			this._syncLast = "";				// JSON of our last snapshot ("" = none sent)
 			this._warnedSync = false;
@@ -1265,6 +1266,7 @@
 			if (Number(m.maxSync) > 0)
 				this._maxSync = Number(m.maxSync);
 			this._srvBatchMs = Math.max(0, Number(m.batchMs) || 0);
+			this._srvSyncNow = m.syncNow === true;
 			// started right away, not on join: ICE has time while the game gets going
 			if (m.rtc === true && this._srvSync)
 				this._rtcStart(m);
@@ -1868,15 +1870,18 @@
 			return this._delayTarget(o);
 		}
 
-		// The delay the buffer should have now: two send intervals (one to receive the
-		// next snapshot, one to interpolate into) plus three measured jitters and the
-		// server batching window - enough to cover a burst, not more (every extra
-		// millisecond is a millisecond the player sees in the past).
+		// The delay the buffer should have now: one and a half send intervals - the
+		// newest snapshot has to be there while the previous one is still drawn -
+		// plus three measured jitters. The batching window is added only when the
+		// snapshot really goes through the room queue: a server that relays "sync"
+		// at once (welcome.syncNow) and an open WebRTC channel do not add it, there
+		// it would be pure phantom latency.
 		_delayTarget(o)
 		{
 			const iv = o && o.iv > 0 ? o.iv : this._sendInterval;
 			const jit = o && o.jit > 0 ? o.jit : 0;
-			return Math.max(INTERP_MIN, Math.min(INTERP_MAX, Math.round(iv * 2 + jit * 3 + this._srvBatchMs)));
+			const batch = this._srvSyncNow || this._rtcDc ? 0 : this._srvBatchMs;
+			return Math.max(INTERP_MIN, Math.min(INTERP_MAX, Math.round(iv * 1.5 + jit * 3 + batch)));
 		}
 
 		// Called once per arrived snapshot: the delay jumps up at once (a burst must
@@ -1948,9 +1953,21 @@
 				buf.splice(0, i - 1);			// older snapshots are not needed any more
 				i = 1;
 			}
-			const a = buf[i].states.get(rec.slot);
+			let a = buf[i].states.get(rec.slot);
 			if (!a)
-				return null;
+			{
+				// The slot is younger than the sampled moment (an object created after
+				// it): hold its first known state. Returning null here left a fresh
+				// object frozen on its spawn point for a whole interpolation delay.
+				for (let j = i + 1; j < buf.length; j++)
+				{
+					a = buf[j].states.get(rec.slot);
+					if (a)
+						break;
+				}
+				if (!a)
+					return null;
+			}
 			if (at(i) > t)
 				return a;						// before the oldest snapshot: hold it
 			if (i === buf.length - 1)
@@ -1970,9 +1987,11 @@
 
 		// Continue the movement of the last two snapshots. over = ms since the newest
 		// snapshot, span = ms between those two. Nothing is sent during a pause, so
-		// over stays 0 for a standing player: only a moving one coasts. mark says the
-		// coasting has outgrown one interval - a real gap that _applyOne has to glide
-		// back from; the usual edge of the buffer is not one.
+		// over stays 0 for a standing player: only a moving one coasts. The coast
+		// covers one late snapshot at most and is then pulled back onto the last
+		// authoritative one - a sender who simply stopped sending (a standing
+		// object) must not keep his copy ahead of him. mark says the coasting has
+		// outgrown one interval - a real gap that _applyOne has to glide back from.
 		_extrapolate(prev, cur, over, span, rec, mark)
 		{
 			if (!prev || over <= 0 || span <= 0)
@@ -1986,7 +2005,17 @@
 			const pa = prev.v, cb = cur.v;
 			if (Math.abs(fin(cb.x) - fin(pa.x)) > TELEPORT || Math.abs(fin(cb.y) - fin(pa.y)) > TELEPORT)
 				return cur;						// a jump: no flying across the map
-			const f = over / span;
+			// One interval of coast, then back onto cur over the next interval: a
+			// smooth return instead of the old 250 ms flight that stayed ahead.
+			let fade = 1;
+			if (over > span)
+			{
+				fade = Math.max(0, 1 - (over - span) / span);
+				over = span;
+				if (fade <= 0)
+					return cur;
+			}
+			const f = (over / span) * fade;
 			const v = Object.assign({}, cb);	// animation, frame, visibility: the newest
 			for (const key of ["x", "y", "z", "op"])
 			{

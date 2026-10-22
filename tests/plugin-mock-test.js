@@ -785,42 +785,56 @@ console.log("ACE consistency OK (" + n + " entries)");
 	clock = 10100; wS2.recv({ t: "sync", id: 1, seq: 2, ts: 1100, iv: 100, objs: [[0, 1035, 100, 50, 90, "player"]] });
 	const proxyS = S2.rt.byUid.get(P.Exps.PlayerProxyUID.call(S2.inst, 1, "player"));
 	assert.ok(proxyS, "the proxy of player 1 must exist");
-	// the auto delay on a steady channel: 2 x the send interval (100) + the server
-	// batching window (40) = 240 ms - the measured jitter is 0, so no extra margin
-	assert.strictEqual(P.Exps.BufferDelay.call(S2.inst), 240, "a steady channel needs no extra delay");
+	// the auto delay on a steady channel: 1.5 x the send interval (100) + the
+	// server batching window (40) = 190 ms - the measured jitter is 0, so no
+	// extra margin. A server that relays "sync" at once (welcome.syncNow) would
+	// take no window at all; these mock servers are the older ones.
+	const delayS = P.Exps.BufferDelay.call(S2.inst);
+	assert.strictEqual(delayS, 190, "a steady channel needs one and a half intervals and the window");
 	assert.strictEqual(P.Exps.Jitter.call(S2.inst), 0, "a steady channel has no jitter");
 	assert.strictEqual(P.Exps.BufferSize.call(S2.inst), 2, "two snapshots are buffered");
-	// delay = 240: at 10320 we draw 10080, 80% of the way between the snapshots
-	clock = 10320; S2.inst._applyRemote(16);
+	// delay = 190: at 10270 we draw 10080, 80% of the way between the snapshots
+	clock = 10080 + delayS; S2.inst._applyRemote(16);
 	assert.ok(Math.abs(proxyS.x - 80) < 0.01 && Math.abs(proxyS.y - 40) < 0.01, "interpolated between the snapshots, got " + proxyS.x + "," + proxyS.y);
 	assert.ok(Math.abs(proxyS.angleDegrees - 72) < 0.01, "the angle is interpolated too");
 	// after a pause the object does not crawl across it: it waits, then moves over
 	// one interval (the sender's clock went on, so a fresh offset is learned)
 	clock = 15000; wS2.recv({ t: "sync", id: 1, seq: 3, ts: 6000, iv: 100, objs: [[0, 1035, 200, 50, 90, "player"]] });
-	clock = 15000 + 240 - 100; S2.inst._applyRemote(16);
+	clock = 15000 + delayS - 100; S2.inst._applyRemote(16);
 	assert.strictEqual(proxyS.x, 100, "the old position is held until one interval before the new snapshot");
-	clock = 15000 + 240 - 50; S2.inst._applyRemote(16);
+	clock = 15000 + delayS - 50; S2.inst._applyRemote(16);
 	assert.ok(Math.abs(proxyS.x - 150) < 0.01, "then it moves over one interval, got " + proxyS.x);
 	// a hiccup: the snapshots stop - the object coasts on the last velocity instead of
 	// freezing (a fresh buffer, as if the sender started over)
 	clock = 20000; S2.inst._onSync(1, { seq: 1, ts: 1000, iv: 100, objs: [[0, 1035, 0, 0, 0, "player"]] }, true);
 	clock = 20100; S2.inst._onSync(1, { seq: 2, ts: 1100, iv: 100, objs: [[0, 1035, 100, 50, 90, "player"]] }, false);
-	clock = 20360; S2.inst._applyRemote(16);
+	clock = 20120 + delayS; S2.inst._applyRemote(16);
 	assert.ok(Math.abs(proxyS.x - 120) < 0.01, "past the newest snapshot the object coasts on, got " + proxyS.x);
-	clock = 20450; S2.inst._applyRemote(16);
-	assert.ok(Math.abs(proxyS.x - 210) < 0.01, "it coasts at the same speed, got " + proxyS.x);
-	// ...but at most EXTRAP_MAX (250 ms) ahead: a lost connection must not fly it away
-	for (clock = 20466; clock < 20600; clock += 16)
+	// ...but the coast is pulled back onto the last snapshot after one interval: at
+	// 110 ms past it the copy is already on its way back (0.9 of the old 1.1)
+	clock = 20210 + delayS; S2.inst._applyRemote(16);
+	assert.ok(Math.abs(proxyS.x - 190) < 1, "after one interval the coast is pulled back, got " + proxyS.x);
+	// a sender who stopped sending (a standing object) leaves his copy exactly on
+	// his last snapshot instead of 250 ms ahead of him
+	for (clock = 20226 + delayS; clock < 20000 + delayS + 1600; clock += 16)
 		S2.inst._applyRemote(16);
-	assert.ok(Math.abs(proxyS.x - 350) < 1, "the coasting stops after 250 ms, got " + proxyS.x);
+	assert.ok(Math.abs(proxyS.x - 100) < 1, "a stopped sender leaves the copy on the last snapshot, got " + proxyS.x);
 	// the measured jitter widens the delay at once and lets it down slowly
 	const bufS = S2.inst._snaps.get(1);
 	bufS.jit = 50;
 	S2.inst._updateDelay(bufS);
-	assert.strictEqual(P.Exps.BufferDelay.call(S2.inst), 390, "jitter widens the delay at once");
+	assert.strictEqual(P.Exps.BufferDelay.call(S2.inst), 340, "jitter widens the delay at once");
 	bufS.jit = 0;
 	S2.inst._updateDelay(bufS);
-	assert.ok(bufS.delay > 360 && bufS.delay < 390, "the delay comes down slowly, got " + bufS.delay);
+	assert.ok(bufS.delay > 310 && bufS.delay < 340, "the delay comes down slowly, got " + bufS.delay);
+	// a server that relays "sync" at once (welcome.syncNow) costs no window at all
+	S2.inst._srvSyncNow = true;
+	bufS.delay = undefined;
+	S2.inst._updateDelay(bufS);
+	assert.strictEqual(bufS.delay, 150, "a server that relays at once needs no batching window");
+	S2.inst._srvSyncNow = false;
+	bufS.delay = undefined;
+	S2.inst._updateDelay(bufS);
 	// the correction after a gap is capped at 1.5x the entity's own speed
 	const recS = S2.inst._sync.get("1:0");
 	recS.gap = 250;
@@ -843,7 +857,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	// the plain smoothing target on a server without remote data (no "sync" snapshots)
 	assert.strictEqual(Math.round(P.Exps.BufferDelay.call(S2.inst)), Math.round(S2.inst._snaps.get(1).delay),
 		"BufferDelay reports the interpolation delay in use");
-	assert.strictEqual(P.Exps.Smoothing.call(S1.inst), 107, "Smoothing without owners: the target for our own interval");
+	assert.strictEqual(P.Exps.Smoothing.call(S1.inst), 90, "Smoothing without owners: the target for our own interval");
 
 	// ---- 7. "Join random or create room" ------------------------------------
 	// Client-side matchmaking: ask for the room list, pick a room with a free slot

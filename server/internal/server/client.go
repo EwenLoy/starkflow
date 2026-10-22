@@ -319,6 +319,9 @@ func (c *client) onHello(m *proto.ClientMsg) {
 		"sync":    true,
 		"maxSync": cfg.MaxSyncBytes,
 		"batchMs": cfg.BatchInterval.Milliseconds(),
+		// "sync" is relayed right away, not through the batching queue: the
+		// client must not add the batching window to its interpolation delay.
+		"syncNow": true,
 	}
 	if c.srv.rtc != nil {
 		// the client may open the WebRTC channel for "sync" (rtc.offer)

@@ -23,7 +23,7 @@
 				return me.name;
 			return this._name;
 		},
-		Ping() { return this._ping; },
+		Ping() { return Math.round(num(this._ping)); },
 		ServerTime() { return Date.now() + this._serverOffset; },
 		StatusString() { return this._status; },
 

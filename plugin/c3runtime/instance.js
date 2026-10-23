@@ -17,6 +17,13 @@
 	const HZ_OF = { fast: 58, medium: 30, slow: 15 };
 	const TOKEN_CAP = 20;				// short bursts are fine, the average stays under MAX_RATE
 
+	// ---- ping -----------------------------------------------------------
+	// The ping runs on its own timer and does not wait for an idle connection: an
+	// active game sends something every frame, and "ping only when nothing was sent
+	// for 10 s" never fires there, so the Ping expression stayed 0 forever.
+	const PING_MS = 1000;
+	const PING_TIMEOUT = 10000;			// a pong this late is not a usable sample
+
 	// ---- object sync --------------------------------------------------
 	// Synced objects are packed into the owner's player properties "_sf0".."_sf7".
 	// The server tells its string limit in "welcome" (maxString, 4096 by default), a
@@ -137,6 +144,8 @@
 			this._pingTimer = null;
 			this._lastSend = 0;
 			this._ping = 0;
+			this._pingMs = PING_MS;			// the mock test shortens it
+			this._pings = new Map();		// ts -> sent at, to match the answer with the request
 			this._serverOffset = 0;
 			this._nextReq = 0;
 			this._lastJoin = null;				// replayed after a reconnect
@@ -719,11 +728,25 @@
 		_startPing()
 		{
 			this._stopPing();
-			this._pingTimer = setInterval(() =>
+			this._sendPing();			// the first sample lands right after "welcome", not a second later
+			this._pingTimer = setInterval(() => this._sendPing(), this._pingMs);
+		}
+
+		// One ping per interval whatever else the plugin sends: the answer is the only
+		// way to know the round trip time, and it must not depend on the game being idle.
+		_sendPing()
+		{
+			const ws = this._ws;
+			if (!ws || ws.readyState !== 1)
+				return;
+			const now = Date.now();
+			for (const ts of this._pings.keys())
 			{
-				if (this._ws && Date.now() - this._lastSend > 10000)
-					this._send({ t: "ping", ts: Date.now() });
-			}, 5000);
+				if (now - ts > PING_TIMEOUT)
+					this._pings.delete(ts);
+			}
+			this._pings.set(now, now);
+			this._send({ t: "ping", ts: now });
 		}
 
 		_stopPing()
@@ -733,6 +756,8 @@
 				clearInterval(this._pingTimer);
 				this._pingTimer = null;
 			}
+			this._pings.clear();
+			this._ping = 0;
 		}
 
 		// ---- sending -------------------------------------------------
@@ -1233,8 +1258,22 @@
 					this._pickRandomRoom();		// «случайная или своя» ждёт именно этого ответа
 					break;
 				case "pong":
-					this._ping = Math.max(0, Date.now() - (m.ts || Date.now()));
+				{
+					// Match the answer with the request by the echoed "ts", so a late
+					// pong cannot be counted twice and a stale one cannot move the value.
+					const now = Date.now();
+					let ts = m.ts;
+					if (ts === undefined || ts === null)
+						ts = this._pings.keys().next().value;		// a server that does not echo ts
+					else if (!this._pings.has(ts))
+						break;										// duplicate or expired answer: no sample
+					if (ts === undefined)
+						break;
+					const sentAt = this._pings.get(ts);
+					this._pings.delete(ts);
+					this._ping = Math.max(0, now - sentAt);
 					break;
+				}
 				case "err": this._onError(m); break;
 				case "ok": break;
 				case "rtc.answer": this._onRtcAnswer(m); break;

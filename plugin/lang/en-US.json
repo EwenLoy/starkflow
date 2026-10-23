@@ -816,7 +816,7 @@
 					},
 					"ping": {
 						"translated-name": "Ping",
-						"description": "Round trip time to the server in milliseconds."
+						"description": "Round trip time to the server in milliseconds, measured once per second (0 until the first answer arrives)."
 					},
 					"server-time": {
 						"translated-name": "ServerTime",

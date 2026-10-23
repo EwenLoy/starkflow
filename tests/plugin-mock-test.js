@@ -84,6 +84,11 @@ const P = globalThis.C3.Plugins.EwenLoy_StarkFlow;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fired = (inst, name) => inst.triggered.includes(P.Cnds[name]);
 
+// Pings go out on their own timer, so they would show up in every "sent" check of
+// the behaviour tests. Instances start with a huge interval here; the ping test
+// at the end shortens it.
+const newInst = () => { const i = new P.Instance(); i._pingMs = 1e9; return i; };
+
 // ---- 0. the plugin never opens a browser dialog --------------------------
 const fs = require("fs");
 const pluginFiles = ["plugin.js", "type.js", "instance.js",
@@ -133,7 +138,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 
 // ---- 2. behaviour --------------------------------------------------------
 (async () => {
-	const inst = new P.Instance();
+	const inst = newInst();
 	inst._retryBase = 5;
 
 	P.Acts.Connect.call(inst, "", "");
@@ -263,7 +268,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.ok(fired(inst, "OnDisconnected"));
 
 	// protocol mismatch must not loop forever
-	const inst2 = new P.Instance();
+	const inst2 = newInst();
 	inst2._retryBase = 5;
 	P.Acts.Connect.call(inst2, "", "");
 	await sleep(5);
@@ -275,7 +280,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.ok(fired(inst2, "OnDisconnected"));
 
 	// locked room: the password goes with the join and is replayed after a reconnect
-	const inst3 = new P.Instance();
+	const inst3 = newInst();
 	inst3._retryBase = 5;
 	P.Acts.Connect.call(inst3, "", "");
 	await sleep(5);
@@ -309,7 +314,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.ok(fired(inst3, "OnError"));
 
 	// ---- 3. the simple object sync API --------------------------------------
-	const inst4 = new P.Instance();
+	const inst4 = newInst();
 	inst4._retryBase = 5;
 	// my nickname is known before joining: it is what the game set
 	P.Acts.SetName.call(inst4, "nick");
@@ -457,7 +462,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 		};
 		cls.rt = rt;
 		crateCls.rt = rt;
-		const inst = new P.Instance();
+		const inst = newInst();
 		inst.__runtime = rt;
 		inst._retryBase = 5;
 		return { inst: inst, rt: rt, cls: cls, crateCls: crateCls };
@@ -977,7 +982,9 @@ console.log("ACE consistency OK (" + n + " entries)");
 	const mk = (props) =>
 	{
 		class C extends P.Instance { _getInitProperties() { return props; } }
-		return new C();
+		const i = new C();
+		i._pingMs = 1e9;
+		return i;
 	};
 	const okJson = (obj) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(obj) });
 
@@ -1063,6 +1070,44 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.ok(FakeWS.all.length === 1 && FakeWS.all[0].url.indexOf("wss://node7.example.com/ws") === 0);
 	assert.strictEqual(P.Exps.Region.call(dirForced), "eu");
 	globalThis.fetch = realFetch;
+
+	// ---- ping: measured on its own timer, whatever else the game sends ------
+	{
+		FakeWS.all.length = 0;
+		const p = newInst();
+		p._retryBase = 5;
+		p._pingMs = 25;							// the real interval is 1 s
+		P.Acts.Connect.call(p, "", "");
+		await sleep(5);
+		const wp = FakeWS.all[FakeWS.all.length - 1];
+		wp.recv({ t: "welcome", userId: "uPing", token: "tokPing", serverTime: Date.now(), proto: 1 });
+
+		const first = wp.sent.filter((m) => m.t === "ping")[0];
+		assert.ok(first && typeof first.ts === "number", "a ping must follow the socket opening: " + JSON.stringify(wp.sent));
+
+		await sleep(30);
+		wp.recv({ t: "pong", ts: first.ts, serverTime: Date.now() });
+		assert.ok(P.Exps.Ping.call(p) > 0, "Ping must show the measured time, got " + P.Exps.Ping.call(p));
+
+		// The bug: a ping went out only when nothing had been sent for 10 s, so in a
+		// live game the Ping expression stayed 0 forever.
+		const before = wp.sent.filter((m) => m.t === "ping").length;
+		for (let i = 0; i < 4; i++)
+		{
+			p._send({ t: "event", to: "all", code: 1 });	// the game keeps sending
+			await sleep(15);
+		}
+		const after = wp.sent.filter((m) => m.t === "ping").length;
+		assert.ok(after > before, "pings must keep coming while the game sends: " + before + " -> " + after);
+
+		// a pong nobody asked for must not invent a value
+		const kept = P.Exps.Ping.call(p);
+		wp.recv({ t: "pong", ts: 12345 });
+		assert.strictEqual(P.Exps.Ping.call(p), kept, "an unmatched pong must be ignored");
+
+		P.Acts.Disconnect.call(p);
+		assert.strictEqual(P.Exps.Ping.call(p), 0, "no connection: Ping resets to 0");
+	}
 
 	console.log("Behaviour tests OK");
 	process.exit(0);

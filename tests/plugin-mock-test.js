@@ -1180,7 +1180,93 @@ console.log("ACE consistency OK (" + n + " entries)");
 	}
 
 
-	// ---- a copy whose animation the events overwrite: reported, never silent --------
+	// ---- a held frame must not rewind the animation of the copy ---------------------
+	// The owner sends only changes, so a minimized tab (the runtime stops ticking, no
+	// snapshots go out) leaves the last snapshot as the only one there is. Writing its
+	// frame on every tick pulled the copy back to that frame each tick - the animation
+	// looked like it started over and over. A playing animation advances on its own;
+	// the frame only starts it, poses a stopped one or is the whole state without a name.
+	{
+		const C = mkClient();
+		const D = mkClient();
+		const wC = await joinClient(C, 1, [{ id: 1, name: "C", props: {} }]);
+		const wD = await joinClient(D, 2, [{ id: 1, name: "C", props: {} }, { id: 2, name: "D", props: {} }]);
+		const mineC = C.cls.createInstance("Game", 10, 20);
+		D.cls.createInstance("Game", 30, 40);
+
+		P.Acts.SyncObject.call(C.inst, C.cls, "player", "player", "position", true, "Game");
+		P.Acts.SyncAnimations.call(C.inst, C.cls, true, true, true, false);
+		P.Acts.StartSync.call(C.inst);
+		mineC.animationName = "fall";
+		mineC.animationFrame = 0;
+		mineC.animationSpeed = 1;
+		C.inst._flush(performance.now());
+		const sent = chunkOf(wC);
+
+		P.Acts.SyncObject.call(D.inst, D.cls, "player", "player", "position", true, "Game");
+		P.Acts.SyncAnimations.call(D.inst, D.cls, true, true, true, false);
+		P.Acts.StartSync.call(D.inst);
+		wD.recv({ t: "player.props", id: 1, key: "_sf0", value: sent.value });
+		D.inst._applyRemote(16);
+		const proxy = D.rt.getInstanceByUid(P.Exps.PlayerProxyUID.call(D.inst, 1, "player"));
+		assert.ok(proxy, "D must have a proxy of player 1");
+		assert.strictEqual(proxy.animationName, "fall", "the copy gets the animation of its owner");
+		assert.strictEqual(proxy.animationFrame, 0, "the animation starts at the frame of the owner");
+
+		// the copy plays it, the owner is minimized: the same snapshot is applied again
+		proxy.animationFrame = 3;
+		for (let i = 0; i < 5; i++)
+			D.inst._applyRemote(16);
+		assert.strictEqual(proxy.animationFrame, 3,
+			"a playing animation must not be pulled back to the frame of a held snapshot");
+
+		// the owner comes back with another animation: it starts at its frame again
+		const before = wC.sent.length;
+		mineC.animationName = "stat";
+		mineC.animationFrame = 0;
+		C.inst._flush(performance.now());
+		assert.ok(wC.sent.length > before, "the new animation must go out");
+		wD.recv({ t: "player.props", id: 1, key: "_sf0", value: chunkOf(wC).value });
+		D.inst._applyRemote(16);
+		assert.strictEqual(proxy.animationName, "stat", "the new animation is applied");
+		assert.strictEqual(proxy.animationFrame, 0, "the new animation starts at the frame of the owner");
+
+		proxy.animationFrame = 2;
+		for (let i = 0; i < 3; i++)
+			D.inst._applyRemote(16);
+		assert.strictEqual(proxy.animationFrame, 2, "and keeps playing on its own after that");
+	}
+
+	// ---- without the name the frame is the whole animation state --------------------
+	{
+		const C = mkClient();
+		const D = mkClient();
+		const wC = await joinClient(C, 1, [{ id: 1, name: "C", props: {} }]);
+		const wD = await joinClient(D, 2, [{ id: 1, name: "C", props: {} }, { id: 2, name: "D", props: {} }]);
+		const mineC = C.cls.createInstance("Game", 10, 20);
+		D.cls.createInstance("Game", 30, 40);
+
+		P.Acts.SyncObject.call(C.inst, C.cls, "player", "player", "position", false, "Game");
+		P.Acts.SyncAnimations.call(C.inst, C.cls, false, true, false, false);
+		P.Acts.StartSync.call(C.inst);
+		mineC.animationFrame = 5;
+		C.inst._flush(performance.now());
+
+		P.Acts.SyncObject.call(D.inst, D.cls, "player", "player", "position", false, "Game");
+		P.Acts.SyncAnimations.call(D.inst, D.cls, false, true, false, false);
+		P.Acts.StartSync.call(D.inst);
+		wD.recv({ t: "player.props", id: 1, key: "_sf0", value: chunkOf(wC).value });
+		D.inst._applyRemote(16);
+		const proxy = D.rt.getInstanceByUid(P.Exps.PlayerProxyUID.call(D.inst, 1, "player"));
+		assert.ok(proxy, "D must have a proxy of player 1");
+		assert.strictEqual(proxy.animationFrame, 5, "a frame without a name is applied");
+
+		proxy.animationFrame = 2;
+		D.inst._applyRemote(16);
+		assert.strictEqual(proxy.animationFrame, 5, "the frame of the owner wins every tick");
+	}
+
+
 	// The events run after the plugin tick and pick every instance of the object type,
 	// so a plain "Is moving -> Set animation walk" wins over the synced animation of the
 	// copies. The plugin cannot win that fight, so it names the Pick that fixes it.

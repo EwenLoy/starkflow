@@ -2266,6 +2266,19 @@
 			}
 		}
 
+		// Should the sampled frame be written into the copy? See the call site: a
+		// playing animation advances on its own, so the frame only starts it (or poses
+		// a stopped one), and it is the whole state when the name is not synced.
+		_frameWanted(inst, rec, m, v)
+		{
+			if (!(m & F.ANIM) || !v.anim)
+				return true;
+			const sp = (m & F.SPEED) ? fin(v.sp) : fin(inst.animationSpeed);
+			if (!(sp > 0))
+				return true;
+			return rec.frameAnim !== v.anim;
+		}
+
 		// exact: st is already interpolated (the sync channel), apply it as is.
 		_applyOne(inst, rec, st, dt, exact, now)
 		{
@@ -2382,14 +2395,27 @@
 				}
 				else if (inst.animationName !== v.anim)
 				{
-					try { inst.setAnimation(v.anim); rec.anim = v.anim; }
-					catch (e) { rec.anim = undefined; this._log("warn", "unknown animation: " + v.anim); }
+					try { inst.setAnimation(v.anim); rec.anim = v.anim; rec.frameAnim = undefined; }
+					catch (e) { rec.anim = undefined; rec.frameAnim = undefined; this._log("warn", "unknown animation: " + v.anim); }
 				}
 				else
 					rec.anim = v.anim;
 			}
-			if ((m & F.FRAME) && typeof inst.animationFrame === "number" && inst.animationFrame !== v.frame)
-				inst.animationFrame = v.frame;
+			// The frame is not a per-tick value. A copy plays its animation itself at
+			// the synced speed, and the sample is drawn a little in the past, so writing
+			// the sampled frame on every tick pulls the animation back - and an owner who
+			// stopped sending (a minimized tab) leaves one frame in the snapshot, so the
+			// copy is pinned to it and looks like it starts over and over. The frame is
+			// written only when it starts an animation, poses a stopped one, or is the
+			// only animation state there is (the name is not synced).
+			if ((m & F.FRAME) && typeof inst.animationFrame === "number")
+			{
+				if (inst.animationFrame !== v.frame && this._frameWanted(inst, rec, m, v))
+					inst.animationFrame = v.frame;
+				// The starting frame of this animation has been taken: from here on the
+				// copy plays it itself, at the synced speed, like its owner does.
+				rec.frameAnim = v.anim;
+			}
 			if ((m & F.VISIBLE) && inst.isVisible !== !!v.vis) inst.isVisible = !!v.vis;
 			if ((m & F.OPACITY) && inst.opacity !== v.op) inst.opacity = v.op;
 

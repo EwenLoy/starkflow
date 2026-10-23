@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.6.6.4-blue?style=flat-square" alt="Version 0.6.6.4">
+  <img src="https://img.shields.io/badge/version-0.6.6.5-blue?style=flat-square" alt="Version 0.6.6.5">
   <img src="https://img.shields.io/badge/go-1.22%2B-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.22+">
   <img src="https://img.shields.io/badge/construct_3-addon-f2c94c?style=flat-square" alt="Construct 3 addon">
   <img src="https://img.shields.io/badge/license-MIT-success?style=flat-square" alt="MIT license">

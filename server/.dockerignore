@@ -1,0 +1,8 @@
+*.exe
+*.test
+*.out
+starkflow
+starkflow.exe
+coverage.out
+.git
+.github

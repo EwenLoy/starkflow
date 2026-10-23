@@ -1,43 +1,65 @@
-# StarkFlow
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg">
+    <img src="docs/assets/banner-light.svg" alt="StarkFlow — multiplayer for Construct 3 games on your own server" width="900">
+  </picture>
+</p>
 
-Multiplayer for Construct 3 games on your own server: rooms, events, shared room state. One Go binary, no external
-services, no sign-ups, no subscriptions.
+<p align="center">
+  Multiplayer for Construct 3 games on your own server: rooms, events, shared room state.<br>
+  One Go binary. No external services, no sign-ups, no subscriptions.
+</p>
 
-**English** · [Русский](README.ru.md)
+<p align="center">
+  <a href="#quick-start"><b>Quick start</b></a> ·
+  <a href="docs/GAME-GUIDE.md">Game guide</a> ·
+  <a href="docs/ACE.md">ACE reference</a> ·
+  <a href="docs/PROTOCOL.md">Protocol</a> ·
+  <a href="docs/DEPLOY.md">Deployment</a>
+</p>
 
-[![CI](https://github.com/EwenLoy/starkflow/actions/workflows/ci.yml/badge.svg)](https://github.com/EwenLoy/starkflow/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Donate](https://img.shields.io/badge/donate-dalink.to%2Fewenloy-ff69b4.svg)](https://dalink.to/ewenloy)
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.6.6.1-blue?style=flat-square" alt="Version 0.6.6.1">
+  <img src="https://img.shields.io/badge/go-1.22%2B-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.22+">
+  <img src="https://img.shields.io/badge/construct_3-addon-f2c94c?style=flat-square" alt="Construct 3 addon">
+  <img src="https://img.shields.io/badge/license-MIT-success?style=flat-square" alt="MIT license">
+  <a href="https://github.com/EwenLoy/starkflow/actions/workflows/ci.yml"><img src="https://github.com/EwenLoy/starkflow/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
+
+<p align="center">
+  <b>English</b> · <a href="README.ru.md">Русский</a>
+</p>
 
 ## What it is
 
-- **Rooms** — a short id plus a display name in any language (32 characters by default), duplicate names are allowed.
-- **Shared room state** with per-key rules: `add` is atomic, `min`/`max`/`maxDelta` are clamped by the server.
-- **Relay events** — to all players, to others, or to a single player.
-- **Per-player state** — cursors, ready flags, colours: only the player itself can write, nobody can spoof it.
-- **Object sync** — `Register object for sync` + `Start auto-sync` (the same format as GamePush Channels): the
-  plugin sends your sprite and creates and moves one for every other player by itself, tag by tag
-  (`On other player's object created`, `For each object`). Smoothing of other players' objects is
-  configurable (`Set smoothing`, or the automatic delay by default).
-- **Player tokens** (signed, nothing stored on the server): after a dropped connection the player returns to the same
-  room with the same identity and state.
-- **Batteries included** — a test client built into the server and a Construct 3 plugin in this repository.
+| Feature | What you get |
+|---|---|
+| **Rooms** | A short id plus a display name in any language (32 characters by default); duplicate names are allowed. |
+| **Shared room state** | Per-key rules: `add` is atomic, `min`/`max`/`maxDelta` are clamped by the server. |
+| **Relay events** | To all players, to others, or to a single player. |
+| **Per-player state** | Cursors, ready flags, colours: only the player itself can write, nobody can spoof it. |
+| **Object sync** | `Register object for sync` + `Start auto-sync`, the same format as GamePush Channels: the plugin sends your sprite and creates and moves one for every other player by itself, tag by tag (`On other player's object created`, `For each object`). Smoothing is configurable (`Set smoothing`, automatic delay by default). |
+| **Player tokens** | Signed, nothing stored on the server: after a dropped connection the player returns to the same room with the same identity and state. |
+| **Batteries included** | A test client built into the server and a Construct 3 plugin in this repository. |
 
 Wire protocol: `ws(s)://host/ws?v=1&app=APP_ID`, JSON frames.
 
 ## Quick start
 
-Go 1.22+ and nothing to configure:
+**1. Run the server** — Go 1.22+, nothing to configure:
 
 ```bash
 cd server
 go run ./cmd/starkflow
 ```
 
-Open http://localhost:8080 — that is the built-in test client with two demo modes: boss fight (shared HP) and cursor
-synchronisation. To play with a friend, open the same page in a second browser or in a private window.
+**2. Open the test client** — http://localhost:8080, the built-in test page with two demo modes: boss fight (shared
+HP) and cursor synchronisation.
 
-### Public address without Docker
+**3. Play with a friend** — open the same page in a second browser or in a private window.
+
+<details>
+<summary><b>Public address without Docker</b> — Cloudflare Tunnel, no account, no open ports</summary>
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/run-public.ps1
@@ -47,6 +69,8 @@ The script builds the server, starts it on `localhost:8080`, runs a Cloudflare T
 (`https://xxxx.trycloudflare.com`) plus the Construct 3 plugin URL `wss://xxxx.trycloudflare.com/ws`. No Docker, no
 Cloudflare account, no open ports: `cloudflared` is downloaded automatically. The address changes on every restart,
 use `-TunnelToken` for a stable hostname. See [docs/DEPLOY.md](docs/DEPLOY.md).
+
+</details>
 
 ## Quick test with a friend (Docker)
 
@@ -62,10 +86,15 @@ friend opens `http://<server-ip>:8080` and plays.
 
 No public IP, or you do not want to open ports? The same compose file gives you a temporary https address:
 
+<details>
+<summary><b>Docker + Cloudflare Tunnel</b> — temporary https address</summary>
+
 ```bash
 docker compose --profile tunnel up -d
 docker compose logs tunnel | grep trycloudflare    # prints an address like https://xxxx.trycloudflare.com
 ```
+
+</details>
 
 ## Your own domain and https
 
@@ -79,9 +108,39 @@ docker compose -f docker-compose.tls.yml --profile caddy up -d --build
 
 Then point an A record of your domain at the server. The plugin talks to `wss://game.example.com/ws`.
 
-If ports 80/443 are not available (or the domain lives on Cloudflare), the second profile in the same file runs a
-Cloudflare Tunnel with your token and creates the DNS record for you. Both options are documented at the top of
-`docker-compose.tls.yml`.
+<details>
+<summary>Ports 80/443 are not available, or the domain lives on Cloudflare?</summary>
+
+The second profile in the same file runs a Cloudflare Tunnel with your token and creates the DNS record for you. Both
+options are documented at the top of `docker-compose.tls.yml`.
+
+</details>
+
+## Architecture
+
+```mermaid
+flowchart LR
+  G["Construct 3 game<br/>StarkFlow addon"]
+  S["StarkFlow server<br/>one Go binary"]
+
+  G -- "JSON over WebSocket<br/>ws(s)://host/ws?v=1&app=APP_ID" --> S
+  S --> R["Rooms<br/>short id + name"]
+  S --> C["Shared room state<br/>add · min · max · maxDelta"]
+  S --> P["Per-player state<br/>written by its owner only"]
+  S --> E["Events<br/>all · others · one"]
+```
+
+Several regions? The same binary runs as a `directory` or as a `node` (`STARKFLOW_MODE`), the plugin measures latency
+itself and joins the nearest region, and a room never migrates:
+
+```mermaid
+flowchart LR
+  P["Construct 3 addon"] -- "/regions · /assign" --> D["directory"]
+  D --- A["node · region eu"]
+  D --- B["node · region ru"]
+```
+
+See [docs/CLUSTER.md](docs/CLUSTER.md).
 
 ## Requirements
 
@@ -100,9 +159,9 @@ node tests/plugin-mock-test.js   # plugin: 119 ACE and behaviour on a WebSocket 
 node tests/server-smoke.mjs      # 75 protocol checks against a running server
 ```
 
-All of it runs in CI on every push: 4 jobs (server, plugin, live smoke test, Docker image build).
+All of it runs in CI on every push: 5 jobs (server, plugin, live protocol smoke test, live cluster, Docker image build).
 
-## Technical details
+## Repository layout
 
 | File / folder | What is inside |
 |---|---|
@@ -114,14 +173,19 @@ All of it runs in CI on every push: 4 jobs (server, plugin, live smoke test, Doc
 | `tests/` | Go unit tests, ACE reference check, live protocol smoke test |
 | `docs/` | the detailed documentation (currently in Russian) |
 
-Documentation (Russian):
+## Documentation
 
-- [docs/DEPLOY.md](docs/DEPLOY.md) — deployment: VPS, own domain and https, tunnels, bot hosting, environment variables
-- [docs/PROTOCOL.md](docs/PROTOCOL.md) — protocol: messages, rooms, state key rules, the two storages
-- [docs/PLUGIN.md](docs/PLUGIN.md) — installing the plugin and a first example in C3 (including how to read the room list)
-- [docs/GAME-GUIDE.md](docs/GAME-GUIDE.md) — building a game step by step: lobby with a room list, room state, player state, events, errors
-- [docs/ACE.md](docs/ACE.md) — every action, condition and expression with parameters, error codes and server limits
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — local run, test client, tests, CI, what is verified and what is not
+Detailed guides, currently in Russian:
+
+| Guide | What is inside |
+|---|---|
+| [DEPLOY.md](docs/DEPLOY.md) | deployment: VPS, own domain and https, tunnels, bot hosting, environment variables |
+| [PROTOCOL.md](docs/PROTOCOL.md) | protocol: messages, rooms, state key rules, the two storages |
+| [PLUGIN.md](docs/PLUGIN.md) | installing the plugin and a first example in C3 (including how to read the room list) |
+| [GAME-GUIDE.md](docs/GAME-GUIDE.md) | building a game step by step: lobby with a room list, room state, player state, events, errors |
+| [ACE.md](docs/ACE.md) | every action, condition and expression with parameters, error codes and server limits |
+| [DEVELOPMENT.md](docs/DEVELOPMENT.md) | local run, test client, tests, CI, what is verified and what is not |
+| [CLUSTER.md](docs/CLUSTER.md) | several regions and a directory node: modes, tickets, the admin page |
 
 ## License and support
 

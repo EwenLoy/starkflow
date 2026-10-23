@@ -187,6 +187,8 @@ Detailed guides, currently in Russian:
 | [DEVELOPMENT.md](docs/DEVELOPMENT.md) | local run, test client, tests, CI, what is verified and what is not |
 | [CLUSTER.md](docs/CLUSTER.md) | several regions and a directory node: modes, tickets, the admin page |
 
+Every document links back to the index — [docs/README.md](docs/README.md) (where to start, which file answers what).
+
 ## License and support
 
 MIT: do anything you want, commercial games included; the only condition is keeping the [LICENSE](LICENSE) text and

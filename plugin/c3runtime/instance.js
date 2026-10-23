@@ -77,7 +77,8 @@
 	const RTC_TIMEOUT = 3000;
 	const RTC_BUFFERED_MAX = 64 * 1024;	// more waiting in the channel = congested, use the WebSocket
 	const RTC_ICE = [{ urls: "stun:stun.l.google.com:19302" }];	// when the server gives none
-	const F = { X: 1, Y: 2, Z: 4, ANGLE: 8, SIZE: 16, MIRROR: 32, ANIM: 64, FRAME: 128, VISIBLE: 256, OPACITY: 512, TAG: 1024, VARS: 2048 };
+	const F = { X: 1, Y: 2, Z: 4, ANGLE: 8, SIZE: 16, MIRROR: 32, ANIM: 64, FRAME: 128, VISIBLE: 256, OPACITY: 512, TAG: 1024, VARS: 2048,
+		SPEED: 4096, FLIP: 8192, TINT: 16384, BLEND: 32768, SAMPLING: 65536, REPTO: 131072 };
 
 	// ---- the simple object sync API ---------------------------------------
 	// "Sync object" remembers what to sync (tag -> object type + fields), "Bind local
@@ -91,6 +92,12 @@
 		"full": F.X | F.Y | F.Z | F.ANGLE | F.SIZE | F.MIRROR | F.ANIM | F.FRAME | F.VISIBLE | F.OPACITY
 	};
 	TRANSFORMS.everything = TRANSFORMS.full;		// old name, still accepted
+	// "Sync appearance" and "Sync animations" (the same two actions as in GamePush):
+	// each one owns its own group of fields, so its checkboxes replace exactly that
+	// group and never touch the other one, whatever "Transform" the object was
+	// registered with.
+	const APPEARANCE_BITS = F.BLEND | F.TINT | F.FLIP | F.MIRROR | F.SAMPLING | F.OPACITY | F.VISIBLE;
+	const ANIMATION_BITS = F.ANIM | F.FRAME | F.SPEED | F.REPTO;
 	// GamePush calls the scopes "player" and "global"; "host" is the same as "global".
 	const TRANSFORM_IDS = ["none", "position", "positionAngle", "full"];
 	const SCOPE_IDS = ["player", "global"];
@@ -112,6 +119,14 @@
 		return n;
 	};
 	const angleOf = (inst) => typeof inst.angleDegrees === "number" ? inst.angleDegrees : (inst.angle || 0) * 180 / Math.PI;
+	// Tint colour and blend mode only exist on objects that have them: the encode step
+	// then writes nothing and the mask bit is dropped (see _fitMask).
+	const tintOf = (inst) =>
+	{
+		const c = inst.colorRgb;
+		return (c && c.length >= 3) ? [fin(c[0]), fin(c[1]), fin(c[2])] : [1, 1, 1];
+	};
+	const blendOf = (inst) => typeof inst.blendMode === "string" ? inst.blendMode : "";
 
 	C3.Plugins.EwenLoy_StarkFlow.Instance = class StarkFlowInstance extends globalThis.ISDKInstanceBase
 	{
@@ -1712,6 +1727,14 @@
 					a.push(obj);
 				}
 			}
+			// "Sync appearance" and "Sync animations": always the last fields of a record,
+			// so a payload written by an older plugin still decodes in the same order.
+			if (f & F.SPEED) a.push(Math.round(fin(inst.animationSpeed) * 100) / 100);
+			if (f & F.FLIP) a.push(inst.height < 0 ? 1 : 0);
+			if (f & F.TINT) { const c = tintOf(inst); a.push(r3(c[0]), r3(c[1]), r3(c[2])); }
+			if (f & F.BLEND) a.push(blendOf(inst));
+			if (f & F.SAMPLING) a.push(typeof inst.sampling === "string" ? inst.sampling : "");
+			if (f & F.REPTO) a.push(fin(inst.animationRepeatToFrame) | 0);
 			return a;
 		}
 
@@ -2185,6 +2208,12 @@
 					const o = r[i++];
 					v.vars = (o && typeof o === "object") ? o : null;
 				}
+				if (f & F.SPEED) v.sp = fin(r[i++]);
+				if (f & F.FLIP) v.fl = fin(r[i++]) ? 1 : 0;
+				if (f & F.TINT) { v.tr = fin(r[i++]); v.tg = fin(r[i++]); v.tb = fin(r[i++]); }
+				if (f & F.BLEND) v.bl = String(r[i++] === undefined ? "" : r[i - 1]);
+				if (f & F.SAMPLING) v.sm = String(r[i++] === undefined ? "" : r[i - 1]);
+				if (f & F.REPTO) v.rt = fin(r[i++]) | 0;
 				out.set(slot, { mask: f, v: v });
 			}
 			return out;
@@ -2332,6 +2361,40 @@
 			if ((m & F.VISIBLE) && inst.isVisible !== !!v.vis) inst.isVisible = !!v.vis;
 			if ((m & F.OPACITY) && inst.opacity !== v.op) inst.opacity = v.op;
 
+			// ---- "Sync appearance" and "Sync animations" ----
+			// Discrete fields: they are applied as they arrive, never interpolated.
+			if ((m & F.FLIP) && typeof inst.height === "number")
+			{
+				const h = Math.abs(inst.height);
+				const want = v.fl ? -h : h;
+				if (inst.height !== want) inst.height = want;
+			}
+			if ((m & F.TINT) && typeof v.tr === "number")
+			{
+				const c = inst.colorRgb;
+				if (!c || Math.abs(fin(c[0]) - v.tr) > 0.004 || Math.abs(fin(c[1]) - v.tg) > 0.004 ||
+					Math.abs(fin(c[2]) - v.tb) > 0.004)
+				{
+					try { inst.colorRgb = [v.tr, v.tg, v.tb]; }
+					catch (e) { this._log("warn", "sync appearance: this object has no tint colour"); }
+				}
+			}
+			if ((m & F.BLEND) && v.bl && inst.blendMode !== v.bl)
+			{
+				try { inst.blendMode = v.bl; }
+				catch (e) { this._log("warn", "sync appearance: unknown blend mode " + v.bl); }
+			}
+			if ((m & F.SPEED) && typeof inst.animationSpeed === "number" && inst.animationSpeed !== v.sp)
+				inst.animationSpeed = v.sp;
+			if ((m & F.REPTO) && typeof inst.animationRepeatToFrame === "number" &&
+				inst.animationRepeatToFrame !== v.rt)
+				inst.animationRepeatToFrame = v.rt;
+			if ((m & F.SAMPLING) && v.sm && typeof inst.sampling === "string" && inst.sampling !== v.sm)
+			{
+				try { inst.sampling = v.sm; }
+				catch (e) { this._log("warn", "sync appearance: unknown sampling " + v.sm); }
+			}
+
 			// instance variables registered with "Register object variable for sync"
 			const vars = rec.vars || null;
 			if (vars && v.vars && inst.instVars)
@@ -2359,6 +2422,29 @@
 		// objClass is what the "object" parameter gives us; the instances picked by the
 		// event conditions are registered. With several picked instances the slot
 		// numbers go slot, slot+1, ... in the order they were picked.
+		// Fields this instance does not have are dropped from the mask: not every object
+		// type is a Sprite with animations, a tint colour or a blend mode.
+		_fitMask(inst, m)
+		{
+			if ((m & F.Z) && typeof inst.zElevation !== "number")
+				m &= ~F.Z;						// this Construct version has no Z elevation
+			if ((m & (F.ANIM | F.FRAME | F.SPEED | F.REPTO)) && typeof inst.animationName !== "string")
+				m &= ~(F.ANIM | F.FRAME | F.SPEED | F.REPTO);	// not a Sprite
+			else if ((m & F.SPEED) && typeof inst.animationSpeed !== "number")
+				m &= ~F.SPEED;
+			else if ((m & F.REPTO) && typeof inst.animationRepeatToFrame !== "number")
+				m &= ~F.REPTO;
+			if ((m & F.TINT) && !(inst.colorRgb && inst.colorRgb.length >= 3))
+				m &= ~F.TINT;
+			if ((m & F.BLEND) && typeof inst.blendMode !== "string")
+				m &= ~F.BLEND;
+			if ((m & F.SAMPLING) && typeof inst.sampling !== "string")
+				m &= ~F.SAMPLING;
+			if ((m & F.FLIP) && typeof inst.height !== "number")
+				m &= ~F.FLIP;
+			return m;
+		}
+
 		_register(objClass, owner, slot, mask)
 		{
 			if (!objClass || typeof objClass.getPickedInstances !== "function")
@@ -2373,11 +2459,7 @@
 					this._log("warn", "register object: only objects that are placed in the layout can be synced");
 					continue;
 				}
-				let m = mask;
-				if ((m & F.Z) && typeof inst.zElevation !== "number")
-					m &= ~F.Z;					// this Construct version has no Z elevation
-				if ((m & F.ANIM) && typeof inst.animationName !== "string")
-					m &= ~(F.ANIM | F.FRAME);		// not a Sprite
+				let m = this._fitMask(inst, mask);
 				for (const [k, r] of this._sync)
 				{
 					if (r.uid === inst.uid)
@@ -2545,6 +2627,85 @@
 				" of " + (name || "object") + " registered, interpolate: " + (!!interpolate));
 		}
 
+		// ---- "Sync appearance" and "Sync animations" -------------------------
+		// The checkboxes of one action replace exactly the fields of its own group:
+		// position, angle and the other group stay as they were registered. Same two
+		// actions as in GamePush, with the same shape: tick once on "On start of layout".
+
+		_applyGroupMask(objClass, groupBits, wanted, what)
+		{
+			if (!objClass)
+				return;
+			const name = objClass.name || "";
+			const tags = this._defsByClass.get(name) || [];
+			if (!tags.length)
+			{
+				this._log("warn", what + ": call \"Register object for sync\" for " + (name || "this object") + " first");
+				return;
+			}
+			const set = (wanted & groupBits) | 0;
+			for (const tag of tags)
+			{
+				const def = this._defs.get(tag);
+				if (!def)
+					continue;
+				def.mask = ((def.mask & ~groupBits) | set) | 0;
+				// records that are already registered follow at once, so the action works
+				// both before and after "Start auto-sync"
+				for (const rec of this._sync.values())
+				{
+					if (rec.tag !== tag)
+						continue;
+					const inst = this._instByUid(rec.uid);
+					const m = ((rec.mask & ~groupBits) | set) | 0;
+					rec.mask = inst ? this._fitMask(inst, m) : m;
+				}
+				this._log("info", what + ": \"" + tag + "\" -> " + this._fieldsText(def.mask));
+			}
+		}
+
+		// Readable list of the synced fields, for the log (docs/ACE.md shows the names).
+		_fieldsText(mask)
+		{
+			const names = [[F.X, "x"], [F.Y, "y"], [F.Z, "z"], [F.ANGLE, "angle"], [F.SIZE, "size"],
+				[F.MIRROR, "mirrored"], [F.FLIP, "flipped"], [F.ANIM, "animation"], [F.FRAME, "frame"],
+				[F.SPEED, "speed"], [F.REPTO, "repeat-to"], [F.OPACITY, "opacity"], [F.VISIBLE, "visible"],
+				[F.TINT, "color"], [F.BLEND, "blend"], [F.SAMPLING, "sampling"]];
+			const out = [];
+			for (const [bit, name] of names)
+			{
+				if (mask & bit)
+					out.push(name);
+			}
+			return out.length ? out.join(", ") : "nothing";
+		}
+
+		// Sync appearance of Player (blend: yes, color: yes, flipped: yes, mirrored: yes,
+		// sampling: no, opacity: yes, visible: yes)
+		_syncAppearance(objClass, blend, color, flipped, mirrored, sampling, opacity, visible)
+		{
+			let m = 0;
+			if (blend) m |= F.BLEND;
+			if (color) m |= F.TINT;
+			if (flipped) m |= F.FLIP;
+			if (mirrored) m |= F.MIRROR;
+			if (sampling) m |= F.SAMPLING;
+			if (opacity) m |= F.OPACITY;
+			if (visible) m |= F.VISIBLE;
+			this._applyGroupMask(objClass, APPEARANCE_BITS, m, "sync appearance");
+		}
+
+		// Sync animations of Player (name: yes, frame: no, speed: yes, repeat-to: no)
+		_syncAnimations(objClass, name, frame, speed, repeatTo)
+		{
+			let m = 0;
+			if (name) m |= F.ANIM;
+			if (frame) m |= F.FRAME;
+			if (speed) m |= F.SPEED;
+			if (repeatTo) m |= F.REPTO;
+			this._applyGroupMask(objClass, ANIMATION_BITS, m, "sync animations");
+		}
+
 		// The instance(s) picked by the event become mine (for every tag of that object
 		// type). Without this action "Start sync" takes the instance that is in the
 		// layout, which is what a player object usually is.
@@ -2698,8 +2859,9 @@
 			}
 			const slot = this._slotFor(owner, def.tag);
 			const key = owner + ":" + slot;
+			const inst = this._instByUid(uid);
 			this._bound.set(def.tag, uid);
-			this._sync.set(key, { key: key, owner: owner, slot: slot, uid: uid, mask: def.mask, interp: def.interp, tag: def.tag, type: def.name || "", vars: this._effectiveVars(def), seen: false });
+			this._sync.set(key, { key: key, owner: owner, slot: slot, uid: uid, mask: inst ? this._fitMask(inst, def.mask) : def.mask, interp: def.interp, tag: def.tag, type: def.name || "", vars: this._effectiveVars(def), seen: false });
 			this._log("info", "sync: \"" + def.tag + "\" = " + (def.name || "object") + " uid " + uid + (owner === this._myId ? " (mine)" : " (host)"));
 		}
 

@@ -977,6 +977,81 @@
 				]
 			},
 			{
+				"id": "sync-appearance",
+				"scriptName": "SyncAppearance",
+				"params": [
+					{
+						"id": "objectClass",
+						"type": "object"
+					},
+					{
+						"id": "blend",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "color",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "flipped",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "mirrored",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "sampling",
+						"type": "boolean",
+						"initialValue": "false"
+					},
+					{
+						"id": "opacity",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "visible",
+						"type": "boolean",
+						"initialValue": "true"
+					}
+				]
+			},
+			{
+				"id": "sync-animations",
+				"scriptName": "SyncAnimations",
+				"params": [
+					{
+						"id": "objectClass",
+						"type": "object"
+					},
+					{
+						"id": "name",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "frame",
+						"type": "boolean",
+						"initialValue": "false"
+					},
+					{
+						"id": "speed",
+						"type": "boolean",
+						"initialValue": "true"
+					},
+					{
+						"id": "repeatTo",
+						"type": "boolean",
+						"initialValue": "false"
+					}
+				]
+			},
+			{
 				"id": "bind-local-instance",
 				"scriptName": "BindLocalInstance",
 				"params": [

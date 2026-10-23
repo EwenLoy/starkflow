@@ -595,6 +595,72 @@
 							}
 						}
 					},
+					"sync-appearance": {
+						"list-name": "Sync appearance",
+						"display-text": "Multiplayer: Sync appearance of [b]{0}[/b] (blend: [i]{1}[/i], color: [i]{2}[/i], flipped: [i]{3}[/i], mirrored: [i]{4}[/i], sampling: [i]{5}[/i], opacity: [i]{6}[/i], visible: [i]{7}[/i])",
+						"description": "Which looks-only properties of a registered object go into the sync: blend mode, tint colour, vertical flip, mirroring, sampling, opacity and visibility. Only the ticked ones are sent - unticking a box switches that property off, the other fields of the object are not touched. Call after \"Register object for sync\". Opacity and visibility are already part of the \"Full\" transform: do not duplicate them.",
+						"params": {
+							"objectClass": {
+								"name": "Object",
+								"desc": "Object type already registered with \"Register object for sync\"."
+							},
+							"blend": {
+								"name": "Blend mode",
+								"desc": "Send the blend mode (normal, add, multiply...). Objects without blend modes skip it."
+							},
+							"color": {
+								"name": "Color",
+								"desc": "Send the tint colour as RGB, 0..1 each."
+							},
+							"flipped": {
+								"name": "Flipped",
+								"desc": "Send the vertical flip of the sprite."
+							},
+							"mirrored": {
+								"name": "Mirrored",
+								"desc": "Send the horizontal flip (the same field as \"mirrored\" in the transform preset)."
+							},
+							"sampling": {
+								"name": "Sampling",
+								"desc": "Send the image sampling (point/linear). Only if your Construct version has it per instance."
+							},
+							"opacity": {
+								"name": "Opacity",
+								"desc": "Send opacity, 0..1."
+							},
+							"visible": {
+								"name": "Visible",
+								"desc": "Send visibility. Use it to hide the picked-up weapon of other players."
+							}
+						}
+					},
+					"sync-animations": {
+						"list-name": "Sync animations",
+						"display-text": "Multiplayer: Sync animations of [b]{0}[/b] (name: [i]{1}[/i], frame: [i]{2}[/i], speed: [i]{3}[/i], repeat-to: [i]{4}[/i])",
+						"description": "Animation state of a registered sprite: animation name, frame, speed and the repeat-to frame. Name and speed are enough for most games; turn the frame on only when exact frame-by-frame sync is needed - it costs traffic. Call after \"Register object for sync\". Objects without animations skip it.",
+						"params": {
+							"objectClass": {
+								"name": "Object",
+								"desc": "Sprite type already registered with \"Register object for sync\"."
+							},
+							"name": {
+								"name": "Animation name",
+								"desc": "Send which animation plays (idle, run, jump...)."
+							},
+							"frame": {
+								"name": "Frame",
+								"desc": "Send the current frame. Extra traffic: only for exact frame-by-frame sync."
+							},
+							"speed": {
+								"name": "Animation speed",
+								"desc": "Send the playback speed."
+							},
+							"repeatTo": {
+								"name": "Repeat-to frame",
+								"desc": "Send the repeat-to (loop end) frame when your animation being played has one."
+							}
+						}
+					},
 					"start-sync": {
 						"list-name": "Start auto-sync",
 						"display-text": "Multiplayer: Start auto-sync",

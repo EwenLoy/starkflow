@@ -91,6 +91,17 @@
 			this._registerObjectVariable(obj, variable, interpolate);
 		},
 		BindLocalInstance(obj) { this._bindLocalInstance(obj); },
+		// GamePush: "Sync appearance" - colour, blend mode, flipped, mirrored, sampling,
+		// opacity and visibility, each one on its own checkbox.
+		SyncAppearance(obj, blend, color, flipped, mirrored, sampling, opacity, visible)
+		{
+			this._syncAppearance(obj, blend, color, flipped, mirrored, sampling, opacity, visible);
+		},
+		// GamePush: "Sync animations" - animation name, frame, speed and repeat-to frame.
+		SyncAnimations(obj, name, frame, speed, repeatTo)
+		{
+			this._syncAnimations(obj, name, frame, speed, repeatTo);
+		},
 		StartSync() { this._startSync(); },
 		StopSync() { this._stopSync(); },
 

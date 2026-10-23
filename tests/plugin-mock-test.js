@@ -34,11 +34,15 @@ class FakeInstance {
 		this.width = 32; this.height = 32;
 		this.opacity = 1; this.isVisible = true;
 		this.animationName = "idle"; this.animationFrame = 0;
+		// sprite-only fields: "Sync appearance" and "Sync animations" ride on them
+		this.animationSpeed = 1; this.animationRepeatToFrame = -1;
+		this.colorRgb = [1, 1, 1]; this.blendMode = "normal"; this.sampling = "linear";
 		this.layer = { name: "Game" };
 		this.instVars = { hp: 100, ammo: 5 };
 		this.destroyed = false;
 	}
 	destroy() { this.destroyed = true; (this.rt || globalThis.__FakeRuntime).byUid.delete(this.uid); }
+	setAnimation(name) { this.animationName = name; this.animationFrame = 0; }
 }
 FakeInstance.next = 1;
 class FakeObjectClass {
@@ -1070,6 +1074,71 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.ok(FakeWS.all.length === 1 && FakeWS.all[0].url.indexOf("wss://node7.example.com/ws") === 0);
 	assert.strictEqual(P.Exps.Region.call(dirForced), "eu");
 	globalThis.fetch = realFetch;
+
+	// ---- "Sync appearance" and "Sync animations" (GamePush's two extra actions) ----
+	// A tag registered as plain "Position" can still carry the looks of the object:
+	// each action owns its own group of fields and replaces exactly that group, so the
+	// boxes of one action never switch off the fields of the other.
+	{
+		const C = mkClient();
+		const D = mkClient();
+		const wC = await joinClient(C, 1, [{ id: 1, name: "C", props: {} }]);
+		const wD = await joinClient(D, 2, [{ id: 1, name: "C", props: {} }, { id: 2, name: "D", props: {} }]);
+		const mineC = C.cls.createInstance("Game", 10, 20);
+		const mineD = D.cls.createInstance("Game", 30, 40);
+
+		P.Acts.SyncObject.call(C.inst, C.cls, "player", "player", "position", true, "Game");
+		P.Acts.StartSync.call(C.inst);
+		assert.strictEqual(P.Exps.LocalEntityUID.call(C.inst, "player"), mineC.uid);
+		C.inst._flush(performance.now());
+		const plainMask = JSON.parse(chunkOf(wC).value)[0][1];
+		const TAG_BIT = 1024;							// the tag itself rides in every record
+		assert.strictEqual(plainMask & ~TAG_BIT, 1 | 2, "transform Position is x and y only");
+
+		P.Acts.SyncAppearance.call(C.inst, C.cls, true, true, true, true, false, true, true);
+		P.Acts.SyncAnimations.call(C.inst, C.cls, true, false, true, false);
+
+		mineC.colorRgb = [1, 0.5, 0];
+		mineC.blendMode = "add";
+		mineC.width = -32;					// mirrored
+		mineC.height = -48;					// flipped
+		mineC.opacity = 0.5;
+		mineC.isVisible = false;
+		mineC.animationName = "run";
+		mineC.animationSpeed = 2;
+		C.inst._flush(performance.now());
+		const dressed = chunkOf(wC);
+		const dressedMask = JSON.parse(dressed.value)[0][1];
+		assert.ok((dressedMask & plainMask) === plainMask, "the position bits must stay on");
+		assert.ok(dressedMask > plainMask, "the ticked appearance/animation fields must be in the mask");
+
+		// the other player's copy gets all of it: looks, animation and speed
+		P.Acts.SyncObject.call(D.inst, D.cls, "player", "player", "position", true, "Game");
+		P.Acts.SyncAppearance.call(D.inst, D.cls, true, true, true, true, false, true, true);
+		P.Acts.SyncAnimations.call(D.inst, D.cls, true, false, true, false);
+		P.Acts.StartSync.call(D.inst);
+		assert.strictEqual(P.Exps.LocalEntityUID.call(D.inst, "player"), mineD.uid);
+		wD.recv({ t: "player.props", id: 1, key: "_sf0", value: dressed.value });
+		D.inst._applyRemote(16);
+		const proxy = D.rt.getInstanceByUid(P.Exps.PlayerProxyUID.call(D.inst, 1, "player"));
+		assert.ok(proxy, "D must have a proxy of player 1");
+		assert.strictEqual(proxy.animationName, "run", "animation name synced");
+		assert.strictEqual(proxy.animationSpeed, 2, "animation speed synced");
+		assert.strictEqual(proxy.blendMode, "add", "blend mode synced");
+		assert.ok(proxy.width < 0, "mirrored synced");
+		assert.ok(proxy.height < 0, "flipped synced");
+		assert.strictEqual(proxy.opacity, 0.5, "opacity synced");
+		assert.strictEqual(proxy.isVisible, false, "visibility synced");
+		assert.deepStrictEqual([Math.round(proxy.colorRgb[0] * 100) / 100, Math.round(proxy.colorRgb[1] * 100) / 100,
+			Math.round(proxy.colorRgb[2] * 100) / 100], [1, 0.5, 0], "tint colour synced");
+
+		// unticking every box switches exactly that group off again and leaves position alone
+		P.Acts.SyncAppearance.call(C.inst, C.cls, false, false, false, false, false, false, false);
+		P.Acts.SyncAnimations.call(C.inst, C.cls, false, false, false, false);
+		C.inst._flush(performance.now());
+		const bare = JSON.parse(chunkOf(wC).value)[0][1];
+		assert.strictEqual(bare, plainMask, "unticking every box must leave the transform untouched, got " + bare);
+	}
 
 	// ---- ping: measured on its own timer, whatever else the game sends ------
 	{

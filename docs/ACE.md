@@ -299,6 +299,20 @@ System: On start of layout
     → StarkFlow: Start auto-sync
 ```
 
+Одна частая ловушка: если игровая логика каждый тик ставит анимацию всем объектам типа
+(`WariRix: Is moving → Set animation "walk"`), она перебивает синхронизированную — у чужой копии
+остаётся `stat`/`fall`, хотя данные доезжают. Держи свою логику анимаций внутри выбора своего объекта:
+
+```
+System: Pick WariRix by unique ID StarkFlow.LocalEntityUID("player")
+    + WariRix (Platform): Is moving  → Set animation "walk"
+    + WariRix (Platform): Is falling → Set animation "fall"
+    + WariRix (Platform): Is jumping → Set animation "jump"
+```
+
+И отключи поведения у чужих копий — Platform тянет их вниз и подставляет свои условия
+(`On player proxy created → WariRix: Set Platform enabled to Disabled`).
+
 Так у чужих копий видно не только где персонаж, но и какой у него цвет команды, куда он смотрит и что
 он делает — без ручных событий на каждый кадр анимации.
 

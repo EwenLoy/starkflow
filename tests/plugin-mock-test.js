@@ -1140,6 +1140,46 @@ console.log("ACE consistency OK (" + n + " entries)");
 		assert.strictEqual(bare, plainMask, "unticking every box must leave the transform untouched, got " + bare);
 	}
 
+	// ---- the exact setup of a real project: Position + angle, mirrored only, every animation box ----
+	// Changing the animation of the local sprite must reach the other player's copy even when the
+	// frame box is ticked and the transform is the plain "Position + angle" preset.
+	{
+		const C = mkClient();
+		const D = mkClient();
+		const wC = await joinClient(C, 1, [{ id: 1, name: "C", props: {} }]);
+		const wD = await joinClient(D, 2, [{ id: 1, name: "C", props: {} }, { id: 2, name: "D", props: {} }]);
+		const mineC = C.cls.createInstance("Game", 10, 20);
+		const mineD = D.cls.createInstance("Game", 30, 40);
+
+		P.Acts.SyncObject.call(C.inst, C.cls, "player", "player", "positionAngle", true, "Game");
+		P.Acts.SyncAppearance.call(C.inst, C.cls, false, false, false, true, false, false, false);
+		P.Acts.SyncAnimations.call(C.inst, C.cls, true, true, true, true);
+		P.Acts.StartSync.call(C.inst);
+
+		mineC.animationName = "walk";
+		mineC.animationFrame = 3;
+		mineC.animationSpeed = 15;
+		mineC.animationRepeatToFrame = 2;
+		C.inst._flush(performance.now());
+		const sent = chunkOf(wC);
+		assert.ok(sent, "the animation must go out in the split chunk");
+
+		P.Acts.SyncObject.call(D.inst, D.cls, "player", "player", "positionAngle", true, "Game");
+		P.Acts.SyncAppearance.call(D.inst, D.cls, false, false, false, true, false, false, false);
+		P.Acts.SyncAnimations.call(D.inst, D.cls, true, true, true, true);
+		P.Acts.StartSync.call(D.inst);
+		assert.strictEqual(P.Exps.LocalEntityUID.call(D.inst, "player"), mineD.uid);
+		wD.recv({ t: "player.props", id: 1, key: "_sf0", value: sent.value });
+		D.inst._applyRemote(16);
+		const proxy = D.rt.getInstanceByUid(P.Exps.PlayerProxyUID.call(D.inst, 1, "player"));
+		assert.ok(proxy, "D must have a proxy of player 1");
+		assert.strictEqual(proxy.animationName, "walk", "animation name with the frame box ticked");
+		assert.strictEqual(proxy.animationFrame, 3, "frame must be applied after the animation name");
+		assert.strictEqual(proxy.animationSpeed, 15, "animation speed");
+		assert.strictEqual(proxy.animationRepeatToFrame, 2, "repeat-to frame");
+	}
+
+
 	// ---- ping: measured on its own timer, whatever else the game sends ------
 	{
 		FakeWS.all.length = 0;

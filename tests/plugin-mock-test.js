@@ -1180,6 +1180,53 @@ console.log("ACE consistency OK (" + n + " entries)");
 	}
 
 
+	// ---- a copy whose animation the events overwrite: reported, never silent --------
+	// The events run after the plugin tick and pick every instance of the object type,
+	// so a plain "Is moving -> Set animation walk" wins over the synced animation of the
+	// copies. The plugin cannot win that fight, so it names the Pick that fixes it.
+	{
+		const C = mkClient();
+		const D = mkClient();
+		const wC = await joinClient(C, 1, [{ id: 1, name: "C", props: {} }]);
+		const wD = await joinClient(D, 2, [{ id: 1, name: "C", props: {} }, { id: 2, name: "D", props: {} }]);
+		const mineC = C.cls.createInstance("Game", 10, 20);
+		D.cls.createInstance("Game", 30, 40);
+
+		P.Acts.SyncObject.call(C.inst, C.cls, "player", "player", "position", true, "Game");
+		P.Acts.SyncAnimations.call(C.inst, C.cls, true, false, false, false);
+		P.Acts.StartSync.call(C.inst);
+		mineC.animationName = "walk";
+		C.inst._flush(performance.now());
+		const sent = chunkOf(wC);
+
+		P.Acts.SyncObject.call(D.inst, D.cls, "player", "player", "position", true, "Game");
+		P.Acts.SyncAnimations.call(D.inst, D.cls, true, false, false, false);
+		P.Acts.StartSync.call(D.inst);
+		wD.recv({ t: "player.props", id: 1, key: "_sf0", value: sent.value });
+		D.inst._applyRemote(16);
+		const proxy = D.rt.getInstanceByUid(P.Exps.PlayerProxyUID.call(D.inst, 1, "player"));
+		assert.ok(proxy, "D must have a proxy of player 1");
+		assert.strictEqual(proxy.animationName, "walk", "the copy gets the animation of its owner");
+
+		const said = [];
+		const realWarn = console.warn;
+		console.warn = (...a) => said.push(a.join(" "));
+		try
+		{
+			proxy.animationName = "stat";			// what the event sheet does every tick
+			D.inst._applyRemote(16);
+			assert.strictEqual(proxy.animationName, "walk", "the synced animation is put back");
+			assert.ok(said.some((s) => s.indexOf("Pick") > 0 && s.indexOf("LocalEntityUID") > 0),
+				"the overwrite must be reported together with the Pick fix: " + JSON.stringify(said));
+
+			const once = said.length;
+			proxy.animationName = "stat";
+			D.inst._applyRemote(16);
+			assert.strictEqual(said.length, once, "said once, not every tick: " + JSON.stringify(said));
+		}
+		finally { console.warn = realWarn; }
+	}
+
 	// ---- ping: measured on its own timer, whatever else the game sends ------
 	{
 		FakeWS.all.length = 0;

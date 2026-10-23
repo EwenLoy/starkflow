@@ -296,6 +296,12 @@
 			console[fn]("[StarkFlow]", ...args);
 		}
 
+		// A warning about the project setup must not be silenced by the log level.
+		_warnAlways(...args)
+		{
+			console.warn("[StarkFlow]", ...args);
+		}
+
 		_cnd(name)
 		{
 			return C3.Plugins.EwenLoy_StarkFlow.Cnds[name];
@@ -2351,10 +2357,36 @@
 				const want = v.mir ? -w : w;
 				if (inst.width !== want) inst.width = want;
 			}
-			if ((m & F.ANIM) && v.anim && inst.animationName !== v.anim && typeof inst.setAnimation === "function")
+			if (m & F.ANIM)
 			{
-				try { inst.setAnimation(v.anim); }
-				catch (e) { this._log("warn", "unknown animation: " + v.anim); }
+				// The events of the project pick every instance of the object type, so the
+				// animation logic of the game hits the copies of the other players too, and
+				// events run after the plugin tick. The copy then shows what the events set,
+				// not what its owner sends - say it out loud once, the fix is a Pick by UID.
+				if (rec.anim !== undefined && inst.animationName !== rec.anim)
+				{
+					if (!rec.animWarned)
+					{
+						rec.animWarned = true;
+						this._warnAlways("the events change the animation of the players' copies (\"" + (rec.tag || "") +
+							"\"): expected \"" + rec.anim + "\", got \"" + inst.animationName + "\". Wrap the animation " +
+							"events in \"System: Pick " + (rec.type || "object") + " by unique ID StarkFlow.LocalEntityUID(\\\"" +
+							(rec.tag || "") + "\\\")\", otherwise the copies keep the animation that the events set");
+					}
+				}
+				else
+					rec.animWarned = false;
+				if (!v.anim || typeof inst.setAnimation !== "function")
+				{
+					rec.anim = undefined;
+				}
+				else if (inst.animationName !== v.anim)
+				{
+					try { inst.setAnimation(v.anim); rec.anim = v.anim; }
+					catch (e) { rec.anim = undefined; this._log("warn", "unknown animation: " + v.anim); }
+				}
+				else
+					rec.anim = v.anim;
 			}
 			if ((m & F.FRAME) && typeof inst.animationFrame === "number" && inst.animationFrame !== v.frame)
 				inst.animationFrame = v.frame;

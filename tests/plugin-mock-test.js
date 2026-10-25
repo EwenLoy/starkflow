@@ -1170,6 +1170,58 @@ console.log("ACE consistency OK (" + n + " entries)");
 		finally { console.warn = realWarnLobby; }
 	}
 
+	// ---- 7c. a join made from "On connected" goes out once -------------------
+	// The game creates or joins the room inside "On connected" — that is where it
+	// usually happens. The replay meant for a dead socket looked at the queue after
+	// the trigger, so the very same room.join went out twice and the server had
+	// nothing to answer but 303 "already in a room".
+	const oneCli = mkClient();
+	const realOne = oneCli.inst._trigger.bind(oneCli.inst);
+	oneCli.inst._trigger = (fn) => {
+		realOne(fn);
+		if (fn === P.Cnds.OnConnected)
+			P.Acts.CreateRoom.call(oneCli.inst, "NDWKEG", 5, -1, "Friends", "");
+	};
+	P.Acts.Connect.call(oneCli.inst, "", "");
+	await sleep(5);
+	const wOne = FakeWS.all[FakeWS.all.length - 1];
+	wOne.recv({ t: "welcome", userId: "u1", token: "t1", serverTime: Date.now(), proto: 1, unique: true });
+	const oneJoin = wOne.sent.filter((m) => m.t === "room.join");
+	assert.strictEqual(oneJoin.length, 1, "a join from On connected must not be replayed: " + JSON.stringify(wOne.sent));
+	assert.deepStrictEqual([oneJoin[0].room, oneJoin[0].create, oneJoin[0].lobby], ["NDWKEG", true, "Friends"]);
+
+	// the random action from the same place: the room list is asked once
+	const rndCli = mkClient();
+	const realRnd = rndCli.inst._trigger.bind(rndCli.inst);
+	rndCli.inst._trigger = (fn) => {
+		realRnd(fn);
+		if (fn === P.Cnds.OnConnected)
+			P.Acts.JoinRandomOrCreateRoom.call(rndCli.inst, "arena", 4, -1, 0);
+	};
+	P.Acts.Connect.call(rndCli.inst, "", "");
+	await sleep(5);
+	const wRnd = FakeWS.all[FakeWS.all.length - 1];
+	wRnd.recv({ t: "welcome", userId: "u2", token: "t2", serverTime: Date.now(), proto: 1 });
+	assert.strictEqual(wRnd.sent.filter((m) => m.t === "room.list").length, 1,
+		"the room list must be asked once: " + JSON.stringify(wRnd.sent));
+
+	// a reconnect whose game says nothing still restores the room
+	const backCli = mkClient();
+	P.Acts.Connect.call(backCli.inst, "", "");
+	await sleep(5);
+	let wRestore = FakeWS.all[FakeWS.all.length - 1];
+	wRestore.recv({ t: "welcome", userId: "u3", token: "t3", serverTime: Date.now(), proto: 1 });
+	P.Acts.CreateRoom.call(backCli.inst, "room3", 4, -1, "");
+	wRestore.recv({ t: "room.joined", room: "room3", roomId: "abcd1234", you: 1, hostId: 1, resumed: false,
+		created: true, maxPlayers: 4, players: [{ id: 1, userId: "u3", name: "T", status: "active", props: {} }], state: {} });
+	P.Acts.Connect.call(backCli.inst, "", "");		// the socket died and came back
+	await sleep(5);
+	wRestore = FakeWS.all[FakeWS.all.length - 1];
+	wRestore.recv({ t: "welcome", userId: "u3", token: "t3", serverTime: Date.now(), proto: 1 });
+	const restored = wRestore.sent.filter((m) => m.t === "room.join");
+	assert.strictEqual(restored.length, 1, "a silent reconnect still restores the room: " + JSON.stringify(wRestore.sent));
+	assert.deepStrictEqual([restored[0].room, restored[0].create], ["abcd1234", false]);
+
 	// ---- clustered mode: the connection mode + the nearest region ---------------
 	// A browser is the only one that knows which region is close to it, so the
 	// plugin asks the directory for its regions, measures /health of each and sends

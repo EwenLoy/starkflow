@@ -1543,11 +1543,19 @@
 			else
 				this._rtcStop(false);
 			this._attempt = 0;
-			this._status = this._lastJoin ? "reconnecting" : "connected";
+			// The game usually joins from "On connected", so the trigger runs before
+			// the replay below. The replay is for a socket that died, not for a join
+			// the game has just made: without this snapshot the same room.join went
+			// out twice and the server answered 303 "already in a room".
+			const replay = this._lastJoin;
+			const random = this._randomJoin;
+			this._status = replay ? "reconnecting" : "connected";
 			this._trigger(this._cnd("OnConnected"));
-			if (this._lastJoin)
-				this._send(Object.assign({ id: this._reqId() }, this._lastJoin));
-			else if (this._randomJoin)
+			if (this._lastJoin !== replay || this._randomJoin !== random)
+				return;			// the game sent its own join from "On connected"
+			if (replay)
+				this._send(Object.assign({ id: this._reqId() }, replay));
+			else if (random)
 				this._askRooms();	// the list was lost with the old socket
 		}
 

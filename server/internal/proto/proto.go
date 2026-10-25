@@ -93,6 +93,10 @@ type ClientMsg struct {
 	Seq  int64           `json:"seq"`
 	Iv   int             `json:"iv"`   // the sender's send interval, ms
 	Objs json.RawMessage `json:"objs"` // array of object records
+	// K marks a keyframe: every masked field of every object is in it. The
+	// others are deltas against the last keyframe and mean nothing without it,
+	// so only keyframes are kept for players who join later.
+	K bool `json:"k"`
 
 	// batch: several client messages in one WebSocket frame
 	Items []json.RawMessage `json:"items"`

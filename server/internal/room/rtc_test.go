@@ -46,7 +46,7 @@ func TestSyncGoesOneWayPerReceiver(t *testing.T) {
 	cClosed.reset()
 	b.reset()
 
-	r.Sync(a, 1, 1000, 33, json.RawMessage(`[[0,3,10,20]]`))
+	r.Sync(a, 1, 1000, 33, json.RawMessage(`[[0,3,10,20]]`), false)
 	time.Sleep(20 * time.Millisecond)
 	if n := cOpen.udpCount(); n != 1 {
 		t.Fatalf("open channel: got %d WebRTC frames, want 1", n)
@@ -62,7 +62,7 @@ func TestSyncGoesOneWayPerReceiver(t *testing.T) {
 	}
 
 	// the empty snapshot always goes over the WebSocket
-	r.Sync(a, 2, 1033, 33, json.RawMessage(`[]`))
+	r.Sync(a, 2, 1033, 33, json.RawMessage(`[]`), false)
 	time.Sleep(20 * time.Millisecond)
 	if n := cOpen.udpCount(); n != 1 {
 		t.Fatalf("the empty snapshot must not go over WebRTC, got %d WebRTC frames", n)
@@ -74,10 +74,10 @@ func TestSyncGoesOneWayPerReceiver(t *testing.T) {
 
 func TestSyncDropsLateSnapshots(t *testing.T) {
 	r, a, b := newTestRoom(t, 0)
-	r.Sync(a, 5, 1000, 33, json.RawMessage(`[[0,3,1,1]]`))
-	r.Sync(a, 6, 1033, 33, json.RawMessage(`[]`))          // "no objects any more"
-	r.Sync(a, 4, 967, 33, json.RawMessage(`[[0,3,0,0]]`))  // late, reordered
-	r.Sync(a, 6, 1033, 33, json.RawMessage(`[[0,3,0,0]]`)) // duplicate seq
+	r.Sync(a, 5, 1000, 33, json.RawMessage(`[[0,3,1,1]]`), false)
+	r.Sync(a, 6, 1033, 33, json.RawMessage(`[]`), false)          // "no objects any more"
+	r.Sync(a, 4, 967, 33, json.RawMessage(`[[0,3,0,0]]`), false)  // late, reordered
+	r.Sync(a, 6, 1033, 33, json.RawMessage(`[[0,3,0,0]]`), false) // duplicate seq
 	time.Sleep(20 * time.Millisecond)
 	msgs, _ := b.msgs(t)
 	if len(msgs) != 2 || msgs[1]["seq"] != 6.0 {
@@ -97,7 +97,7 @@ func TestSyncDropsLateSnapshots(t *testing.T) {
 
 func TestSyncSeqResetsOnResume(t *testing.T) {
 	r, a, b := newTestRoom(t, 0)
-	r.Sync(a, 50, 1000, 33, json.RawMessage(`[[0,3,1,1]]`))
+	r.Sync(a, 50, 1000, 33, json.RawMessage(`[[0,3,1,1]]`), false)
 	time.Sleep(10 * time.Millisecond)
 	// the page reloads: same user, new connection, seq starts from 1 again
 	a2 := &fakeConn{}
@@ -106,7 +106,7 @@ func TestSyncSeqResetsOnResume(t *testing.T) {
 	}
 	time.Sleep(10 * time.Millisecond)
 	b.reset()
-	r.Sync(a2, 1, 10, 33, json.RawMessage(`[[0,3,2,2]]`))
+	r.Sync(a2, 1, 10, 33, json.RawMessage(`[[0,3,2,2]]`), false)
 	time.Sleep(20 * time.Millisecond)
 	if msgs, _ := b.msgs(t); len(msgs) != 1 || msgs[0]["seq"] != 1.0 {
 		t.Fatalf("after a resume seq 1 must be accepted, got %v", msgs)
@@ -115,8 +115,8 @@ func TestSyncSeqResetsOnResume(t *testing.T) {
 
 func TestSyncWithoutSeqIsAlwaysAccepted(t *testing.T) {
 	r, a, b := newTestRoom(t, 0)
-	r.Sync(a, 0, 1000, 33, json.RawMessage(`[[0,3,1,1]]`))
-	r.Sync(a, 0, 1033, 33, json.RawMessage(`[[0,3,2,2]]`))
+	r.Sync(a, 0, 1000, 33, json.RawMessage(`[[0,3,1,1]]`), false)
+	r.Sync(a, 0, 1033, 33, json.RawMessage(`[[0,3,2,2]]`), false)
 	time.Sleep(20 * time.Millisecond)
 	if msgs, _ := b.msgs(t); len(msgs) != 2 {
 		t.Fatalf("unnumbered snapshots (old clients) must pass, got %v", msgs)

@@ -80,7 +80,10 @@ type Player struct {
 
 	// Последний снимок объектного синка игрока ("sync"): его получает каждый,
 	// кто входит в комнату, чтобы сразу увидеть объекты. nil — снимков не было.
-	sync *syncSnap
+	// Хранится только keyframe: дельта без базы бесполезна. Клиент без
+	// keyframe'ов (старый плагин) пишет сюда каждый снимок, пока не пришлёт "k".
+	sync      *syncSnap
+	syncKeyed bool
 	// syncSeq — номер последнего принятого снимка. По WebRTC снимки приходят не
 	// по порядку: опоздавший (seq не больше) не пересылается и не сохраняется,
 	// иначе он мог бы прийти после пустого objs: [] и «оживить» объекты.
@@ -561,8 +564,9 @@ func (r *Room) doJoin(req JoinReq) *proto.Error {
 		}
 		p.conn = req.Conn
 		p.suspendedAt = time.Time{}
-		p.dropQueue() // room.joined below carries the full snapshot
-		p.syncSeq = 0 // a reloaded page numbers its snapshots from 1 again
+		p.dropQueue()       // room.joined below carries the full snapshot
+		p.syncSeq = 0       // a reloaded page numbers its snapshots from 1 again
+		p.syncKeyed = false // and it starts over with a keyframe (or without one, if it is old)
 		resumed = true
 	} else {
 		if !r.passwordOK(req.Password) {
@@ -764,8 +768,8 @@ type syncSnap struct {
 // Sync stores the newest snapshot of the player's objects and relays it to the
 // others as {"t":"sync","id":...,"seq":...,"ts":...,"iv":...,"objs":[...]}.
 // The server does not look inside the records: the owner is authoritative,
-// the server only keeps the last snapshot for players who join later.
-func (r *Room) Sync(c Conn, seq, ts int64, iv int, objs json.RawMessage) {
+// the server only keeps the last keyframe for players who join later.
+func (r *Room) Sync(c Conn, seq, ts int64, iv int, objs json.RawMessage, key bool) {
 	r.exec(func() {
 		p := r.byConn(c)
 		if p == nil {
@@ -800,12 +804,22 @@ func (r *Room) Sync(c Conn, seq, ts int64, iv int, objs json.RawMessage) {
 		}
 		if len(arr) == 0 {
 			p.sync = nil // no objects any more: nothing to show to newcomers
-		} else {
+		} else if key {
+			// A delta only makes sense on top of the keyframe it was built
+			// against: a newcomer gets the last keyframe, never a delta.
+			p.syncKeyed = true
+			p.sync = &syncSnap{Seq: seq, Ts: ts, Iv: iv, Objs: objs}
+		} else if !p.syncKeyed {
+			// An older plugin sends every snapshot in full: keep the newest one.
 			p.sync = &syncSnap{Seq: seq, Ts: ts, Iv: iv, Objs: objs}
 		}
-		frame := proto.Marshal(map[string]any{
+		msg := map[string]any{
 			"t": "sync", "id": p.ID, "seq": seq, "ts": ts, "iv": iv, "objs": objs,
-		})
+		}
+		if key {
+			msg["k"] = true
+		}
+		frame := proto.Marshal(msg)
 		// Each receiver gets it ONE way: its WebRTC channel if open, else the
 		// WebSocket right away. Not through the batching queue: a snapshot that
 		// waits for the window is a snapshot the others draw a window later, and

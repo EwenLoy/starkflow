@@ -271,7 +271,7 @@ func (c *client) handle(m *proto.ClientMsg) {
 		case "player.set":
 			c.rm.SetProp(c, m.ID, m.Key, m.Value)
 		case "sync":
-			c.rm.Sync(c, m.Seq, m.Ts, m.Iv, m.Objs)
+			c.rm.Sync(c, m.Seq, m.Ts, m.Iv, m.Objs, m.K)
 		}
 	case "rtc.offer":
 		c.onRTCOffer(m)
@@ -419,7 +419,7 @@ func (c *client) onRTCMessage(lim *rtcLimit, data []byte) {
 		return
 	}
 	if rm := c.rmA.Load(); rm != nil {
-		rm.Sync(c, m.Seq, m.Ts, m.Iv, m.Objs)
+		rm.Sync(c, m.Seq, m.Ts, m.Iv, m.Objs, m.K)
 	}
 }
 

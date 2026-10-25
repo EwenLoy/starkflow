@@ -129,8 +129,8 @@ func TestNoBatching(t *testing.T) {
 
 func TestSyncRelayAndSnapshotForNewcomer(t *testing.T) {
 	r, a, b := newTestRoom(t, 0)
-	r.Sync(a, 1, 1000, 33, json.RawMessage(`[[0,3,10,20]]`))
-	r.Sync(a, 2, 1033, 33, json.RawMessage(`[[0,3,11,21]]`))
+	r.Sync(a, 1, 1000, 33, json.RawMessage(`[[0,3,10,20]]`), false)
+	r.Sync(a, 2, 1033, 33, json.RawMessage(`[[0,3,11,21]]`), false)
 	time.Sleep(20 * time.Millisecond)
 
 	if msgs, _ := a.msgs(t); len(msgs) != 0 {
@@ -154,7 +154,7 @@ func TestSyncRelayAndSnapshotForNewcomer(t *testing.T) {
 	}
 
 	// an empty snapshot removes the stored one
-	r.Sync(a, 3, 1066, 33, json.RawMessage(`[]`))
+	r.Sync(a, 3, 1066, 33, json.RawMessage(`[]`), false)
 	d := &fakeConn{}
 	if e := r.Join(JoinReq{UserID: "d", Conn: d}); e != nil {
 		t.Fatal(e)
@@ -168,8 +168,8 @@ func TestSyncRelayAndSnapshotForNewcomer(t *testing.T) {
 
 func TestSyncRejectsBadSnapshots(t *testing.T) {
 	r, a, b := newTestRoom(t, 0)
-	r.Sync(a, 1, 1, 0, json.RawMessage(`{"x":1}`))
-	r.Sync(a, 2, 1, 0, json.RawMessage(`"`+string(make([]byte, 40000))+`"`))
+	r.Sync(a, 1, 1, 0, json.RawMessage(`{"x":1}`), false)
+	r.Sync(a, 2, 1, 0, json.RawMessage(`"`+string(make([]byte, 40000))+`"`), false)
 	time.Sleep(20 * time.Millisecond)
 	msgs, _ := a.msgs(t)
 	if len(msgs) != 2 || msgs[0]["code"] != 401.0 || msgs[1]["code"] != 404.0 {
@@ -219,7 +219,7 @@ func TestSyncByteBudget(t *testing.T) {
 	})
 	objs := json.RawMessage(`[[0,3,10,20]]`)
 	for i := 0; i < 200; i++ {
-		r.Sync(a, int64(i+1), int64(i), 33, objs)
+		r.Sync(a, int64(i+1), int64(i), 33, objs, false)
 	}
 	time.Sleep(20 * time.Millisecond)
 
@@ -239,7 +239,7 @@ func TestSyncByteBudget(t *testing.T) {
 	}
 
 	// the budget is used up, but "no objects any more" must still reach the others
-	r.Sync(a, 9999, 1, 33, json.RawMessage(`[]`))
+	r.Sync(a, 9999, 1, 33, json.RawMessage(`[]`), false)
 	time.Sleep(20 * time.Millisecond)
 	relayed, _ = b.msgs(t)
 	last := relayed[len(relayed)-1]

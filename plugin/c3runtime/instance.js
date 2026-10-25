@@ -167,6 +167,13 @@
 			this._pendingCreate = null;			// "join or create": создаём, если комнаты нет
 			this._randomJoin = null;			// «случайная или своя»: чего ждём от room.list
 			this._randomRetry = null;			// выбранная комната пропала -> создаём свою
+			this._attemptKind = "";			// join | create | joinorcreate | random
+			this._errorKind = "";			// чего касалась последняя ошибка
+			this._createOnly = false;		// room.joined от созданной нами комнаты
+			this._created = 0;				// 1 — текущую комнату создали мы
+			this._srvUnique = false;		// сервер проверяет уникальность имён
+			this._wantsUnique = false;
+			this._warnedUnique = false;
 
 			// Room.
 			this._roomId = "";
@@ -1057,6 +1064,8 @@
 		_join(room, create, maxPlayers, emptyTTL, password)
 		{
 			const msg = this._buildJoin(room, create, maxPlayers, emptyTTL, password);
+			this._attemptKind = create ? "joinorcreate" : "join";
+			this._createOnly = false;
 			this._pendingCreate = null;
 			if (create)
 			{
@@ -1088,6 +1097,8 @@
 			const max = Math.floor(Number(maxPlayers));
 			const ttl = Math.floor(Number(emptyTTL));
 			this._randomRetry = null;
+			this._attemptKind = "random";
+			this._createOnly = false;
 			this._randomJoin = {
 				room: String(room === undefined || room === null ? "" : room).trim(),
 				maxPlayers: max > 0 ? max : 0,
@@ -1166,19 +1177,36 @@
 
 		// Create a room right away: create=true always makes a NEW room (equal names are
 		// allowed), so unlike JoinOrCreateRoom there is no probe join by name first.
-		_createRoom(room, maxPlayers, emptyTTL, lobby)
+		_createRoom(room, maxPlayers, emptyTTL, lobby, unique)
 		{
 			let name = String(room === undefined || room === null ? "" : room).trim();
 			if (!name)
 				name = "room-" + Math.floor(Math.random() * 60466176).toString(36).padStart(5, "0");	// 36^5
 			const msg = this._buildJoin(name, true, maxPlayers, emptyTTL, "");
+			if (unique)
+				msg.unique = true;
 			if (lobby)
 				msg.lobby = String(lobby);
 			Object.assign(msg, this._rulesPayload());
 			this._pendingCreate = null;
 			this._lastJoin = msg;
+			this._attemptKind = unique ? "create" : "random";
+			this._createOnly = true;
 			this._log("info", "creating room \"" + name + "\"");
 			this._send(Object.assign({ id: this._reqId() }, msg));
+		}
+
+		_create(room, maxPlayers, emptyTTL, lobby)
+		{
+			// The warning may only be given once the server has said who it is: a call
+			// before "welcome" would blame an old build for nothing.
+			this._wantsUnique = true;
+			if (!this._srvUnique && !this._warnedUnique && (this._status === "connected" || this._status === "in-room"))
+			{
+				this._warnedUnique = true;
+				this._warnAlways("Create room: the server does not check room name uniqueness (older build), a duplicate name may be created — update the server");
+			}
+			this._createRoom(room, maxPlayers, emptyTTL, lobby, true);
 		}
 
 		_setPlayerTimeout(seconds)
@@ -1191,6 +1219,10 @@
 		{
 			this._lastJoin = null;
 			this._pendingCreate = null;
+			this._attemptKind = "";
+			this._errorKind = "";
+			this._createOnly = false;
+			this._created = 0;
 			this._randomJoin = null;
 			this._randomRetry = null;
 			const wasIn = this._status === "in-room";
@@ -1311,6 +1343,12 @@
 			this._saveToken();
 			this._serverOffset = (m.serverTime || Date.now()) - Date.now();
 			this._srvBatch = m.batch === true;
+			this._srvUnique = m.unique === true;
+			if (!this._srvUnique && this._wantsUnique && !this._warnedUnique)
+			{
+				this._warnedUnique = true;
+				this._warnAlways("Create room: the server does not check room name uniqueness (older build), a duplicate name may be created — update the server");
+			}
 			// The server knows its own frame limit: keep the batches below it (there is
 			// no point in sending a frame the server would refuse to read). A short
 			// guard is left for the batch wrapper itself.
@@ -1343,6 +1381,12 @@
 
 		_onJoined(m)
 		{
+			const created = m.created === true || this._createOnly;
+			this._createOnly = false;
+			this._attemptKind = "";
+			this._errorKind = "";
+			if (!m.resumed)
+				this._created = created ? 1 : 0;
 			this._roomId = m.roomId || "";
 			this._roomName = m.room;
 			this._pendingCreate = null;
@@ -1372,6 +1416,8 @@
 			this._state = new Map(Object.entries(m.state || {}));
 			this._log("info", "joined room, received state:", JSON.stringify(m.state));
 			this._status = "in-room";
+			if (created)
+				this._trigger(this._cnd("OnCreatedRoom"));
 			this._trigger(this._cnd("OnJoinedRoom"));
 
 			// Trigger "On state changed" for each initial state value so the game can react
@@ -1500,6 +1546,8 @@
 		{
 			this._errCode = m.code;
 			this._errMsg = m.msg || "";
+			this._errorKind = this._attemptKind;
+			this._attemptKind = "";
 			// Настоящие ошибки всегда уходят в консоль с уровнем "error" — их не
 			// отфильтровывает даже "Log level = error". Ложный 300 от пробного входа
 			// «войти или создать» остаётся на уровне "warn".
@@ -1552,9 +1600,14 @@
 			else if (m.code >= 300 && m.code < 400 && this._status !== "in-room")
 			{
 				this._lastJoin = null;			// join failed: do not replay it after a reconnect
+				this._createOnly = false;
 				if (this._status === "reconnecting")
 					this._status = "connected";
 			}
+			if (this._errorKind === "join")
+				this._trigger(this._cnd("OnJoinRoomError"));
+			else if (this._errorKind === "create")
+				this._trigger(this._cnd("OnCreateRoomError"));
 			this._trigger(this._cnd("OnError"));
 		}
 

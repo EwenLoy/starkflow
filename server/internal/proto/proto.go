@@ -20,6 +20,7 @@ const (
 	ErrNotInRoom   = 305
 	ErrBadRoomName = 306
 	ErrBadPassword = 307
+	ErrRoomExists  = 308
 	ErrUnknownKey  = 400
 	ErrBadType     = 401
 	ErrForbidden   = 402
@@ -64,6 +65,7 @@ type ClientMsg struct {
 	// room.join
 	Room       string `json:"room"`
 	Create     bool   `json:"create"`
+	Unique     bool   `json:"unique"`
 	Password   string `json:"password"` // opens a locked room; also sets it when creating
 	MaxPlayers int    `json:"maxPlayers"`
 	EmptyTTL   *int   `json:"emptyTTL"`   // seconds; nil = server default

@@ -89,7 +89,10 @@
 
 | Условие | Тип | Когда |
 |---|---|---|
-| On joined room | триггер | Вошли в комнату (в том числе при возврате после обрыва — смотри `Resumed`) |
+| On joined room | триггер | Вошли в комнату (в том числе при возврате после обрыва — смотри `Resumed`; в том числе когда сами её создали) |
+| On created room | триггер | Комнату создал именно ты (`Create room` или «Join or create» без существующей комнаты). Срабатывает перед `On joined room` |
+| On join room error | триггер | `Join room` не удался: нет комнаты (**300**), заполнена (**301**), неверный пароль (**307**). Читай `ErrorCode`/`ErrorMsg` |
+| On create room error | триггер | `Create room` не удался: имя уже занято (**308**), лимит комнат сервера, плохое имя (**306**) |
 | On left room | триггер | Вышли из комнаты (`Leave room`) |
 | On room list received | триггер | Пришёл ответ на `Request rooms` |
 | Is in room | обычное | Истина, пока ты в комнате |
@@ -99,7 +102,8 @@
 
 | Действие | Параметры | Что делает |
 |---|---|---|
-| Join room | `room` | Войти в комнату по **id** (точнее всего) или по имени (тогда — самая старая комната с таким именем) |
+| Create room | `room`, `max-players`, `empty-ttl`, `lobby` | Создать **новую** комнату с этим именем и войти в неё. Если комната с таким именем уже есть — ошибка **308** (`On create room error`), дубликата не появится. В отличие от «Join or create» никогда не входит в чужую комнату. `max-players` = 0 и `empty-ttl` = -1 — «по умолчанию сервера» |
+| Join room | `room`, `password` | Войти в комнату по **id** (точнее всего) или по имени (тогда — самая старая комната с таким именем). `password` — для закрытой комнаты, пусто — для открытой. Неудача — `On join room error` |
 | Join or create room | `room`, `max-players`, `empty-ttl` | Войти, если комната с таким именем есть, иначе создать её. `max-players` = 0 и `empty-ttl` = -1 означают «по умолчанию сервера» |
 | Join random or create room | `room`, `max-players`, `empty-ttl`, `matching`, `lobby` | Быстрая игра: войти в любую комнату со свободным местом (полные и с паролем пропускаются), иначе создать `room` (`max-players`/`empty-ttl` — как выше). `matching`: `fillroom` — самая полная из свободных, `randommatching` — любая, `serialmatching` — первая в списке. `lobby` — метка лобби: матчмейкинг идёт только по комнатам этого лобби, и созданная комната получает её же; пусто — все комнаты приложения. Выбор делает клиент по списку комнат; если выбранную комнату заняли/закрыли — плагин сразу создаёт свою |
 | Join room with password | `room`, `password` | То же, что `Join room`, но для комнаты с паролем |
@@ -117,6 +121,10 @@
 | `HostId` | число | Id игрока-хоста |
 | `Resumed` | 1/0 | 1, если последний вход был возвратом в комнату, где ты уже был |
 | `RoomCount` | число | Сколько комнат в последнем списке |
+| `RoomPlayerCount` | число | Сколько игроков в комнате, в которой ты сейчас |
+| `RoomMaxPlayers` | число | Лимит игроков комнаты, в которой ты сейчас: сколько максимум может войти |
+| `RoomFree` | число | Сколько ещё игроков может войти в текущую комнату (0 — мест нет) |
+| `RoomCreated` | 1/0 | 1, если текущую комнату создал ты |
 | `RoomNameAt(i)` | строка | Имя комнаты с индексом `i` (с нуля) |
 | `RoomIdAt(i)` | строка | Id комнаты с индексом `i` — его передавай в `Join room` |
 | `RoomPlayersAt(i)` | число | Сколько игроков в комнате с индексом `i` |
@@ -371,7 +379,9 @@ System: Pick WariRix by unique ID StarkFlow.LocalEntityUID("player")
 
 | Что есть | Тип | Смысл |
 |---|---|---|
-| On error | триггер | Сервер прислал `err`. Читай `ErrorCode` и `ErrorMsg` |
+| On error | триггер | Сервер прислал `err`. Читай `ErrorCode` и `ErrorMsg`. Поднимается всегда, вместе с `On join room error` / `On create room error` |
+| On join room error | триггер | То же, но только когда неудачно закончился `Join room` |
+| On create room error | триггер | То же, но только когда неудачно закончился `Create room` |
 | On rate limited | триггер | Сервер отбросил сообщение из-за лимита частоты (60 сообщений в секунду на соединение). Отправляй реже |
 | `ErrorCode` | число | Код последней ошибки |
 | `ErrorMsg` | строка | Текст последней ошибки от сервера (по-английски) |
@@ -393,6 +403,7 @@ System: Pick WariRix by unique ID StarkFlow.LocalEntityUID("player")
 | 305 | Ты не в комнате | Команда про стейт игрока или выход без входа |
 | 306 | Некорректное имя комнаты | Пустое или длиннее 32 символов |
 | 307 | Неверный пароль комнаты | Спроси пароль заново: комната закрыта (`RoomLockedAt`) |
+| 308 | Комната с таким именем уже есть | Ответ на `Create room`: имя занято. Предложи другой код или `Join room` с этим именем. Старый сервер (без `welcome.unique`) эту ошибку не пришлёт |
 | 400 | Ключ не разрешён | Ключа нет в схеме комнаты (режим strict) или плохое имя: только латиница, цифры, `_` и `.`, до 64 символов |
 | 401 | Не тот тип значения | У ключа уже другой тип (число ↔ строка), либо значение не число/строка/bool |
 | 402 | Действие запрещено | Ключ только для чтения (const/once/server) или принимает только `add` |
@@ -408,14 +419,15 @@ System: Pick WariRix by unique ID StarkFlow.LocalEntityUID("player")
 |---|---|
 | On connected | `MyUserId`, `AuthToken`, `StatusString`; здесь можно `Join or create room` |
 | On reconnecting / On disconnected | `StatusString` — показать «переподключаюсь…» |
-| On joined room | `RoomId`, `RoomName`, `MyId`, `HostId`, `Resumed` |
+| On joined room | `RoomId`, `RoomName`, `MyId`, `HostId`, `Resumed`, `RoomCreated`, `RoomPlayerCount`/`RoomMaxPlayers`/`RoomFree` (заполненность) |
+| On created room | `RoomId`, `RoomName`, `MyId`, `RoomPlayerCount`/`RoomMaxPlayers`/`RoomFree` — разошли код друзьям |
 | On room list received | `RoomCount` и в цикле по `loopindex`: `RoomNameAt`, `RoomIdAt`, `RoomPlayersAt`, `RoomMaxAt` |
 | On player joined / left / connection lost / resumed | `LastPlayerId` + `LastPlayerName` (или `PlayerName(LastPlayerId)`) |
 | On player prop (key) changed | `LastPlayerId` + ключ из условия → `PlayerProp(LastPlayerId, key)` |
 | On host changed | `HostId`, `Is host` |
 | On event (code) | `EventData`, `EventFrom` |
 | On state (key) changed | `State(key)`, `ChangedValue`, `ChangedOld`, `ChangedBy` |
-| On error | `ErrorCode`, `ErrorMsg` |
+| On error | `ErrorCode`, `ErrorMsg` (для `Join room` и `Create room` — те же коды в своих триггерах) |
 
 ## Ники игроков
 

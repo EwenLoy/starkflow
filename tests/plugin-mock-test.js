@@ -177,6 +177,8 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.strictEqual(inst._status, "in-room");
 	assert.strictEqual(P.Exps.MyId.call(inst), 1);
 	assert.strictEqual(P.Exps.PlayerCount.call(inst), 1);
+	assert.strictEqual(P.Exps.RoomMaxPlayers.call(inst), 4);
+	assert.strictEqual(P.Exps.RoomFree.call(inst), 3);
 	assert.strictEqual(P.Exps.State.call(inst, "boss_hp"), 1000);
 	assert.strictEqual(P.Exps.State.call(inst, "flag"), 1);
 	assert.strictEqual(P.Exps.State.call(inst, "missing"), 0);
@@ -185,6 +187,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 
 	ws.recv({ t: "player.joined", player: { id: 2, userId: "u2", name: "B", status: "active", props: {} } });
 	assert.strictEqual(P.Exps.PlayerCount.call(inst), 2);
+	assert.strictEqual(P.Exps.RoomFree.call(inst), 2);
 	assert.strictEqual(P.Exps.LastPlayerId.call(inst), 2);
 	assert.strictEqual(P.Exps.PlayerName.call(inst, 2), "B");
 	assert.strictEqual(P.Exps.PlayerIdAt.call(inst, 1), 2);
@@ -231,6 +234,9 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.strictEqual(P.Exps.RoomIsFullAt.call(inst, 0), 0);
 	assert.strictEqual(P.Exps.RoomFreeAt.call(inst, 1), 0);
 	assert.strictEqual(P.Exps.RoomIsFullAt.call(inst, 1), 1);
+	assert.strictEqual(P.Exps.RoomMaxAt.call(inst, 0), 4);
+	assert.strictEqual(P.Exps.RoomMaxAt.call(inst, 1), 4);
+	assert.strictEqual(P.Exps.RoomMaxAt.call(inst, 7), 0);
 	assert.strictEqual(P.Exps.RoomLockedAt.call(inst, 1), 1);
 	assert.strictEqual(P.Exps.RoomLockedAt.call(inst, 0), 0);
 
@@ -266,6 +272,8 @@ console.log("ACE consistency OK (" + n + " entries)");
 	P.Acts.LeaveRoom.call(inst);
 	assert.strictEqual(ws.sent[ws.sent.length - 1].t, "room.leave");
 	assert.strictEqual(inst._status, "connected");
+	assert.strictEqual(P.Exps.RoomMaxPlayers.call(inst), 0);
+	assert.strictEqual(P.Exps.RoomFree.call(inst), 0);
 	assert.ok(fired(inst, "OnLeftRoom"));
 	P.Acts.Disconnect.call(inst);
 	assert.strictEqual(inst._status, "disconnected");
@@ -975,6 +983,132 @@ console.log("ACE consistency OK (" + n + " entries)");
 	jr = R6.ws.sent[R6.ws.sent.length - 1];
 	assert.deepStrictEqual([jr.t, jr.room, jr.create], ["room.join", "77777777", false],
 		"rooms without our lobby (or of another lobby) must be skipped by the client too");
+
+	// ---- 7b. "Create room", its own errors, and no duplicate names ----------
+	// Create room sends create=true on the first message (no probe join) together
+	// with unique=true, so a room code can never point at two rooms; an occupied
+	// name comes back as 308 through its own trigger.
+	{
+		const C = mkClient();
+		P.Acts.Connect.call(C.inst, "", "");
+		await sleep(5);
+		const ws = FakeWS.all[FakeWS.all.length - 1];
+		ws.recv({ t: "welcome", userId: "uC", token: "tC", serverTime: Date.now(), proto: 1, unique: true });
+		assert.strictEqual(C.inst._srvUnique, true, "welcome.unique must switch the uniqueness check on");
+
+		const before = ws.sent.length;
+		P.Acts.CreateRoom.call(C.inst, "room1", 5, 60, "friends");
+		assert.strictEqual(ws.sent.length, before + 1, "Create room must send one message, without a probe join");
+		const cj = ws.sent[ws.sent.length - 1];
+		assert.deepStrictEqual([cj.t, cj.room, cj.create, cj.unique, cj.maxPlayers, cj.emptyTTL, cj.lobby],
+			["room.join", "room1", true, true, 5, 60, "friends"]);
+		assert.ok(typeof cj.id === "number");
+
+		// the name is taken: the room is not entered, the game gets its own trigger
+		ws.recv({ t: "err", code: 308, msg: "room with this name already exists: room1" });
+		assert.strictEqual(C.inst._status, "connected", "a failed create must leave the client outside the room");
+		assert.strictEqual(P.Exps.ErrorCode.call(C.inst), 308);
+		assert.ok(fired(C.inst, "OnCreateRoomError"), "308 must fire On create room error");
+		assert.ok(!fired(C.inst, "OnJoinRoomError"), "a create failure is not a join failure");
+		assert.ok(fired(C.inst, "OnError"), "the generic On error still fires");
+		assert.strictEqual(P.Exps.RoomCreated.call(C.inst), 0);
+		assert.ok(!fired(C.inst, "OnCreatedRoom"));
+
+		// free name: created=true comes from the server, both triggers fire
+		C.inst.triggered.length = 0;
+		P.Acts.CreateRoom.call(C.inst, "room2", 5, 60, "");
+		const cj2 = ws.sent[ws.sent.length - 1];
+		assert.deepStrictEqual([cj2.room, cj2.lobby], ["room2", undefined], "an empty lobby is not sent");
+		ws.recv({ t: "room.joined", room: "room2", roomId: "beef0001", you: 1, hostId: 1, resumed: false,
+			created: true, maxPlayers: 5, players: [{ id: 1, userId: "uC", name: "A", status: "active", props: {} }], state: {} });
+		assert.ok(fired(C.inst, "OnCreatedRoom"), "created:true must fire On created room");
+		assert.ok(fired(C.inst, "OnJoinedRoom"), "On joined room fires as well");
+		assert.strictEqual(P.Exps.RoomCreated.call(C.inst), 1);
+
+		// joining an existing room: the same 300 is a join failure now
+		P.Acts.LeaveRoom.call(C.inst);
+		assert.strictEqual(P.Exps.RoomCreated.call(C.inst), 0, "leaving the room forgets that we created it");
+		C.inst.triggered.length = 0;
+		P.Acts.JoinRoom.call(C.inst, "nope");
+		ws.recv({ t: "err", code: 300, msg: "room not found: nope" });
+		assert.ok(fired(C.inst, "OnJoinRoomError"), "300 after Join room must fire On join room error");
+		assert.ok(!fired(C.inst, "OnCreateRoomError"));
+
+		// the password goes with the join: one action instead of two
+		C.inst.triggered.length = 0;
+		P.Acts.JoinRoom.call(C.inst, "vip", "secret");
+		const pj = ws.sent[ws.sent.length - 1];
+		assert.deepStrictEqual([pj.t, pj.room, pj.create, pj.password], ["room.join", "vip", false, "secret"],
+			"Join room must carry the password");
+		ws.recv({ t: "err", code: 307, msg: "wrong room password" });
+		assert.ok(fired(C.inst, "OnJoinRoomError"), "a wrong password is a join failure");
+		P.Acts.JoinRoom.call(C.inst, "open");
+		assert.strictEqual(ws.sent[ws.sent.length - 1].password, undefined, "an empty password is not sent");
+		ws.recv({ t: "room.joined", room: "open", roomId: "beef0002", you: 1, hostId: 1, resumed: false,
+			created: false, maxPlayers: 4, players: [{ id: 1, userId: "uC", name: "A", status: "active", props: {} }], state: {} });
+		assert.strictEqual(P.Exps.RoomCreated.call(C.inst), 0, "a joined room is not ours");
+		assert.ok(!fired(C.inst, "OnCreatedRoom"));
+
+		// an older server ignores "unique": say it once, keep working
+		const said = [];
+		const realWarn = console.warn;
+		console.warn = (...a) => said.push(a.join(" "));
+		try
+		{
+			const O = mkClient();
+			P.Acts.Connect.call(O.inst, "", "");
+			await sleep(5);
+			const wo = FakeWS.all[FakeWS.all.length - 1];
+			wo.recv({ t: "welcome", userId: "uO", token: "tO", serverTime: Date.now(), proto: 1 });
+			assert.strictEqual(O.inst._srvUnique, false);
+			P.Acts.CreateRoom.call(O.inst, "old", 0, -1, "");
+			P.Acts.LeaveRoom.call(O.inst);
+			P.Acts.CreateRoom.call(O.inst, "old", 0, -1, "");
+			assert.strictEqual(said.filter((s) => s.indexOf("uniqueness") > 0).length, 1,
+				"the old-server warning must be said once: " + JSON.stringify(said));
+			assert.strictEqual(wo.sent[wo.sent.length - 1].unique, true, "the flag is still sent, a new server honours it");
+			assert.ok(!fired(O.inst, "OnCreatedRoom"), "no room.joined yet: nothing to trigger");
+
+			// A call before "welcome" must not blame the server: the warning comes
+			// when the welcome really says there is no uniqueness, and only then.
+			const saidBefore = said.length;
+			const E = mkClient();
+			P.Acts.Connect.call(E.inst, "", "");
+			P.Acts.CreateRoom.call(E.inst, "early", 0, -1, "");
+			await sleep(5);
+			const we = FakeWS.all[FakeWS.all.length - 1];
+			assert.strictEqual(said.length, saidBefore, "no warning before the server has answered");
+			we.recv({ t: "welcome", userId: "uE", token: "tE", serverTime: Date.now(), proto: 1 });
+			assert.strictEqual(said.filter((s) => s.indexOf("uniqueness") > 0).length, 2,
+				"one warning after a welcome without unique: " + JSON.stringify(said));
+		}
+		finally { console.warn = realWarn; }
+
+		// Join or create keeps its probe silent: no join error for the expected 300
+		const J = mkClient();
+		P.Acts.Connect.call(J.inst, "", "");
+		await sleep(5);
+		const wj = FakeWS.all[FakeWS.all.length - 1];
+		wj.recv({ t: "welcome", userId: "uJ", token: "tJ", serverTime: Date.now(), proto: 1, unique: true });
+		P.Acts.JoinOrCreateRoom.call(J.inst, "boss", 4, -1);
+		wj.recv({ t: "err", code: 300, msg: "room not found: boss" });
+		assert.ok(!fired(J.inst, "OnJoinRoomError"), "the JoinOrCreateRoom probe must not fire On join room error");
+		assert.ok(!fired(J.inst, "OnCreateRoomError"));
+
+		// a room made by "Join random or create" is ours too
+		const RR = mkClient();
+		P.Acts.Connect.call(RR.inst, "", "");
+		await sleep(5);
+		const wr = FakeWS.all[FakeWS.all.length - 1];
+		wr.recv({ t: "welcome", userId: "uRR", token: "tRR", serverTime: Date.now(), proto: 1, unique: true });
+		P.Acts.JoinRandomOrCreateRoom.call(RR.inst, "arena", 4, -1, 0);
+		wr.recv({ t: "room.list.result", rooms: [{ id: "99999999", room: "arena", players: 4, maxPlayers: 4 }] });
+		assert.strictEqual(wr.sent[wr.sent.length - 1].create, true, "no free room: our own is created");
+		wr.recv({ t: "room.joined", room: "arena", roomId: "99999999", you: 1, hostId: 1, resumed: false,
+			created: true, maxPlayers: 4, players: [{ id: 1, userId: "uRR", name: "R", status: "active", props: {} }], state: {} });
+		assert.ok(fired(RR.inst, "OnCreatedRoom"), "a room made by the random action is announced as created");
+		assert.strictEqual(P.Exps.RoomCreated.call(RR.inst), 1);
+	}
 
 	// ---- clustered mode: the connection mode + the nearest region ---------------
 	// A browser is the only one that knows which region is close to it, so the

@@ -199,14 +199,20 @@ func (s *Server) findLocked(app, ref string) *room.Room {
 // join enters a room: ref is a room id or a display name.
 // With create=true a new room is always created, even if the name is already taken;
 // with create=false an existing room is joined: first by id, then by name.
-func (s *Server) join(app, ref string, create bool, opts room.Options, req room.JoinReq) (*room.Room, *proto.Error) {
+func (s *Server) join(app, ref string, create, unique bool, opts room.Options, req room.JoinReq) (*room.Room, *proto.Error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		s.mu.Lock()
 		var rm *room.Room
+		made := false
 		if create {
 			// create=true всегда создаёт НОВУЮ комнату с этим именем:
 			// ищем только по id (это путь возврата в ту же комнату по id).
 			rm = s.findByIDLocked(app, ref)
+			// unique: занятое имя — ошибка, а не дубликат.
+			if rm == nil && unique && s.findByNameLocked(app, ref) != nil {
+				s.mu.Unlock()
+				return nil, proto.Err(proto.ErrRoomExists, "room with this name already exists: "+ref)
+			}
 		} else {
 			rm = s.findLocked(app, ref) // по id, затем по имени
 		}
@@ -229,6 +235,7 @@ func (s *Server) join(app, ref string, create bool, opts room.Options, req room.
 				s.mu.Unlock()
 				return nil, err
 			}
+			made = true
 			rm = nr
 			s.rooms[nr.Key] = rm
 			go rm.Run()
@@ -239,6 +246,7 @@ func (s *Server) join(app, ref string, create bool, opts room.Options, req room.
 		if rm == nil {
 			return nil, proto.Err(proto.ErrNoRoom, "room not found: "+ref)
 		}
+		req.Created = made
 		err := rm.Join(req)
 		if err == nil {
 			return rm, nil

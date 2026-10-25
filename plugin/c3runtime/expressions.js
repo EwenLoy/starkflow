@@ -37,6 +37,8 @@
 		RoomListCount() { return this._roomList.length; },
 		RoomPlayerCount() { return this._players.size; },
 		RoomMaxPlayers() { return this._maxPlayers; },
+		RoomFree() { return Math.max(0, this._maxPlayers - this._players.size); },
+		RoomCreated() { return this._created; },
 		RoomNameAt(i) { const r = this._roomList[Math.floor(i)]; return r ? r.room : ""; },
 		RoomIdAt(i) { const r = this._roomList[Math.floor(i)]; return r ? (r.id || "") : ""; },
 		RoomPlayersAt(i) { const r = this._roomList[Math.floor(i)]; return r ? r.players : 0; },

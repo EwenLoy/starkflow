@@ -90,6 +90,21 @@
 						"display-text": "On joined room",
 						"description": "Triggered when you entered a room (also after a rejoin; see Resumed)."
 					},
+					"on-created-room": {
+						"list-name": "On created room",
+						"display-text": "On created room",
+						"description": "Triggered when the room you are in was created by this action (Created room, or a room made by Join random or create)."
+					},
+					"on-join-room-error": {
+						"list-name": "On join room error",
+						"display-text": "On join room error",
+						"description": "Triggered when Join room / Join room with password failed. Read ErrorCode: 300 = no such room, 301 = full, 307 = wrong password."
+					},
+					"on-create-room-error": {
+						"list-name": "On create room error",
+						"display-text": "On create room error",
+						"description": "Triggered when Create room failed. Read ErrorCode: 308 = a room with this name already exists."
+					},
 					"on-left-room": {
 						"list-name": "On left room",
 						"display-text": "On left room",
@@ -313,14 +328,41 @@
 							}
 						}
 					},
-					"join-room": {
-						"list-name": "Join room",
-						"display-text": "Join room [i]{0}[/i]",
-						"description": "Enter an existing room.",
+					"create-room": {
+						"list-name": "Create room",
+						"display-text": "Create room [i]{0}[/i] (max players [i]{1}[/i], delete when empty after [i]{2}[/i] s, lobby [i]{3}[/i])",
+						"description": "Create a new room and enter it. Fails with ErrorCode 308 when a room with this name already exists, so two rooms never share one name. Max players 0 = server default, delete time -1 = server default.",
 						"params": {
 							"room": {
 								"name": "Room",
-								"desc": "Room name."
+								"desc": "Room name. Empty = a random name like room-x7k2p."
+							},
+							"max-players": {
+								"name": "Max players",
+								"desc": "0 = server default."
+							},
+							"empty-ttl": {
+								"name": "Delete when empty (s)",
+								"desc": "-1 = server default, 0 = at once."
+							},
+							"lobby": {
+								"name": "Lobby",
+								"desc": "Lobby the new room belongs to. Empty = no lobby."
+							}
+						}
+					},
+					"join-room": {
+						"list-name": "Join room",
+						"display-text": "Join room [i]{0}[/i] (password [i]{1}[/i])",
+						"description": "Enter an existing room by id or by name. A room with a password needs it here; an empty password enters an open room. Fails with ErrorCode 300 when there is no such room, 301 when it is full, 307 when the password is wrong.",
+						"params": {
+							"room": {
+								"name": "Room id or name",
+								"desc": "Room id is exact; a name picks the oldest room with it."
+							},
+							"password": {
+								"name": "Password",
+								"desc": "Empty for a room without a password."
 							}
 						}
 					},
@@ -1127,6 +1169,14 @@
 					"room-max-players": {
 						"translated-name": "RoomMaxPlayers",
 						"description": "Maximum number of players of the room you are in."
+					},
+					"room-free": {
+						"translated-name": "RoomFree",
+						"description": "How many more players can enter the room you are in (0 when it is full)."
+					},
+					"room-created": {
+						"translated-name": "RoomCreated",
+						"description": "1 when the room you are in was created by you, otherwise 0."
 					},
 					"send-rate": {
 						"translated-name": "SendRate",

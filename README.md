@@ -155,7 +155,7 @@ See [docs/CLUSTER.md](docs/CLUSTER.md).
 
 ```bash
 cd server && go test ./...       # room state and tokens
-node tests/plugin-mock-test.js   # plugin: 119 ACE and behaviour on a WebSocket stub
+node tests/plugin-mock-test.js   # plugin: 133 ACE and behaviour on a WebSocket stub
 node tests/server-smoke.mjs      # 75 protocol checks against a running server
 ```
 

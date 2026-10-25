@@ -13,6 +13,9 @@
 
 		// room
 		OnJoinedRoom() { return true; },
+		OnCreatedRoom() { return true; },
+		OnJoinRoomError() { return this._errorKind === "join"; },
+		OnCreateRoomError() { return this._errorKind === "create"; },
 		OnLeftRoom() { return true; },
 		OnRoomList() { return true; },
 		IsInRoom() { return this._status === "in-room"; },

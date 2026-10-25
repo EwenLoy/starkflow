@@ -308,6 +308,7 @@ func (c *client) onHello(m *proto.ClientMsg) {
 		"serverTime":  time.Now().UnixMilli(),
 		"proto":       proto.Version,
 		"roomNameMax": cfg.MaxRoomNameRunes,
+		"unique":      true,
 		// the client may send {"t":"batch"} and must accept it from the server
 		"batch":          true,
 		"maxString":      cfg.MaxStringBytes,
@@ -465,7 +466,7 @@ func (c *client) onJoin(m *proto.ClientMsg) {
 	if joinName == "" {
 		joinName = c.name
 	}
-	rm, err := c.srv.join(c.app, ref, m.Create, opts, room.JoinReq{
+	rm, err := c.srv.join(c.app, ref, m.Create, m.Unique, opts, room.JoinReq{
 		ReqID:    m.ID,
 		UserID:   c.userID,
 		Name:     joinName,

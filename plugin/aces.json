@@ -122,6 +122,21 @@
 				"isTrigger": true
 			},
 			{
+				"id": "on-created-room",
+				"scriptName": "OnCreatedRoom",
+				"isTrigger": true
+			},
+			{
+				"id": "on-join-room-error",
+				"scriptName": "OnJoinRoomError",
+				"isTrigger": true
+			},
+			{
+				"id": "on-create-room-error",
+				"scriptName": "OnCreateRoomError",
+				"isTrigger": true
+			},
+			{
 				"id": "on-left-room",
 				"scriptName": "OnLeftRoom",
 				"isTrigger": true
@@ -142,11 +157,42 @@
 		],
 		"actions": [
 			{
+				"id": "create-room",
+				"scriptName": "CreateRoom",
+				"params": [
+					{
+						"id": "room",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "max-players",
+						"type": "number",
+						"initialValue": "0"
+					},
+					{
+						"id": "empty-ttl",
+						"type": "number",
+						"initialValue": "-1"
+					},
+					{
+						"id": "lobby",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
+			},
+			{
 				"id": "join-room",
 				"scriptName": "JoinRoom",
 				"params": [
 					{
 						"id": "room",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
+						"id": "password",
 						"type": "string",
 						"initialValue": "\"\""
 					}
@@ -378,6 +424,16 @@
 			{
 				"id": "room-max-players",
 				"expressionName": "RoomMaxPlayers",
+				"returnType": "number"
+			},
+			{
+				"id": "room-free",
+				"expressionName": "RoomFree",
+				"returnType": "number"
+			},
+			{
+				"id": "room-created",
+				"expressionName": "RoomCreated",
 				"returnType": "number"
 			}
 		]

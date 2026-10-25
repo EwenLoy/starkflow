@@ -53,6 +53,7 @@ type JoinReq struct {
 	Name     string
 	Conn     Conn
 	Password string // needed to enter a locked room as a new player
+	Created  bool
 }
 
 // Info is a lock-free summary used by room.list.
@@ -600,6 +601,7 @@ func (r *Room) doJoin(req JoinReq) *proto.Error {
 		"players":    r.playerList(),
 		"state":      r.state.Snapshot(),
 		"resumed":    resumed,
+		"created":    req.Created,
 	}
 	if req.ReqID != 0 {
 		joined["id"] = req.ReqID

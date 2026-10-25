@@ -25,7 +25,8 @@
 				this._rememberRegion(r);
 		},
 
-		JoinRoom(room) { this._join(room, false, 0, -1, ""); },
+		CreateRoom(room, maxPlayers, emptyTTL, lobby) { this._create(room, maxPlayers, emptyTTL, lobby); },
+		JoinRoom(room, password) { this._join(room, false, 0, -1, password); },
 		JoinOrCreateRoom(room, maxPlayers, emptyTTL) { this._join(room, true, maxPlayers, emptyTTL, ""); },
 		// Matchmaking: enter a room that still has a free slot (not locked), otherwise
 		// create one with this name. The choice is made from the room list, no new

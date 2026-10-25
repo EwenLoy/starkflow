@@ -179,6 +179,11 @@
 						"id": "lobby",
 						"type": "string",
 						"initialValue": "\"\""
+					},
+					{
+						"id": "password",
+						"type": "string",
+						"initialValue": "\"\""
 					}
 				]
 			},
@@ -195,6 +200,11 @@
 						"id": "password",
 						"type": "string",
 						"initialValue": "\"\""
+					},
+					{
+						"id": "lobby",
+						"type": "string",
+						"initialValue": "\"\""
 					}
 				]
 			},
@@ -208,6 +218,11 @@
 						"initialValue": "\"\""
 					},
 					{
+						"id": "password",
+						"type": "string",
+						"initialValue": "\"\""
+					},
+					{
 						"id": "max-players",
 						"type": "number",
 						"initialValue": "0"
@@ -216,6 +231,11 @@
 						"id": "empty-ttl",
 						"type": "number",
 						"initialValue": "-1"
+					},
+					{
+						"id": "lobby",
+						"type": "string",
+						"initialValue": "\"\""
 					}
 				]
 			},
@@ -256,50 +276,15 @@
 				"scriptName": "LeaveRoom"
 			},
 			{
-				"id": "join-room-password",
-				"scriptName": "JoinRoomWithPassword",
-				"params": [
-					{
-						"id": "room",
-						"type": "string",
-						"initialValue": "\"\""
-					},
-					{
-						"id": "password",
-						"type": "string",
-						"initialValue": "\"\""
-					}
-				]
-			},
-			{
-				"id": "join-or-create-password",
-				"scriptName": "JoinOrCreateRoomWithPassword",
-				"params": [
-					{
-						"id": "room",
-						"type": "string",
-						"initialValue": "\"\""
-					},
-					{
-						"id": "password",
-						"type": "string",
-						"initialValue": "\"\""
-					},
-					{
-						"id": "max-players",
-						"type": "number",
-						"initialValue": 0
-					},
-					{
-						"id": "empty-ttl",
-						"type": "number",
-						"initialValue": -1
-					}
-				]
-			},
-			{
 				"id": "request-rooms",
-				"scriptName": "RequestRooms"
+				"scriptName": "RequestRooms",
+				"params": [
+					{
+						"id": "lobby",
+						"type": "string",
+						"initialValue": "\"\""
+					}
+				]
 			}
 		],
 		"expressions": [
@@ -404,6 +389,17 @@
 				"id": "room-locked-at",
 				"expressionName": "RoomLockedAt",
 				"returnType": "number",
+				"params": [
+					{
+						"id": "index",
+						"type": "number"
+					}
+				]
+			},
+			{
+				"id": "room-lobby-at",
+				"expressionName": "RoomLobbyAt",
+				"returnType": "string",
 				"params": [
 					{
 						"id": "index",

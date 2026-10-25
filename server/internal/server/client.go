@@ -309,6 +309,8 @@ func (c *client) onHello(m *proto.ClientMsg) {
 		"proto":       proto.Version,
 		"roomNameMax": cfg.MaxRoomNameRunes,
 		"unique":      true,
+		// the client may send a lobby with room.join and room.list
+		"lobby": true,
 		// the client may send {"t":"batch"} and must accept it from the server
 		"batch":          true,
 		"maxString":      cfg.MaxStringBytes,

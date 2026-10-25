@@ -118,7 +118,7 @@ StarkFlow: On room list received
 
 ```
 RoomRow (Sprite): On clicked
-    → StarkFlow: Join room with password (RoomRow.roomId, PasswordInput.Text)
+    → StarkFlow: Join room (RoomRow.roomId, PasswordInput.Text)
 ```
 
 Как сделать саму закрытую комнату — в разделе [14](#14-комнаты-с-паролем).
@@ -416,7 +416,7 @@ JS-клиента (тестовая страница работает именн
 | Ошибка 400 на ключ стейта | Кириллица или пробелы в имени ключа: только латиница, цифры, `_`, `.` |
 | Ошибка 401 на ключ стейта | В этот ключ уже писали значение другого типа |
 | Ошибка 500 при быстром движении | Больше 60 сообщений в секунду: отправляй через `Every 0.1 seconds`, а не каждый кадр |
-| Ошибка 307 при входе | Комната закрыта паролем: нужен `Join room with password`, раздел [14](#14-комнаты-с-паролем) |
+| Ошибка 307 при входе | Комната закрыта паролем: передай пароль вторым параметром `Join room`, раздел [14](#14-комнаты-с-паролем) |
 | Сработал `On rate limited` | Отправляешь слишком часто: переходи на таймер и увеличь интервал, раздел [15](#15-рейт-лимит-не-заваливать-сервер) |
 
 ## 13. Полный пример
@@ -451,7 +451,7 @@ Button "Создать закрытую комнату" (On clicked)
 
 ```
 Button "Играть" (On clicked)
-    → StarkFlow: Join room with password (RoomIdInput.Text, PasswordInput.Text)
+    → StarkFlow: Join room (RoomIdInput.Text, PasswordInput.Text)
 
 StarkFlow: On error
     → StarkFlow.ErrorCode = 307        // условие

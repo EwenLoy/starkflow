@@ -173,12 +173,16 @@ func (s *Server) findByIDLocked(app, id string) *room.Room {
 }
 
 // findByNameLocked returns the oldest room of the app with this display name.
+// lobby != "" keeps only the rooms of that lobby ("" = any lobby).
 // Call with s.mu held.
-func (s *Server) findByNameLocked(app, name string) *room.Room {
+func (s *Server) findByNameLocked(app, name, lobby string) *room.Room {
 	prefix := app + ":"
 	var oldest *room.Room
 	for k, r := range s.rooms {
 		if !strings.HasPrefix(k, prefix) || r.Name != name {
+			continue
+		}
+		if lobby != "" && r.Lobby != lobby {
 			continue
 		}
 		if oldest == nil || r.Created().Before(oldest.Created()) {
@@ -188,18 +192,23 @@ func (s *Server) findByNameLocked(app, name string) *room.Room {
 	return oldest
 }
 
-// findLocked finds a room by id first, then by display name. Call with s.mu held.
-func (s *Server) findLocked(app, ref string) *room.Room {
+// findLocked finds a room by id first, then by display name (inside the lobby
+// when one is asked for). Call with s.mu held.
+func (s *Server) findLocked(app, ref, lobby string) *room.Room {
 	if rm := s.findByIDLocked(app, ref); rm != nil {
 		return rm
 	}
-	return s.findByNameLocked(app, ref)
+	return s.findByNameLocked(app, ref, lobby)
 }
 
 // join enters a room: ref is a room id or a display name.
-// With create=true a new room is always created, even if the name is already taken;
-// with create=false an existing room is joined: first by id, then by name.
+// With create=true a new room is always created, even if the name is already
+// taken; with create=false an existing room is joined: first by id, then by
+// name inside the requested lobby (opts.Lobby, "" = any lobby).
+// unique=true makes a taken name a 308 error instead of a duplicate; the name
+// is taken only inside its own lobby, so "code42" may exist once per lobby.
 func (s *Server) join(app, ref string, create, unique bool, opts room.Options, req room.JoinReq) (*room.Room, *proto.Error) {
+	lobby := opts.Lobby
 	for attempt := 0; attempt < 3; attempt++ {
 		s.mu.Lock()
 		var rm *room.Room
@@ -209,12 +218,12 @@ func (s *Server) join(app, ref string, create, unique bool, opts room.Options, r
 			// ищем только по id (это путь возврата в ту же комнату по id).
 			rm = s.findByIDLocked(app, ref)
 			// unique: занятое имя — ошибка, а не дубликат.
-			if rm == nil && unique && s.findByNameLocked(app, ref) != nil {
+			if rm == nil && unique && s.findByNameLocked(app, ref, lobby) != nil {
 				s.mu.Unlock()
-				return nil, proto.Err(proto.ErrRoomExists, "room with this name already exists: "+ref)
+				return nil, proto.Err(proto.ErrRoomExists, "room with this name already exists in the lobby: "+ref)
 			}
 		} else {
-			rm = s.findLocked(app, ref) // по id, затем по имени
+			rm = s.findLocked(app, ref, lobby) // по id, затем по имени в лобби
 		}
 		if rm == nil && create {
 			if s.draining.Load() {
@@ -260,7 +269,8 @@ func (s *Server) join(app, ref string, create, unique bool, opts room.Options, r
 }
 
 // list returns up to 100 rooms of one app. lobby != "" keeps only the rooms
-// of that lobby; "" lists every room.
+// of that lobby; "" lists every room. The result is grouped by lobby and then
+// by name, so a client showing it sees one lobby after another.
 func (s *Server) list(app, lobby string) []map[string]any {
 	prefix := app + ":"
 	s.mu.Lock()
@@ -277,6 +287,9 @@ func (s *Server) list(app, lobby string) []map[string]any {
 	}
 	s.mu.Unlock()
 	sort.Slice(infos, func(i, j int) bool {
+		if infos[i].Lobby != infos[j].Lobby {
+			return infos[i].Lobby < infos[j].Lobby // сначала по лобби
+		}
 		if infos[i].Name != infos[j].Name {
 			return infos[i].Name < infos[j].Name
 		}
@@ -376,7 +389,7 @@ func (s *Server) Report(publicURL, region string) directory.NodeReport {
 // kickRoom closes a room by "app:id" or "app:name" (directory admin kick).
 func (s *Server) kickRoom(app, ref string) bool {
 	s.mu.Lock()
-	rm := s.findLocked(app, ref)
+	rm := s.findLocked(app, ref, "")
 	s.mu.Unlock()
 	if rm == nil {
 		return false

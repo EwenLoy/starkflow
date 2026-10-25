@@ -157,7 +157,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.ok(fired(inst, "OnConnected"));
 	assert.ok(Math.abs(P.Exps.ServerTime.call(inst) - Date.now() - 5000) < 50);
 
-	P.Acts.JoinOrCreateRoom.call(inst, "boss1", 4, 30);
+	P.Acts.JoinOrCreateRoom.call(inst, "boss1", "", 4, 30);
 	let last = ws.sent[ws.sent.length - 1];
 	// В«РІРѕР№С‚Рё РёР»Рё СЃРѕР·РґР°С‚СЊВ»: СЃРЅР°С‡Р°Р»Р° РїСЂРѕР±СѓРµРј РІРѕР№С‚Рё РїРѕ РёРјРµРЅРё
 	assert.deepStrictEqual([last.t, last.room, last.create, last.maxPlayers, last.emptyTTL], ["room.join", "boss1", false, 4, 30]);
@@ -298,7 +298,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	await sleep(5);
 	const w3 = FakeWS.all[FakeWS.all.length - 1];
 	w3.recv({ t: "welcome", userId: "u3", token: "tok3", serverTime: Date.now(), proto: 1 });
-	P.Acts.JoinOrCreateRoomWithPassword.call(inst3, "boss", "secret", 4, 30);
+	P.Acts.JoinOrCreateRoom.call(inst3, "boss", "secret", 4, 30);
 	let m3 = w3.sent[w3.sent.length - 1];
 	assert.deepStrictEqual([m3.t, m3.room, m3.create, m3.password, m3.maxPlayers, m3.emptyTTL],
 		["room.join", "boss", false, "secret", 4, 30]);
@@ -335,7 +335,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	await sleep(5);
 	const w5 = FakeWS.all[FakeWS.all.length - 1];
 	w5.recv({ t: "welcome", userId: "u4", token: "t4", serverTime: Date.now(), proto: 1 });
-	P.Acts.JoinOrCreateRoom.call(inst4, "arena", 8, 30);
+	P.Acts.JoinOrCreateRoom.call(inst4, "arena", "", 8, 30);
 	w5.recv({ t: "room.joined", room: "arena", roomId: "r1", you: 1, hostId: 1, maxPlayers: 8, players: [{ id: 1, name: "me", props: {} }], state: {} });
 
 	// after joining the room the server is the source of truth for nicknames
@@ -484,7 +484,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 		await sleep(5);
 		const ws = FakeWS.all[FakeWS.all.length - 1];
 		ws.recv({ t: "welcome", userId: "u" + id, token: "t" + id, serverTime: Date.now(), proto: 1 });
-		P.Acts.JoinOrCreateRoom.call(C.inst, "arena", 8, 30);
+		P.Acts.JoinOrCreateRoom.call(C.inst, "arena", "", 8, 30);
 		ws.recv({ t: "room.joined", room: "arena", roomId: "r1", you: id, hostId: 1, maxPlayers: 8, players: players, state: {} });
 		return ws;
 	};
@@ -607,7 +607,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	await sleep(5);
 	const wC = FakeWS.all[FakeWS.all.length - 1];
 	wC.recv({ t: "welcome", userId: "uC", token: "tC", serverTime: Date.now(), proto: 1 });
-	P.Acts.JoinOrCreateRoom.call(C.inst, "arena", 8, 30);
+	P.Acts.JoinOrCreateRoom.call(C.inst, "arena", "", 8, 30);
 	wC.recv({ t: "room.joined", room: "arena", roomId: "r2", you: 1, hostId: 1, maxPlayers: 8, players: [{ id: 1, name: "C", props: {} }], state: {} });
 	assert.strictEqual(P.Exps.LocalEntityUID.call(C.inst, "player"), mineC.uid, "the binding must survive the join");
 	mineC.x = 500; mineC.y = 600;
@@ -677,7 +677,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.strictEqual(wN.sent.filter((m) => m.t === "room.join").pop().name, "",
 		"the join must carry a name field (empty until Set player name)");
 	P.Acts.SetName.call(N.inst, "Nina");
-	P.Acts.JoinOrCreateRoom.call(N.inst, "arena", 8, 30);
+	P.Acts.JoinOrCreateRoom.call(N.inst, "arena", "", 8, 30);
 	assert.strictEqual(wN.sent.filter((m) => m.t === "room.join").pop().name, "Nina",
 		"a name set before joining must go out with room.join");
 
@@ -686,11 +686,11 @@ console.log("ACE consistency OK (" + n + " entries)");
 	const T = mkClient();
 	const wT = await joinClient(T, 1, [{ id: 1, name: "T", props: {} }]);
 	P.Acts.SetPlayerTimeout.call(T.inst, 0);
-	P.Acts.JoinOrCreateRoom.call(T.inst, "instant", 8, 30);
+	P.Acts.JoinOrCreateRoom.call(T.inst, "instant", "", 8, 30);
 	assert.strictEqual(wT.sent.filter((m) => m.t === "room.join").pop().suspendTTL, 0,
 		"Set player timeout 0 must go out with room.join");
 	P.Acts.SetPlayerTimeout.call(T.inst, -1);
-	P.Acts.JoinOrCreateRoom.call(T.inst, "instant", 8, 30);
+	P.Acts.JoinOrCreateRoom.call(T.inst, "instant", "", 8, 30);
 	assert.ok(!("suspendTTL" in wT.sent.filter((m) => m.t === "room.join").pop()),
 		"-1 must keep the server default: no suspendTTL in room.join");
 
@@ -700,7 +700,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	await sleep(5);
 	const wG = FakeWS.all[FakeWS.all.length - 1];
 	wG.recv({ t: "welcome", userId: "uG", token: "tG", serverTime: Date.now(), proto: 1, batch: true, maxString: 4096 });
-	P.Acts.JoinOrCreateRoom.call(G.inst, "arena", 8, 30);
+	P.Acts.JoinOrCreateRoom.call(G.inst, "arena", "", 8, 30);
 	wG.recv({ t: "room.joined", room: "arena", roomId: "r3", you: 1, hostId: 1, maxPlayers: 8, players: [{ id: 1, name: "G", props: {} }, { id: 2, name: "H", props: {} }], state: {} });
 	assert.strictEqual(G.inst._chunkBytes, 4000, "the chunk size must follow welcome.maxString");
 	// many synced objects: more than one old 1000-byte chunk, still one 4000-byte chunk
@@ -742,7 +742,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	await sleep(5);
 	const wGM = FakeWS.all[FakeWS.all.length - 1];
 	wGM.recv({ t: "welcome", userId: "uGM", token: "tGM", serverTime: Date.now(), proto: 1, batch: true, maxString: 4096, maxMsg: 1200 });
-	P.Acts.JoinOrCreateRoom.call(GM.inst, "arena", 8, 30);
+	P.Acts.JoinOrCreateRoom.call(GM.inst, "arena", "", 8, 30);
 	wGM.recv({ t: "room.joined", room: "arena", roomId: "r5", you: 1, hostId: 1, maxPlayers: 8, players: [{ id: 1, name: "GM", props: {} }, { id: 2, name: "H", props: {} }], state: {} });
 	assert.strictEqual(GM.inst._batchBytes, 1200 - 256, "the batch size must follow welcome.maxMsg");
 	assert.ok(GM.inst._chunkBytes <= 1200 - 384, "one chunk must still fit into one frame: " + GM.inst._chunkBytes);
@@ -767,7 +767,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 		await sleep(5);
 		const ws = FakeWS.all[FakeWS.all.length - 1];
 		ws.recv({ t: "welcome", userId: "s" + id, token: "s" + id, serverTime: Date.now(), proto: 1, batch: true, sync: true, maxSync: 32768, batchMs: 40 });
-		P.Acts.JoinOrCreateRoom.call(C.inst, "arena", 8, 30);
+		P.Acts.JoinOrCreateRoom.call(C.inst, "arena", "", 8, 30);
 		ws.recv({ t: "room.joined", room: "arena", roomId: "r4", you: id, hostId: 1, maxPlayers: 8, players: players, state: {} });
 		return ws;
 	};
@@ -886,7 +886,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 		P.Acts.Connect.call(C.inst, "", "");
 		await sleep(5);
 		const ws = FakeWS.all[FakeWS.all.length - 1];
-		ws.recv({ t: "welcome", userId: "u" + id, token: "t" + id, serverTime: Date.now(), proto: 1 });
+		ws.recv({ t: "welcome", userId: "u" + id, token: "t" + id, serverTime: Date.now(), proto: 1, lobby: true });
 		return { inst: C.inst, ws: ws };
 	};
 	const R1 = await mkRandom("R1");
@@ -935,7 +935,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	await sleep(40);
 	const wR3 = FakeWS.all[FakeWS.all.length - 1];
 	assert.ok(wR3 && wR3 !== R3.ws, "no reconnect happened");
-	wR3.recv({ t: "welcome", userId: "uR3", token: "tR3b", serverTime: Date.now(), proto: 1 });
+	wR3.recv({ t: "welcome", userId: "uR3", token: "tR3b", serverTime: Date.now(), proto: 1, lobby: true });
 	jr = wR3.sent[wR3.sent.length - 1];
 	assert.strictEqual(jr.t, "room.list", "a pending random join must ask again after a reconnect");
 	wR3.recv({ t: "room.list.result", rooms: [
@@ -1090,7 +1090,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 		await sleep(5);
 		const wj = FakeWS.all[FakeWS.all.length - 1];
 		wj.recv({ t: "welcome", userId: "uJ", token: "tJ", serverTime: Date.now(), proto: 1, unique: true });
-		P.Acts.JoinOrCreateRoom.call(J.inst, "boss", 4, -1);
+		P.Acts.JoinOrCreateRoom.call(J.inst, "boss", "", 4, -1);
 		wj.recv({ t: "err", code: 300, msg: "room not found: boss" });
 		assert.ok(!fired(J.inst, "OnJoinRoomError"), "the JoinOrCreateRoom probe must not fire On join room error");
 		assert.ok(!fired(J.inst, "OnCreateRoomError"));
@@ -1108,6 +1108,25 @@ console.log("ACE consistency OK (" + n + " entries)");
 			created: true, maxPlayers: 4, players: [{ id: 1, userId: "uRR", name: "R", status: "active", props: {} }], state: {} });
 		assert.ok(fired(RR.inst, "OnCreatedRoom"), "a room made by the random action is announced as created");
 		assert.strictEqual(P.Exps.RoomCreated.call(RR.inst), 1);
+
+		// An older server ignores the lobby field silently, which looks exactly like
+		// "matchmaking puts everyone in their own room": say it once, not every join.
+		const lobbySaid = [];
+		const realWarnLobby = console.warn;
+		console.warn = (...a) => lobbySaid.push(a.join(" "));
+		try
+		{
+			const O = mkClient();
+			P.Acts.Connect.call(O.inst, "", "");
+			await sleep(5);
+			const wo = FakeWS.all[FakeWS.all.length - 1];
+			wo.recv({ t: "welcome", userId: "uOld", token: "tOld", serverTime: Date.now(), proto: 1 });
+			P.Acts.JoinRandomOrCreateRoom.call(O.inst, "arena", 4, -1, 0, "friends");
+			P.Acts.JoinRandomOrCreateRoom.call(O.inst, "arena", 4, -1, 0, "friends");
+			const lobbyWarns = lobbySaid.filter((s) => s.indexOf("does not support lobbies") > 0);
+			assert.strictEqual(lobbyWarns.length, 1, "the missing lobby support is reported once: " + JSON.stringify(lobbySaid));
+		}
+		finally { console.warn = realWarnLobby; }
 	}
 
 	// ---- clustered mode: the connection mode + the nearest region ---------------

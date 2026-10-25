@@ -54,6 +54,7 @@
 			return r && r.players >= r.maxPlayers ? 1 : 0;
 		},
 		RoomLockedAt(i) { const r = this._roomList[Math.floor(i)]; return r && r.locked ? 1 : 0; },
+		RoomLobbyAt(i) { const r = this._roomList[Math.floor(i)]; return r && r.lobby ? String(r.lobby) : ""; },
 
 		// players
 		PlayerCount() { return this._players.size; },

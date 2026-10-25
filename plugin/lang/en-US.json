@@ -330,8 +330,8 @@
 					},
 					"create-room": {
 						"list-name": "Create room",
-						"display-text": "Create room [i]{0}[/i] (max players [i]{1}[/i], delete when empty after [i]{2}[/i] s, lobby [i]{3}[/i])",
-						"description": "Create a new room and enter it. Fails with ErrorCode 308 when a room with this name already exists, so two rooms never share one name. Max players 0 = server default, delete time -1 = server default.",
+						"display-text": "Create room [i]{0}[/i] (max players [i]{1}[/i], delete when empty after [i]{2}[/i] s, lobby [i]{3}[/i], password [i]{4}[/i])",
+						"description": "Create a new room and enter it. Fails with ErrorCode 308 when a room with this name already exists in the same lobby, so two rooms never share one name there; the same name in another lobby is allowed. Empty password = open room.",
 						"params": {
 							"room": {
 								"name": "Room",
@@ -348,13 +348,17 @@
 							"lobby": {
 								"name": "Lobby",
 								"desc": "Lobby the new room belongs to. Empty = no lobby."
+							},
+							"password": {
+								"name": "Password",
+								"desc": "Players need it to enter. Empty = open room."
 							}
 						}
 					},
 					"join-room": {
 						"list-name": "Join room",
-						"display-text": "Join room [i]{0}[/i] (password [i]{1}[/i])",
-						"description": "Enter an existing room by id or by name. A room with a password needs it here; an empty password enters an open room. Fails with ErrorCode 300 when there is no such room, 301 when it is full, 307 when the password is wrong.",
+						"display-text": "Join room [i]{0}[/i] (password [i]{1}[/i], lobby [i]{2}[/i])",
+						"description": "Enter an existing room by id or by name. An empty password enters an open room. Fails with ErrorCode 300 when there is no such room, 301 when it is full, 307 when the password is wrong.",
 						"params": {
 							"room": {
 								"name": "Room id or name",
@@ -363,17 +367,25 @@
 							"password": {
 								"name": "Password",
 								"desc": "Empty for a room without a password."
+							},
+							"lobby": {
+								"name": "Lobby",
+								"desc": "Look for the name inside this lobby only. Empty = any lobby."
 							}
 						}
 					},
 					"join-or-create": {
 						"list-name": "Join or create room",
-						"display-text": "Join or create room [i]{0}[/i] (max players [i]{1}[/i], delete when empty after [i]{2}[/i] s)",
-						"description": "Enter the room, create it if it does not exist. Max players 0 = server default. Delete time -1 = server default, 0 = at once.",
+						"display-text": "Join or create room [i]{0}[/i] (password [i]{1}[/i], max players [i]{2}[/i], delete when empty after [i]{3}[/i] s, lobby [i]{4}[/i])",
+						"description": "Enter the room inside the lobby, create it if it does not exist. An empty password creates an open room. Max players 0 = server default. Delete time -1 = server default, 0 = at once.",
 						"params": {
 							"room": {
 								"name": "Room",
 								"desc": "Room name."
+							},
+							"password": {
+								"name": "Password",
+								"desc": "Password of the room to enter, and of the room created. Empty = open room."
 							},
 							"max-players": {
 								"name": "Max players",
@@ -382,6 +394,10 @@
 							"empty-ttl": {
 								"name": "Delete when empty (s)",
 								"desc": "-1 = server default."
+							},
+							"lobby": {
+								"name": "Lobby",
+								"desc": "The name is looked up inside this lobby and a new room gets it. Empty = any lobby."
 							}
 						}
 					},
@@ -422,48 +438,16 @@
 						"display-text": "Leave room",
 						"description": "Leave the current room."
 					},
-					"join-room-password": {
-						"list-name": "Join room with password",
-						"display-text": "Join room [i]{0}[/i] with password [i]{1}[/i]",
-						"description": "Enter a locked room by id or by name. The password is kept for the automatic reconnect.",
-						"params": {
-							"room": {
-								"name": "Room id or name",
-								"desc": "Room id is exact; a name picks the oldest room with it."
-							},
-							"password": {
-								"name": "Password",
-								"desc": "Room password."
-							}
-						}
-					},
-					"join-or-create-password": {
-						"list-name": "Join or create locked room",
-						"display-text": "Join or create room [i]{0}[/i] with password [i]{1}[/i] (max players [i]{2}[/i], delete when empty after [i]{3}[/i] s)",
-						"description": "Enter the room with this password, creating it if it does not exist.",
-						"params": {
-							"room": {
-								"name": "Room name",
-								"desc": "Display name, any language."
-							},
-							"password": {
-								"name": "Password",
-								"desc": "Password that will be required to enter."
-							},
-							"max-players": {
-								"name": "Max players",
-								"desc": "0 = server default (8), cap 64."
-							},
-							"empty-ttl": {
-								"name": "Delete when empty after, s",
-								"desc": "-1 = server default (60 s), 0 = at once."
-							}
-						}
-					},
 					"request-rooms": {
 						"list-name": "Request room list",
-						"display-text": "Request room list",
-						"description": "Ask the server for the list of rooms."
+						"display-text": "Request room list (lobby [i]{0}[/i])",
+						"description": "Ask the server for the list of rooms. The list is grouped by lobby, then by name. An empty lobby asks for every room.",
+						"params": {
+							"lobby": {
+								"name": "Lobby",
+								"desc": "Only rooms of this lobby. Empty = every room of the app."
+							}
+						}
 					},
 					"send-event": {
 						"list-name": "Send event",
@@ -1139,6 +1123,16 @@
 					"room-locked-at": {
 						"translated-name": "RoomLockedAt",
 						"description": "1 if the room at index needs a password.",
+						"params": {
+							"index": {
+								"name": "Index",
+								"desc": "0-based."
+							}
+						}
+					},
+					"room-lobby-at": {
+						"translated-name": "RoomLobbyAt",
+						"description": "Lobby label of the room at index (empty when the room has none). The list is grouped by lobby, so the rooms of one lobby follow each other.",
 						"params": {
 							"index": {
 								"name": "Index",

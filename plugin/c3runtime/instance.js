@@ -107,6 +107,8 @@
 
 	const r1 = (v) => Math.round(v * 10) / 10;
 	const r3 = (v) => Math.round(v * 1000) / 1000;
+	// A lobby is just a label on a room: trimmed, an empty one means "any lobby".
+	const _trimLobby = (v) => String(v === undefined || v === null ? "" : v).trim();
 	const fin = (v) => (typeof v === "number" && isFinite(v)) ? v : 0;
 	const utf8Len = (str) =>
 	{
@@ -174,6 +176,9 @@
 			this._srvUnique = false;		// сервер проверяет уникальность имён
 			this._wantsUnique = false;
 			this._warnedUnique = false;
+			this._srvLobby = false;			// сервер понимает метку лобби
+			this._wantsLobby = false;
+			this._warnedLobby = false;
 
 			// Room.
 			this._roomId = "";
@@ -1047,7 +1052,8 @@
 
 		// room.join as the server expects it: create = "always make a new room",
 		// maxPlayers 0 and emptyTTL -1 mean "server default" and are not sent.
-		_buildJoin(room, create, maxPlayers, emptyTTL, password)
+		// An empty password means "open room", an empty lobby "any lobby".
+		_buildJoin(room, create, maxPlayers, emptyTTL, password, lobby)
 		{
 			const msg = { t: "room.join", room: String(room), create: create, name: this._name };
 			if (maxPlayers > 0)
@@ -1058,12 +1064,16 @@
 				msg.suspendTTL = Math.floor(this._suspendTTL);
 			if (password)
 				msg.password = String(password);
+			const l = _trimLobby(lobby);
+			if (l)
+				msg.lobby = l;
 			return msg;
 		}
 
-		_join(room, create, maxPlayers, emptyTTL, password)
+		_join(room, create, maxPlayers, emptyTTL, password, lobby)
 		{
-			const msg = this._buildJoin(room, create, maxPlayers, emptyTTL, password);
+			const msg = this._buildJoin(room, create, maxPlayers, emptyTTL, password, lobby);
+			this._wantLobby(lobby);
 			this._attemptKind = create ? "joinorcreate" : "join";
 			this._createOnly = false;
 			this._pendingCreate = null;
@@ -1104,21 +1114,25 @@
 				maxPlayers: max > 0 ? max : 0,
 				emptyTTL: Number.isFinite(ttl) ? ttl : -1,
 				mode: this._pickCombo(RANDOM_MODES, matching, "fillroom"),
-				lobby: String(lobby === undefined || lobby === null ? "" : lobby).trim()
+				lobby: _trimLobby(lobby)
 			};
+			this._wantLobby(this._randomJoin.lobby);
 			this._log("info", "join random: asking for the room list (" + this._randomJoin.mode
 				+ (this._randomJoin.lobby ? ", lobby \"" + this._randomJoin.lobby + "\"" : "") + ")");
 			this._askRooms();
 		}
 
-		// room.list для «случайной или своей»: лобби сужает список до одного лобби,
-		// без лобби — все комнаты приложения. Ответ приходит как room.list.result.
-		_askRooms()
+		// room.list: a lobby narrows the answer down to that lobby, an empty one
+		// lists every room. The action calls it with its own argument, "join random"
+		// with the lobby it is going to use.
+		_askRooms(lobby)
 		{
 			const msg = { t: "room.list", id: this._reqId() };
-			const lobby = this._randomJoin && this._randomJoin.lobby;
-			if (lobby)
-				msg.lobby = lobby;
+			const l = lobby === undefined
+				? (this._randomJoin && this._randomJoin.lobby) || ""
+				: _trimLobby(lobby);
+			if (l)
+				msg.lobby = l;
 			this._send(msg);
 		}
 
@@ -1166,7 +1180,7 @@
 			if (!pick)
 			{
 				this._log("info", "join random: no free room, creating one");
-				this._createRoom(req.room, req.maxPlayers, req.emptyTTL, req.lobby);
+				this._createRoom(req.room, req.maxPlayers, req.emptyTTL, req.lobby, false, "");
 				return;
 			}
 			this._randomRetry = req;
@@ -1175,28 +1189,28 @@
 			this._join(pick.id, false, 0, -1, "");
 		}
 
-		// Create a room right away: create=true always makes a NEW room (equal names are
-		// allowed), so unlike JoinOrCreateRoom there is no probe join by name first.
-		_createRoom(room, maxPlayers, emptyTTL, lobby, unique)
+		// Create a room right away: create=true always makes a NEW room, so unlike
+		// JoinOrCreateRoom there is no probe join by name first. With unique the
+		// server refuses a name that is already taken inside the same lobby (308).
+		_createRoom(room, maxPlayers, emptyTTL, lobby, unique, password)
 		{
 			let name = String(room === undefined || room === null ? "" : room).trim();
 			if (!name)
 				name = "room-" + Math.floor(Math.random() * 60466176).toString(36).padStart(5, "0");	// 36^5
-			const msg = this._buildJoin(name, true, maxPlayers, emptyTTL, "");
+			const msg = this._buildJoin(name, true, maxPlayers, emptyTTL, password, lobby);
 			if (unique)
 				msg.unique = true;
-			if (lobby)
-				msg.lobby = String(lobby);
 			Object.assign(msg, this._rulesPayload());
 			this._pendingCreate = null;
 			this._lastJoin = msg;
 			this._attemptKind = unique ? "create" : "random";
 			this._createOnly = true;
-			this._log("info", "creating room \"" + name + "\"");
+			this._log("info", "creating room \"" + name + "\""
+				+ (msg.lobby ? " in lobby \"" + msg.lobby + "\"" : ""));
 			this._send(Object.assign({ id: this._reqId() }, msg));
 		}
 
-		_create(room, maxPlayers, emptyTTL, lobby)
+		_create(room, maxPlayers, emptyTTL, lobby, password)
 		{
 			// The warning may only be given once the server has said who it is: a call
 			// before "welcome" would blame an old build for nothing.
@@ -1206,7 +1220,23 @@
 				this._warnedUnique = true;
 				this._warnAlways("Create room: the server does not check room name uniqueness (older build), a duplicate name may be created — update the server");
 			}
-			this._createRoom(room, maxPlayers, emptyTTL, lobby, true);
+			this._wantLobby(lobby);
+			this._createRoom(room, maxPlayers, emptyTTL, lobby, true, password);
+		}
+
+		// A lobby is only a label the server filters by; a build without lobbies
+		// ignores it silently, which looks like "matchmaking does not work".
+		_wantLobby(lobby)
+		{
+			if (!_trimLobby(lobby))
+				return;
+			this._wantsLobby = true;
+			if (this._srvLobby || this._warnedLobby)
+				return;
+			if (this._status !== "connected" && this._status !== "in-room")
+				return;	// the check runs again when "welcome" arrives
+			this._warnedLobby = true;
+			this._warnAlways("A lobby is sent, but the server does not support lobbies (older build): the label is ignored — update the server");
 		}
 
 		_setPlayerTimeout(seconds)
@@ -1348,6 +1378,12 @@
 			{
 				this._warnedUnique = true;
 				this._warnAlways("Create room: the server does not check room name uniqueness (older build), a duplicate name may be created — update the server");
+			}
+			this._srvLobby = m.lobby === true;
+			if (!this._srvLobby && this._wantsLobby && !this._warnedLobby)
+			{
+				this._warnedLobby = true;
+				this._warnAlways("A lobby is sent, but the server does not support lobbies (older build): the label is ignored — update the server");
 			}
 			// The server knows its own frame limit: keep the batches below it (there is
 			// no point in sending a frame the server would refuse to read). A short
@@ -1563,7 +1599,7 @@
 				const req = this._randomRetry;
 				this._randomRetry = null;
 				this._log("warn", "join random: that room is gone (" + m.code + "), creating one");
-				this._createRoom(req.room, req.maxPlayers, req.emptyTTL, req.lobby);
+				this._createRoom(req.room, req.maxPlayers, req.emptyTTL, req.lobby, false, "");
 				return;
 			}
 			if (m.code === 500)

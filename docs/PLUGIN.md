@@ -47,7 +47,7 @@ StarkFlow: On room list received
                       (StarkFlow.RoomLockedAt(loopindex) = 1 ? " 🔒" : "")
 
 RoomRow: On clicked
-    → StarkFlow: Join room with password (RoomRow.roomId, PasswordInput.Text)   // вход именно в эту комнату
+    → StarkFlow: Join room (RoomRow.roomId, PasswordInput.Text)   // вход именно в эту комнату
 ```
 
 `loopindex` — номер комнаты в списке (с нуля). Подробнее, включая «войти в первую свободную» и вариант с Array —

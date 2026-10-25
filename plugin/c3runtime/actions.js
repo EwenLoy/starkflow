@@ -25,17 +25,21 @@
 				this._rememberRegion(r);
 		},
 
-		CreateRoom(room, maxPlayers, emptyTTL, lobby) { this._create(room, maxPlayers, emptyTTL, lobby); },
-		JoinRoom(room, password) { this._join(room, false, 0, -1, password); },
-		JoinOrCreateRoom(room, maxPlayers, emptyTTL) { this._join(room, true, maxPlayers, emptyTTL, ""); },
+		// Only create: a taken name is a 308 error, never a second room with that
+		// name in the same lobby. An empty password creates an open room.
+		CreateRoom(room, maxPlayers, emptyTTL, lobby, password) { this._create(room, maxPlayers, emptyTTL, lobby, password); },
+		// Enter an existing room by id or by name. An empty password means an open
+		// room, an empty lobby means "any lobby".
+		JoinRoom(room, password, lobby) { this._join(room, false, 0, -1, password, lobby); },
+		// Enter the room if it exists (by name, inside the lobby) and create it otherwise.
+		JoinOrCreateRoom(room, password, maxPlayers, emptyTTL, lobby) { this._join(room, true, maxPlayers, emptyTTL, password, lobby); },
 		// Matchmaking: enter a room that still has a free slot (not locked), otherwise
 		// create one with this name. The choice is made from the room list, no new
 		// protocol: "matching" is the index of fillroom / randommatching / serialmatching.
 		JoinRandomOrCreateRoom(room, maxPlayers, emptyTTL, matching, lobby) { this._joinRandom(room, maxPlayers, emptyTTL, matching, lobby); },
-		JoinRoomWithPassword(room, password) { this._join(room, false, 0, -1, password); },
-		JoinOrCreateRoomWithPassword(room, password, maxPlayers, emptyTTL) { this._join(room, true, maxPlayers, emptyTTL, password); },
 		LeaveRoom() { this._leave(); },
-		RequestRooms() { this._send({ t: "room.list", id: this._reqId() }); },
+		// An empty lobby asks for every room; the list comes grouped by lobby, then by name.
+		RequestRooms(lobby) { this._askRooms(lobby === undefined ? "" : lobby); },
 
 		SendEvent(code, data, to) { this._sendEvent(code, data, to); },
 

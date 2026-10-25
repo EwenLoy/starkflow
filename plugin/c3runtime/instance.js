@@ -66,6 +66,10 @@
 	// sender, if it is close in both seq and time: the unreliable channel reorders.
 	const STALE_SEQ = SNAP_BUFFER;
 	const STALE_MS = 2000;
+	// A keyframe carries every masked field again: newcomers start from it, and a
+	// receiver that missed a snapshot catches up with the next one. Between
+	// keyframes a record only carries the fields that changed since the keyframe.
+	const SYNC_KEY_EVERY = 30;			// snapshots between keyframes (~1 s at 30 Hz)
 
 	// ---- WebRTC (stage 4) -------------------------------------------------------
 	// A server with welcome.rtc opens an unreliable, unordered DataChannel "sync"
@@ -239,6 +243,8 @@
 			this._srvSyncNow = false;		// welcome.syncNow: "sync" is relayed at once
 			this._syncSeq = 0;				// number of our last snapshot
 			this._syncLast = "";				// JSON of our last snapshot ("" = none sent)
+			this._syncKey = false;				// send the next snapshot as a keyframe
+			this._kfCount = 0;					// snapshots since the last keyframe
 			this._warnedSync = false;
 			this._snaps = new Map();			// owner id -> { buf, off, seq, iv, jit, delay }
 			this._statAt = 0;					// last "buffer:" diagnostics line
@@ -281,6 +287,136 @@
 		{
 			this._disconnect(true);
 			super._release();
+		}
+
+		// ---- debugger (Inspector) ------------------------------------
+
+		// What the debug layout shows for this object: connection, player, room, sync
+		// and the values of the last triggers, so a problem can be read without a
+		// single Text object in the project. Names start with "$": the debugger then
+		// shows them literally instead of looking for a language string.
+		_getDebuggerProperties()
+		{
+			const on = this._status === "connected" || this._status === "in-room";
+			const me = this._players.get(this._myId);
+			const myName = (me && typeof me.name === "string" && me.name !== "") ? me.name : this._name;
+			const token = this._token
+				? (this._token.length > 12 ? "\u2026" + this._token.slice(-6) : "\u2026") + " (" + this._token.length + ")"
+				: "none";
+			const out = [];
+
+			out.push({
+				title: "$StarkFlow - Connection",
+				properties: [
+					{ name: "$Server URL", value: this._url },
+					{ name: "$Connect URL", value: this._buildUrl() },
+					{ name: "$App ID", value: this._appId },
+					{ name: "$Connection mode", value: this._mode },
+					{ name: "$Region", value: this._curRegion || this._region || "-" },
+					{ name: "$Status", value: this._status },
+					{ name: "$Connected", value: on },
+					{ name: "$Reconnect attempt", value: this._attempt },
+					{ name: "$Auto reconnect", value: this._autoReconnect },
+					{ name: "$Ping (ms)", value: Math.round(Number(this._ping) || 0) },
+					{ name: "$Send rate (per s)", value: Number(this._sendHz) || 0 },
+					{ name: "$Log level", value: this._logLevel }
+				]
+			});
+
+			out.push({
+				title: "$StarkFlow - Player",
+				properties: [
+					{ name: "$My user id", value: this._userId || "-" },
+					{ name: "$My player id in room", value: this._myId },
+					{ name: "$My name in room", value: myName },
+					{ name: "$Name to use", value: this._name || "-" },
+					{ name: "$Token", value: token },
+					{ name: "$Player props sent", value: this._sentProps.size },
+					{ name: "$Props waiting", value: this._pendingProps.size },
+					{ name: "$Server time offset (ms)", value: Math.round(Number(this._serverOffset) || 0) }
+				]
+			});
+
+			out.push({
+				title: "$StarkFlow - Room",
+				properties: [
+					{ name: "$Room name", value: this._roomName || "-" },
+					{ name: "$Room id", value: this._roomId || "-" },
+					{ name: "$Players", value: this._players.size + " / " + (this._maxPlayers || 0) },
+					{ name: "$Host id", value: this._hostUser() || "-" },
+					{ name: "$Host index in room", value: this._hostId },
+					{ name: "$Am I host", value: this._myId !== 0 && this._myId === this._hostId },
+					{ name: "$Created by me", value: this._created === 1 },
+					{ name: "$Resumed", value: this._resumed === 1 },
+					{ name: "$Join target", value: this._lastJoin ? this._lastJoin.room : "-" }
+				]
+			});
+
+			out.push({
+				title: "$StarkFlow - Sync",
+				properties: [
+					{ name: "$Synced objects", value: this._sync.size },
+					{ name: "$Proxies", value: this._proxyUid.size },
+					{ name: "$Sync channel", value: this._srvSync },
+					{ name: "$WebRTC sync", value: !!this._rtcDc },
+					{ name: "$Batch", value: this._srvBatch },
+					{ name: "$Batch window (ms)", value: Math.round(Number(this._srvBatchMs) || 0) },
+					{ name: "$Sync now", value: this._srvSyncNow },
+					{ name: "$Smoothing (ms)", value: Math.round(Number(this._smoothValue()) || 0) },
+					{ name: "$Buffer delay (ms)", value: Math.round(Number(this._srvSync ? this._bufferDelay() : this._smoothValue()) || 0) },
+					{ name: "$Buffer size", value: this._bufferSize() },
+					{ name: "$Jitter (ms)", value: Math.round(Number(this._jitter()) || 0) }
+				]
+			});
+
+			out.push({
+				title: "$StarkFlow - Last",
+				properties: [
+					{ name: "$Error code", value: this._errCode },
+					{ name: "$Error message", value: this._errMsg || "-" },
+					{ name: "$Event code", value: this._evCode },
+					{ name: "$Event from", value: this._evFrom },
+					{ name: "$Event data", value: this._dbgText(this._evData) },
+					{ name: "$Changed key", value: this._chKey || "-" },
+					{ name: "$Changed value", value: this._dbgText(this._chValue) },
+					{ name: "$Changed by", value: this._chBy }
+				]
+			});
+
+			const rows = [];
+			const ids = Array.from(this._players.keys()).sort((a, b) => a - b);
+			for (const id of ids)
+			{
+				const p = this._players.get(id);
+				if (!p)
+					continue;
+				let value = "userId " + (p.userId || "-");
+				if (id === this._hostId)
+					value += " \u00b7 host";
+				if (typeof p.status === "string" && p.status !== "")
+					value += " \u00b7 " + p.status;
+				rows.push({ name: "$#" + id + " " + (p.name || "-"), value: value });
+			}
+			if (rows.length === 0)
+				rows.push({ name: "$Players in room", value: "none" });
+			out.push({ title: "$StarkFlow - Players", properties: rows });
+
+			return out;
+		}
+
+		// Inspector values must be primitives: objects are shown as JSON.
+		_dbgText(v)
+		{
+			if (v === undefined || v === null)
+				return "-";
+			if (typeof v === "string")
+				return v === "" ? "-" : v;
+			if (typeof v === "object")
+			{
+				try { return JSON.stringify(v); }
+				catch (e) { return "[object]"; }
+			}
+			return v;
 		}
 
 		// ---- helpers -------------------------------------------------
@@ -1440,6 +1576,9 @@
 			this._net.clear();
 			this._snaps.clear();
 			this._syncLast = "";				// send our snapshot again in the new room
+			this._syncKey = true;
+			for (const rec of this._sync.values())
+				rec.key = null;					// a new room: everyone starts from a keyframe
 			this._sentChunks = [];
 			this._chunkTime = [];
 			this._sentProps.clear();
@@ -1500,7 +1639,21 @@
 			this._ingestAll(m.player);
 			this._lastPlayerId = m.player.id;
 			this._lastPlayerName = m.player.name || "";
+			this._syncKey = true;					// the newcomer needs a keyframe right away
 			this._trigger(this._cnd("OnPlayerJoined"));
+		}
+
+		// The host's permanent id: "hostId" in the room messages is only the number
+		// inside the room and changes between sessions, so the userId is looked up in
+		// the player list (it may arrive after "host.changed").
+		_hostUser()
+		{
+			if (!this._hostId)
+				return "";
+			if (this._hostId === this._myId)
+				return this._userId || "";
+			const p = this._players.get(this._hostId);
+			return p && typeof p.userId === "string" ? p.userId : "";
 		}
 
 		_onPlayerLeft(m)
@@ -1785,7 +1938,7 @@
 
 		_encode(inst, rec)
 		{
-			return JSON.stringify(this._encodeArr(inst, rec));
+			return JSON.stringify(this._encodeArr(inst, rec, true));
 		}
 
 		_encodeArr(inst, rec)
@@ -1833,22 +1986,128 @@
 			return a;
 		}
 
+		// One record of the "sync" channel: [slot, bits, ...values]. bits are the
+		// fields whose value differs from the last keyframe, so an object that has
+		// not changed costs three bytes. The values stay absolute: a snapshot lost
+		// on the way is corrected by the next one, and a keyframe is not needed
+		// for that.
+		_encodeDelta(inst, rec, key)
+		{
+			const a = [rec.slot, 0];
+			const next = {};
+			const last = key ? null : rec.key;
+			let bits = 0;
+			const put = (bit, name, value) =>
+			{
+				next[name] = value;
+				if (last && last[name] === value)
+					return;
+				bits |= bit;
+				a.push(value);
+			};
+			const m = rec.mask;
+			if (m & F.X) put(F.X, "x", r1(fin(inst.x)));
+			if (m & F.Y) put(F.Y, "y", r1(fin(inst.y)));
+			if (m & F.Z) put(F.Z, "z", r1(fin(inst.zElevation)));
+			if (m & F.ANGLE) put(F.ANGLE, "a", r1(fin(angleOf(inst))));
+			if (m & F.SIZE)
+			{
+				const w = r1(fin(inst.width)), h = r1(fin(inst.height));
+				next.w = w;
+				next.h = h;
+				if (!last || last.w !== w || last.h !== h)
+				{
+					bits |= F.SIZE;
+					a.push(w, h);
+				}
+			}
+			if (m & F.MIRROR) put(F.MIRROR, "mir", inst.width < 0 ? 1 : 0);
+			if (m & F.ANIM) put(F.ANIM, "anim", typeof inst.animationName === "string" ? inst.animationName.slice(0, 64) : "");
+			if (m & F.FRAME) put(F.FRAME, "frame", fin(inst.animationFrame) | 0);
+			if (m & F.VISIBLE) put(F.VISIBLE, "vis", inst.isVisible ? 1 : 0);
+			if (m & F.OPACITY) put(F.OPACITY, "op", Math.round(fin(inst.opacity) * 100) / 100);
+			if (rec.tag) put(F.TAG, "tag", rec.tag);
+			const vars = rec.vars || null;
+			if (vars && vars.length && inst.instVars)
+			{
+				const obj = {};
+				const was = last ? last.vars : null;
+				let any = false, moved = false;
+				for (const v of vars)
+				{
+					const val = inst.instVars[v.name];
+					if (val === undefined || val === null)
+						continue;
+					const out = (typeof val === "number" && isFinite(val)) ? (v.interp ? r3(val) : val) : val;
+					obj[v.name] = out;
+					any = true;
+					if (!was || was[v.name] !== out)
+						moved = true;
+				}
+				if (any)
+				{
+					next.vars = obj;
+					if (moved)
+					{
+						bits |= F.VARS;
+						a.push(obj);
+					}
+				}
+			}
+			if (m & F.SPEED) put(F.SPEED, "sp", Math.round(fin(inst.animationSpeed) * 100) / 100);
+			if (m & F.FLIP) put(F.FLIP, "fl", inst.height < 0 ? 1 : 0);
+			if (m & F.TINT)
+			{
+				const c = tintOf(inst);
+				const r = r3(c[0]), g = r3(c[1]), b = r3(c[2]);
+				next.tr = r;
+				next.tg = g;
+				next.tb = b;
+				if (!last || last.tr !== r || last.tg !== g || last.tb !== b)
+				{
+					bits |= F.TINT;
+					a.push(r, g, b);
+				}
+			}
+			if (m & F.BLEND) put(F.BLEND, "bl", blendOf(inst));
+			if (m & F.SAMPLING) put(F.SAMPLING, "sm", typeof inst.sampling === "string" ? inst.sampling : "");
+			if (m & F.REPTO) put(F.REPTO, "rt", fin(inst.animationRepeatToFrame) | 0);
+			a[1] = bits;
+			rec.next = next;
+			return a;
+		}
+
 		// Stage 2: all our objects as one numbered snapshot, sent only when something
 		// changed. ts is our clock: the receivers use the time between snapshots, not
 		// the absolute value, so the clocks of the players do not have to match.
 		_flushSyncChannel(now)
 		{
-			const mine = [];
+			const key = this._syncKey || (++this._kfCount % SYNC_KEY_EVERY === 0);
+			const all = [];
+			const recs = [];
+			let dirty = false;
 			for (const rec of this._sync.values())
 			{
 				if (rec.owner !== this._myId)
 					continue;
 				const inst = this._resolve(rec);
-				if (inst)
-					mine.push(this._encodeArr(inst, rec));
+				if (!inst)
+					continue;
+				const a = this._encodeDelta(inst, rec, key);
+				if (a[1] !== 0)
+					dirty = true;
+				all.push(a);
+				recs.push(rec);
 			}
-			mine.sort((a, b) => a[0] - b[0]);
-			if (!mine.length && !this._syncLast)
+			// slot order, each record next to the one that produced it: a record
+			// clipped by the byte limit must stay changed, or it is never sent again
+			const order = all.map((a, i) => i).sort((x, y) => all[x][0] - all[y][0]);
+			const mine = order.map((i) => all[i]);
+			const sent = order.map((i) => recs[i]);
+			const had = this._syncLast !== "";
+			if (!mine.length && !had)
+				return;
+			if (!key && !dirty)
 				return;
 			let text = JSON.stringify(mine);
 			if (utf8Len(text) > this._maxSync)
@@ -1859,16 +2118,23 @@
 				while (mine.length && utf8Len(text) > this._maxSync)
 				{
 					mine.pop();
+					sent.pop();
 					text = JSON.stringify(mine);
 				}
 			}
-			if (text === this._syncLast || (!mine.length && this._syncLast === ""))
-				return;
 			if (this._tokens < 1)
 				return;
 			this._tokens--;
+			this._syncKey = false;
 			this._syncLast = mine.length ? text : "";
-			const msg = { t: "sync", seq: ++this._syncSeq, ts: Math.round(now), iv: Math.round(this._sendInterval), objs: mine };
+			for (const rec of sent)
+				rec.key = rec.next;			// what really left is the new base
+			const msg = { t: "sync", seq: ++this._syncSeq, ts: Math.round(now), objs: mine };
+			if (key)
+			{
+				msg.iv = Math.round(this._sendInterval);
+				msg.k = 1;
+			}
 			// the empty snapshot removes our objects for the others: it must not get lost
 			if (!mine.length || !this._sendUnreliable(msg))
 				this._queue(msg);
@@ -1971,9 +2237,19 @@
 			// a new buffer: first snapshot, a resume, or the sender started again (seq went back)
 			if (!o || reset || seq <= o.seq)
 			{
-				o = { buf: [], off: undefined, seq: 0, iv: 0, jit: 0, arr: undefined, ts: undefined, delay: undefined };
+				o = { buf: [], cur: new Map(), off: undefined, seq: 0, iv: 0, jit: 0, arr: undefined, ts: undefined, delay: undefined };
 				this._snaps.set(owner, o);
 			}
+			// The records are a delta against the sender's last keyframe: the object
+			// states are rebuilt here, so the interpolation and the copies below work
+			// with complete states, as they did with full snapshots.
+			const full = new Map();
+			for (const [slot, st] of states)
+			{
+				const prev = o.cur.get(slot);
+				full.set(slot, prev ? { mask: prev.mask | st.mask, v: this._mergeV(prev.v, st.v) } : st);
+			}
+			o.cur = full;
 			// Clock offset sender -> us: the smallest "arrival - ts" seen is the fastest
 			// delivery; it follows slow drift, and a big jump means a new clock.
 			const off = now - ts;
@@ -2002,11 +2278,11 @@
 			const last = o.buf[o.buf.length - 1];
 			if (last && ts - last.ts > o.iv * 2.5)
 				o.buf.push({ ts: ts - o.iv, states: last.states });
-			o.buf.push({ ts: ts, states: states });
+			o.buf.push({ ts: ts, states: full });
 			if (o.buf.length > SNAP_BUFFER)
 				o.buf.splice(0, o.buf.length - SNAP_BUFFER);
 
-			this._net.set(owner, [states]);		// the newest snapshot: creating/removing objects
+			this._net.set(owner, [full]);		// the newest snapshot: creating/removing objects
 			if (this._syncOn)
 			{
 				this._adopt(owner);
@@ -2312,6 +2588,17 @@
 				out.set(slot, { mask: f, v: v });
 			}
 			return out;
+		}
+
+		// A delta record replaces only the fields it carries: the rest stays as it
+		// was in the previous snapshot, so the states in the buffer are always
+		// complete (the interpolator lerps complete states only).
+		_mergeV(prev, next)
+		{
+			const v = Object.assign({}, prev, next);
+			if (prev.vars && next.vars)
+				v.vars = Object.assign({}, prev.vars, next.vars);
+			return v;
 		}
 
 		_getNet(owner, slot)
@@ -2961,6 +3248,7 @@
 			if (this._srvSync && this._syncLast && this._canSend())
 				this._queue({ t: "sync", seq: ++this._syncSeq, ts: Math.round(this._now()), iv: Math.round(this._sendInterval), objs: [] });
 			this._syncLast = "";
+			this._syncKey = true;				// the others dropped our objects: start over with a keyframe
 			this._flushOut();
 			this._sentChunks = [];
 			this._chunkTime = [];

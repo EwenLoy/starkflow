@@ -53,6 +53,27 @@ RoomRow: On clicked
 `loopindex` — номер комнаты в списке (с нуля). Подробнее, включая «войти в первую свободную» и вариант с Array —
 в [GAME-GUIDE.md](GAME-GUIDE.md#3-список-комнат-как-читать-и-как-перебирать).
 
+## Inspector: что видно в отладчике
+
+Запусти отладочный предпросмотр (**Preview → Debug layout** на тулбаре или клавишей F7), открой панель **Inspector**
+и выбери объект StarkFlow — появятся секции с живыми значениями, обновляются сами. Ничего в проекте для этого
+добавлять не нужно (в релизной сборке метод не вызывается вовсе).
+
+| Секция | Что показывает |
+|---|---|
+| `StarkFlow - Connection` | Server URL, Connect URL (с `v` и `app`), App ID, Connection mode, Region, Status, Connected, Reconnect attempt, Auto reconnect, Ping (ms), Send rate (per s), Log level |
+| `StarkFlow - Player` | My user id (постоянный, `MyUserId`), My player id in room, My name in room, Name to use, Token (маскированный), Player props sent, Props waiting, Server time offset (ms) |
+| `StarkFlow - Room` | Room name, Room id, Players `сколько / максимум`, Host id (постоянный `userId`), Host index in room (номер в комнате), Am I host, Created by me, Resumed, Join target |
+| `StarkFlow - Sync` | Synced objects, Proxies, Sync channel, WebRTC sync, Batch, Batch window (ms), Sync now, Smoothing (ms), Buffer delay (ms), Buffer size, Jitter (ms) |
+| `StarkFlow - Last` | Error code, Error message, Event code / from / data, Changed key / value / by |
+| `StarkFlow - Players` | строка на игрока: `#3 Duke` → `userId 9f2c… · host · active` |
+
+`StarkFlow - Players` — самый быстрый способ проверить, что клиенты видят друг друга одинаково: у всех игроков в
+комнате должны быть те же `userId`, что и `PlayerUserId(id)`, и на нём же должен быть подключён голосовой аддон.
+
+> [!NOTE]
+> Имена свойств начинаются с `$` намеренно: так отладчик C3 показывает строку как есть и не ищет её в файлах языка.
+
 ## Токен игрока
 
 Токен плагин сам кладёт в `localStorage`. В worker-режиме C3 `localStorage` недоступен, тогда сохраняй

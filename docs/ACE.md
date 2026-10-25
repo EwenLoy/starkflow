@@ -6,7 +6,8 @@
 
 Обозначения: **триггер** — срабатывает один раз в момент события, остальные условия можно ставить где угодно.
 `Id` игрока — это число внутри комнаты (1, 2, 3…), оно меняется между сессиями; `UserId` — постоянный
-идентификатор игрока, он живёт, пока сервер помнит токен.
+идентификатор игрока, он живёт, пока сервер помнит токен. `HostId` отдаёт постоянный `userId` хоста,
+`HostIndexInRoom` — его номер в комнате (для сравнения с `MyId`).
 
 ## Навигация
 
@@ -116,7 +117,8 @@
 | `RoomName` | строка | Имя текущей комнаты |
 | `RoomId` | строка | Id текущей комнаты (например `8f3a1c04`) |
 | `MyId` | число | Твой id внутри комнаты |
-| `HostId` | число | Id игрока-хоста |
+| `HostId` | строка | Постоянный id хоста (`userId`, переживает переподключение) |
+| `HostIndexInRoom` | число | Номер хоста внутри комнаты (1, 2, 3…), для `PlayerUserId` и `PlayerName` |
 | `Resumed` | 1/0 | 1, если последний вход был возвратом в комнату, где ты уже был |
 | `RoomCount` | число | Сколько комнат в последнем списке |
 | `RoomPlayerCount` | число | Сколько игроков в комнате, в которой ты сейчас |
@@ -418,12 +420,12 @@ System: Pick WariRix by unique ID StarkFlow.LocalEntityUID("player")
 |---|---|
 | On connected | `MyUserId`, `AuthToken`, `StatusString`; здесь можно `Join or create room` |
 | On reconnecting / On disconnected | `StatusString` — показать «переподключаюсь…» |
-| On joined room | `RoomId`, `RoomName`, `MyId`, `HostId`, `Resumed`, `RoomCreated`, `RoomPlayerCount`/`RoomMaxPlayers`/`RoomFree` (заполненность) |
+| On joined room | `RoomId`, `RoomName`, `MyId`, `HostId`, `HostIndexInRoom`, `Resumed`, `RoomCreated`, `RoomPlayerCount`/`RoomMaxPlayers`/`RoomFree` (заполненность) |
 | On created room | `RoomId`, `RoomName`, `MyId`, `RoomPlayerCount`/`RoomMaxPlayers`/`RoomFree` — разошли код друзьям |
 | On room list received | `RoomCount` и в цикле по `loopindex`: `RoomNameAt`, `RoomIdAt`, `RoomPlayersAt`, `RoomMaxAt` |
 | On player joined / left / connection lost / resumed | `LastPlayerId` + `LastPlayerName` (или `PlayerName(LastPlayerId)`) |
 | On player prop (key) changed | `LastPlayerId` + ключ из условия → `PlayerProp(LastPlayerId, key)` |
-| On host changed | `HostId`, `Is host` |
+| On host changed | `HostId` (постоянный id), `HostIndexInRoom`, `Is host` |
 | On event (code) | `EventData`, `EventFrom` |
 | On state (key) changed | `State(key)`, `ChangedValue`, `ChangedOld`, `ChangedBy` |
 | On error | `ErrorCode`, `ErrorMsg` (для `Join room` и `Create room` — те же коды в своих триггерах) |

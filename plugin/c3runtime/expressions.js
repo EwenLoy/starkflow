@@ -31,7 +31,10 @@
 		RoomName() { return this._roomName; },
 		RoomId() { return this._roomId; },
 		MyId() { return this._myId; },
-		HostId() { return this._hostId; },
+		// The permanent id of the host (userId, it survives reconnects). The number
+		// inside the room is HostIndexInRoom: it changes between sessions.
+		HostId() { return this._hostUser(); },
+		HostIndexInRoom() { return this._hostId; },
 		Resumed() { return this._resumed; },
 		RoomCount() { return this._roomList.length; },
 		RoomListCount() { return this._roomList.length; },

@@ -148,7 +148,7 @@
 					"on-host-changed": {
 						"list-name": "On host changed",
 						"display-text": "On host changed",
-						"description": "Triggered when another player became the host. Read HostId."
+						"description": "Triggered when another player became the host. Read HostId (permanent) or HostIndexInRoom."
 					},
 					"on-player-prop-changed": {
 						"list-name": "On player property changed",
@@ -932,7 +932,11 @@
 					},
 					"host-id": {
 						"translated-name": "HostId",
-						"description": "Player id of the host."
+						"description": "Permanent id (userId) of the host. It stays the same after a reconnect."
+					},
+					"host-index-in-room": {
+						"translated-name": "HostIndexInRoom",
+						"description": "Player id of the host inside the room (1, 2, 3...). Use it with PlayerUserId and PlayerName."
 					},
 					"resumed": {
 						"translated-name": "Resumed",

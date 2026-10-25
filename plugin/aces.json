@@ -306,6 +306,11 @@
 			{
 				"id": "host-id",
 				"expressionName": "HostId",
+				"returnType": "string"
+			},
+			{
+				"id": "host-index-in-room",
+				"expressionName": "HostIndexInRoom",
 				"returnType": "number"
 			},
 			{

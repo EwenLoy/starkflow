@@ -792,6 +792,41 @@ console.log("ACE consistency OK (" + n + " entries)");
 	S1.inst._flush(performance.now());
 	assert.strictEqual(wS1.sent[0].seq, 2, "a changed object gives the next snapshot");
 
+	// the records are deltas against the keyframe: only what changed is inside,
+	// the values themselves stay absolute
+	const snap2 = wS1.sent[0];
+	assert.deepStrictEqual(snap2.objs, [[0, 1, 30]], "only x changed, so only x is sent: " + JSON.stringify(snap2.objs));
+	assert.strictEqual(snap2.k, undefined, "a plain snapshot is not a keyframe");
+	assert.strictEqual(snap2.iv, undefined, "the send interval travels in a keyframe only");
+	mineS.angleDegrees = 90;
+	wS1.sent.length = 0;
+	S1.inst._tokens = 20;
+	S1.inst._flush(performance.now());
+	assert.deepStrictEqual(wS1.sent[0].objs, [[0, 8, 90]], "only the angle changed");
+	// a snapshot lost on the way costs nothing: the next one carries the field again
+	mineS.x = 40;
+	wS1.sent.length = 0;
+	S1.inst._tokens = 20;
+	S1.inst._flush(performance.now());
+	assert.deepStrictEqual(wS1.sent[0].objs, [[0, 1, 40]], "the value is absolute, not a difference");
+	// a keyframe goes out on its own timer, even when nothing changed
+	wS1.sent.length = 0;
+	for (let i = 0; i < 40 && !wS1.sent.some((m) => m.k === 1); i++)
+	{
+		S1.inst._tokens = 20;
+		S1.inst._flush(performance.now());
+	}
+	const kf = wS1.sent.find((m) => m.k === 1);
+	assert.ok(kf, "a keyframe must go out on its own, without a newcomer: " + JSON.stringify(wS1.sent));
+	assert.deepStrictEqual(kf.objs, [[0, 1035, 40, 20, 90, "player"]], "a keyframe carries the whole object");
+	assert.ok(kf.iv > 0, "a keyframe carries the send interval");
+	// a newcomer gets a keyframe right away, without waiting for the timer
+	wS1.recv({ t: "player.joined", player: { id: 2, name: "S2", props: {} } });
+	wS1.sent.length = 0;
+	S1.inst._tokens = 20;
+	S1.inst._flush(performance.now());
+	assert.deepStrictEqual([wS1.sent[0].t, wS1.sent[0].k], ["sync", 1], "a newcomer must get a keyframe at once");
+
 	// the receiver: player 1 joined with his last snapshot, then two more arrive
 	const wS2 = await joinSync(S2, 2, [{ id: 1, name: "S1", props: {}, sync: { seq: 1, ts: 1000, iv: 100, objs: [[0, 1035, 0, 0, 0, "player"]] } }, { id: 2, name: "S2", props: {} }]);
 	P.Acts.SyncObject.call(S2.inst, S2.cls, "player", "player", "positionAngle", true, "Game");
@@ -821,6 +856,12 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.strictEqual(proxyS.x, 100, "the old position is held until one interval before the new snapshot");
 	clock = 15000 + delayS - 50; S2.inst._applyRemote(16);
 	assert.ok(Math.abs(proxyS.x - 150) < 0.01, "then it moves over one interval, got " + proxyS.x);
+	// a delta record: only x is inside, the other fields keep their values
+	clock = 15140; wS2.recv({ t: "sync", id: 1, seq: 4, ts: 6140, iv: 100, objs: [[0, 1, 130]] });
+	clock = 15140 + delayS; S2.inst._applyRemote(16);
+	assert.strictEqual(Math.round(proxyS.x), 130, "the delta moves the object");
+	assert.strictEqual(Math.round(proxyS.y), 50, "a field outside the delta keeps its value");
+	assert.strictEqual(Math.round(proxyS.angleDegrees), 90, "the angle keeps its value too");
 	// a hiccup: the snapshots stop - the object coasts on the last velocity instead of
 	// freezing (a fresh buffer, as if the sender started over)
 	clock = 20000; S2.inst._onSync(1, { seq: 1, ts: 1000, iv: 100, objs: [[0, 1035, 0, 0, 0, "player"]] }, true);
@@ -863,7 +904,7 @@ console.log("ACE consistency OK (" + n + " entries)");
 	assert.ok(Math.abs(proxyS.x - xBefore - 12) < 0.01, "a catch-up may not run faster than 1.5x the entity speed, moved " + (proxyS.x - xBefore));
 	// an empty snapshot removes the objects
 	S2.inst.triggered.length = 0;
-	wS2.recv({ t: "sync", id: 1, seq: 4, ts: 6100, iv: 100, objs: [] });
+	wS2.recv({ t: "sync", id: 1, seq: 5, ts: 6140, iv: 100, objs: [] });
 	assert.strictEqual(P.Exps.PlayerProxyUID.call(S2.inst, 1, "player"), 0, "an empty snapshot must remove the proxy");
 	// stop sync on the sender: an empty snapshot goes out
 	wS1.sent.length = 0;
@@ -1502,6 +1543,87 @@ console.log("ACE consistency OK (" + n + " entries)");
 
 		P.Acts.Disconnect.call(p);
 		assert.strictEqual(P.Exps.Ping.call(p), 0, "no connection: Ping resets to 0");
+	}
+
+	// ---- debugger: the Inspector shows the live state of the object ----------
+	{
+		FakeWS.all.length = 0;
+		const d = newInst();
+		d._retryBase = 5;
+		d._pingMs = 1e9;
+
+		// The debugger takes name/value pairs only: every name must be literal
+		// (a leading "$") and every value a primitive, otherwise the panel breaks.
+		const flat = (list) =>
+		{
+			const m = new Map();
+			for (const s of list)
+				for (const p of s.properties)
+					m.set(p.name, p.value);
+			return m;
+		};
+		let sections = d._getDebuggerProperties();
+		assert.ok(Array.isArray(sections) && sections.length >= 6, "the debugger must get sections");
+		for (const s of sections)
+		{
+			assert.ok(typeof s.title === "string" && s.title.charAt(0) === "$", "section title is literal: " + s.title);
+			assert.ok(Array.isArray(s.properties) && s.properties.length > 0, "empty section: " + s.title);
+			for (const p of s.properties)
+			{
+				assert.ok(typeof p.name === "string" && p.name.charAt(0) === "$", "property name is literal: " + p.name);
+				const t = typeof p.value;
+				assert.ok(t === "string" || t === "number" || t === "boolean",
+					"the Inspector takes primitives only: " + p.name + " is " + t);
+			}
+		}
+
+		let v = flat(sections);
+		assert.strictEqual(v.get("$Status"), "disconnected");
+		assert.strictEqual(v.get("$Connected"), false);
+		assert.strictEqual(v.get("$My user id"), "-");
+		assert.strictEqual(v.get("$Players in room"), "none");
+		// no room yet: the host has no permanent id and no place in the room
+		assert.strictEqual(P.Exps.HostId.call(d), "");
+		assert.strictEqual(P.Exps.HostIndexInRoom.call(d), 0);
+
+		P.Acts.Connect.call(d, "", "");
+		await sleep(5);
+		const wd = FakeWS.all[FakeWS.all.length - 1];
+		wd.recv({ t: "welcome", userId: "uDbg", token: "tokDbg", serverTime: Date.now(), proto: 1 });
+		wd.recv({ t: "room.joined", room: "boss1", roomId: "r1", you: 1, hostId: 1, resumed: false, maxPlayers: 4,
+			players: [{ id: 1, userId: "uDbg", name: "A", status: "active", props: {} },
+				{ id: 2, userId: "u2", name: "B", status: "active", props: {} }], state: {} });
+
+		v = flat(d._getDebuggerProperties());
+		assert.strictEqual(v.get("$Status"), "in-room");
+		assert.strictEqual(v.get("$Connected"), true);
+		assert.strictEqual(v.get("$My user id"), "uDbg");
+		assert.strictEqual(v.get("$My player id in room"), 1);
+		assert.strictEqual(v.get("$My name in room"), "A");
+		assert.strictEqual(v.get("$Players"), "2 / 4");
+		assert.strictEqual(v.get("$Am I host"), true);
+		assert.ok(v.get("$Connect URL").indexOf("app=app1") > 0, v.get("$Connect URL"));
+		assert.ok(v.get("$Token").indexOf("tokDbg") < 0, "the token must be masked: " + v.get("$Token"));
+		// every player with the permanent id the voice addon has to be given
+		assert.strictEqual(v.get("$#1 A"), "userId uDbg \u00b7 host \u00b7 active");
+		assert.strictEqual(v.get("$#2 B"), "userId u2 \u00b7 active");
+
+		// HostId is the permanent id; the number inside the room is HostIndexInRoom
+		assert.strictEqual(P.Exps.HostId.call(d), "uDbg");
+		assert.strictEqual(P.Exps.HostIndexInRoom.call(d), 1);
+		assert.strictEqual(P.Exps.PlayerUserId.call(d, P.Exps.HostIndexInRoom.call(d)), "uDbg");
+		// the host changes: the permanent id follows the new host
+		wd.recv({ t: "host.changed", hostId: 2 });
+		assert.strictEqual(P.Exps.HostId.call(d), "u2");
+		assert.strictEqual(P.Exps.HostIndexInRoom.call(d), 2);
+		// the new host is not in the player list yet: the id is unknown until he is
+		wd.recv({ t: "host.changed", hostId: 3 });
+		assert.strictEqual(P.Exps.HostId.call(d), "");
+		assert.strictEqual(P.Exps.HostIndexInRoom.call(d), 3);
+		wd.recv({ t: "player.joined", player: { id: 3, userId: "u3", name: "C", status: "active", props: {} } });
+		assert.strictEqual(P.Exps.HostId.call(d), "u3");
+
+		P.Acts.Disconnect.call(d);
 	}
 
 	console.log("Behaviour tests OK");

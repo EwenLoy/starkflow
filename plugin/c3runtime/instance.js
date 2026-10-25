@@ -2247,7 +2247,12 @@
 			for (const [slot, st] of states)
 			{
 				const prev = o.cur.get(slot);
-				full.set(slot, prev ? { mask: prev.mask | st.mask, v: this._mergeV(prev.v, st.v) } : st);
+				if (!prev)
+					full.set(slot, st);			// a new object: the record is the whole state
+				else if (!st.mask)
+					full.set(slot, prev);		// nothing changed: no copy, the same state
+				else
+					full.set(slot, { mask: prev.mask | st.mask, v: this._mergeV(prev.v, st.v) });
 			}
 			o.cur = full;
 			// Clock offset sender -> us: the smallest "arrival - ts" seen is the fastest

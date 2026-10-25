@@ -310,9 +310,11 @@ func (r *Room) hostID() int {
 	return host
 }
 
-func (r *Room) checkHost(before int) {
+// checkHost broadcasts the current host if it changed (except = the id that
+// already knows it, 0 = everyone).
+func (r *Room) checkHost(before, except int) {
 	if after := r.hostID(); after != before && after != 0 {
-		r.broadcast(proto.Marshal(map[string]any{"t": "host.changed", "hostId": after}), 0)
+		r.broadcast(proto.Marshal(map[string]any{"t": "host.changed", "hostId": after}), except)
 	}
 }
 
@@ -488,7 +490,7 @@ func (r *Room) removePlayer(id int, reason string) {
 		"name":   p.Name,
 		"reason": reason,
 	}), 0)
-	r.checkHost(before)
+	r.checkHost(before, 0)
 }
 
 func (r *Room) burst() float64 {
@@ -557,6 +559,7 @@ func (r *Room) doJoin(req JoinReq) *proto.Error {
 	now := time.Now()
 	var p *Player
 	resumed := false
+	before := r.hostID()
 	if id, ok := r.byUser[req.UserID]; ok {
 		p = r.players[id]
 		if p.conn != nil && p.conn != req.Conn {
@@ -617,6 +620,10 @@ func (r *Room) doJoin(req JoinReq) *proto.Error {
 		ev = "player.resumed"
 	}
 	r.broadcast(proto.Marshal(map[string]any{"t": ev, "player": r.playerInfo(p)}), p.ID)
+	// A returning player can be older than the host the room moved on to while he
+	// was away: the others have to learn that the host is back, or they keep
+	// another one - and a "global" object would be sent by two players at once.
+	r.checkHost(before, p.ID)
 	return nil
 }
 
@@ -638,7 +645,7 @@ func (r *Room) Disconnect(c Conn) {
 		}
 		p.suspendedAt = time.Now()
 		r.broadcast(proto.Marshal(map[string]any{"t": "player.suspended", "id": p.ID}), 0)
-		r.checkHost(before)
+		r.checkHost(before, 0)
 	})
 }
 

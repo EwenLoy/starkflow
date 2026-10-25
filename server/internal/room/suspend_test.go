@@ -81,3 +81,46 @@ func TestJoinedReportsSuspendTTL(t *testing.T) {
 		t.Fatalf("room.joined = %v, want suspendTTL 42", got)
 	}
 }
+
+// The host is the oldest connected player: while he is away the next one takes
+// over, and when he comes back the others must learn that the host is him again -
+// otherwise two players think they own the "global" objects.
+func TestResumeMovesHostBack(t *testing.T) {
+	r, a, b := newSuspendRoom(t, -1)
+	r.Disconnect(a)
+	time.Sleep(10 * time.Millisecond)
+
+	suspended, _ := b.msgs(t)
+	found := false
+	for _, m := range suspended {
+		if m["t"] == "host.changed" && m["hostId"] == 2.0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("player 2 must become the host while player 1 is away, got %v", suspended)
+	}
+
+	b.reset()
+	a2 := &fakeConn{}
+	if e := r.Join(JoinReq{UserID: "a", Conn: a2}); e != nil {
+		t.Fatal(e)
+	}
+	time.Sleep(10 * time.Millisecond)
+	// the others get player.resumed and the host id back, the returning player
+	// reads it from his own room.joined
+	back, _ := b.msgs(t)
+	found = false
+	for _, m := range back {
+		if m["t"] == "host.changed" && m["hostId"] == 1.0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the others must get host.changed back to player 1, got %v", back)
+	}
+	joined, _ := a2.msgs(t)
+	if len(joined) == 0 || joined[0]["t"] != "room.joined" || joined[0]["hostId"] != 1.0 {
+		t.Fatalf("the returning player must be told he is the host again, got %v", joined)
+	}
+}

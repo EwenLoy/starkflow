@@ -223,6 +223,24 @@ const schema = {
     await A.next(m => m.t === 'sync' && m.seq === 4);
     await A.next(m => m.t === 'player.left');
 
+    // keyframe: плагин помечает его числом ("k":1), так же он описан в PROTOCOL.
+    // Раньше такой снимок получал 101 "invalid JSON" и не доходил никому.
+    B.send({ t: 'sync', seq: 5, ts: 5200, iv: 33, k: 1, objs: [[0, 3, 12, 22]] });
+    const kf = await A.next(m => m.t === 'sync' && m.seq === 5);
+    eq('keyframe "k":1 принят и переслан', [kf.k, kf.iv, kf.objs], [1, 33, [[0, 3, 12, 22]]]);
+    eq('keyframe не вызвал ошибку', B.inbox.some(m => m.code === 101), false);
+    const N2 = await open(wsUrl());
+    N2.send({ t: 'hello', name: 'Newbie2' });
+    await N2.nextT('welcome');
+    N2.send({ t: 'room.join', id: 1, room: jA.roomId });
+    const jN2 = await N2.nextT('room.joined');
+    const bInfo2 = jN2.players.find(p => p.id === 2);
+    eq('вошедшему отдаётся последний keyframe', bInfo2.sync && [bInfo2.sync.seq, bInfo2.sync.objs], [5, [[0, 3, 12, 22]]]);
+    N2.send({ t: 'room.leave', id: 2 });
+    await N2.next(m => m.t === 'ok' && m.id === 2);
+    N2.ws.close();
+    await A.next(m => m.t === 'player.left');
+
     // --- обрыв и повторный вход после реконнекта ---
     B.ws.close();
     eq('player.suspended id 2', (await A.nextT('player.suspended')).id, 2);

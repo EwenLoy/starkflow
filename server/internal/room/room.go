@@ -824,7 +824,7 @@ func (r *Room) Sync(c Conn, seq, ts int64, iv int, objs json.RawMessage, key boo
 			"t": "sync", "id": p.ID, "seq": seq, "ts": ts, "iv": iv, "objs": objs,
 		}
 		if key {
-			msg["k"] = true
+			msg["k"] = 1
 		}
 		frame := proto.Marshal(msg)
 		// Each receiver gets it ONE way: its WebRTC channel if open, else the

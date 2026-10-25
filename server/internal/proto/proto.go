@@ -1,7 +1,11 @@
 // Package proto describes the StarkFlow wire protocol (JSON over WebSocket).
 package proto
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"errors"
+	"strings"
+)
 
 // Version of the protocol, sent by the client in the URL (?v=1).
 const Version = 1
@@ -96,7 +100,7 @@ type ClientMsg struct {
 	// K marks a keyframe: every masked field of every object is in it. The
 	// others are deltas against the last keyframe and mean nothing without it,
 	// so only keyframes are kept for players who join later.
-	K bool `json:"k"`
+	K Flag `json:"k"`
 
 	// batch: several client messages in one WebSocket frame
 	Items []json.RawMessage `json:"items"`
@@ -104,6 +108,28 @@ type ClientMsg struct {
 	// rtc.offer: the client's SDP offer; rtc.ice: one ICE candidate (RTCIceCandidateInit)
 	Sdp       string          `json:"sdp"`
 	Candidate json.RawMessage `json:"candidate"`
+}
+
+// Flag is a boolean flag that also accepts 1/0 and "1"/"0": the protocol marks
+// a keyframe as "k":1, so a client that follows the docs (the Construct 3
+// plugin does) must not be answered with "invalid JSON". A missing field and
+// null mean false.
+type Flag bool
+
+func (f *Flag) UnmarshalJSON(b []byte) error {
+	switch s := strings.Trim(strings.TrimSpace(string(b)), `"`); s {
+	case "1", "true":
+		*f = true
+	case "", "0", "false", "null":
+		*f = false
+	default:
+		var n float64
+		if err := json.Unmarshal(b, &n); err != nil {
+			return errors.New(`expected a boolean or 1/0`)
+		}
+		*f = n != 0
+	}
+	return nil
 }
 
 // Marshal encodes a server message.

@@ -146,7 +146,10 @@ func (c *client) readPump() {
 		}
 		var m proto.ClientMsg
 		if err := json.Unmarshal(data, &m); err != nil {
-			c.Send(proto.ErrFrame(0, proto.Err(proto.ErrBadMessage, "invalid JSON")))
+			// A malformed frame and a field of the wrong type are the same code,
+			// but the reason is worth keeping: "invalid JSON" alone tells neither
+			// the game nor the plugin author which field is off.
+			c.Send(proto.ErrFrame(0, proto.Err(proto.ErrBadMessage, "invalid JSON: "+err.Error())))
 			continue
 		}
 		if m.T == "batch" {
@@ -176,7 +179,7 @@ func (c *client) handleBatch(m *proto.ClientMsg) {
 	for i, raw := range m.Items {
 		var item proto.ClientMsg
 		if err := json.Unmarshal(raw, &item); err != nil {
-			c.Send(proto.ErrFrame(0, proto.Err(proto.ErrBadMessage, "invalid JSON in batch")))
+			c.Send(proto.ErrFrame(0, proto.Err(proto.ErrBadMessage, "invalid JSON in batch: "+err.Error())))
 			continue
 		}
 		if i > 0 && !c.allow() {
@@ -271,7 +274,7 @@ func (c *client) handle(m *proto.ClientMsg) {
 		case "player.set":
 			c.rm.SetProp(c, m.ID, m.Key, m.Value)
 		case "sync":
-			c.rm.Sync(c, m.Seq, m.Ts, m.Iv, m.Objs, m.K)
+			c.rm.Sync(c, m.Seq, m.Ts, m.Iv, m.Objs, bool(m.K))
 		}
 	case "rtc.offer":
 		c.onRTCOffer(m)
@@ -419,7 +422,7 @@ func (c *client) onRTCMessage(lim *rtcLimit, data []byte) {
 		return
 	}
 	if rm := c.rmA.Load(); rm != nil {
-		rm.Sync(c, m.Seq, m.Ts, m.Iv, m.Objs, m.K)
+		rm.Sync(c, m.Seq, m.Ts, m.Iv, m.Objs, bool(m.K))
 	}
 }
 

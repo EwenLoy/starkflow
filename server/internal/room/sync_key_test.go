@@ -43,7 +43,8 @@ func TestSyncKeepsOnlyKeyframesForNewcomers(t *testing.T) {
 }
 
 // The keyframe flag is relayed: a receiver can tell a full snapshot from a
-// delta and drop a delta it has no base for.
+// delta and drop a delta it has no base for. It goes out as 1, the form the
+// protocol describes and the plugin sends.
 func TestSyncRelayMarksKeyframes(t *testing.T) {
 	r, a, b := newTestRoom(t, 0)
 	r.Sync(a, 1, 1000, 33, json.RawMessage(`[[0,11,10,20,0]]`), true)
@@ -51,7 +52,7 @@ func TestSyncRelayMarksKeyframes(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	msgs, _ := b.msgs(t)
-	if len(msgs) != 2 || msgs[0]["k"] != true || msgs[1]["k"] != nil {
+	if len(msgs) != 2 || msgs[0]["k"] != 1.0 || msgs[1]["k"] != nil {
 		t.Fatalf("got %v, want k only on the keyframe", msgs)
 	}
 }

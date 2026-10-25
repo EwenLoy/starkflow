@@ -26,6 +26,10 @@ URL: `ws(s)://host/ws?v=1&app=APPID`. Все кадры — JSON с полем `
 | клиент → сервер | `hello`, `room.join`, `room.leave`, `room.list`, `event`, `state.set`, `state.add`, `state.toggle`, `player.set`, `ping`, `batch`, `sync` |
 | сервер → клиент | `welcome`, `room.joined`, `player.joined`, `player.left`, `player.suspended`, `player.resumed`, `player.props`, `host.changed`, `event`, `state.changed`, `room.list.result`, `ok`, `err`, `pong`, `batch`, `sync` |
 
+Кадр, который не разбирается как сообщение (битый JSON или поле не того типа), получает ошибку **101**, а в `msg`
+сервер пишет причину (`invalid JSON: json: cannot unmarshal number into Go struct field ...`) — по ней видно, из-за
+какого поля кадр не принят.
+
 ## Комнаты: id, имя, лобби, пароль
 
 Комната живёт по **id** (8 hex-символов, генерирует сервер), а имя — просто метка для людей.
@@ -164,7 +168,7 @@ sequenceDiagram
 | `seq` | растёт с каждым снимком |
 | `ts` | часы отправителя в мс (сверять с другими не нужно, получатель смотрит только на разницу между снимками) |
 | `iv` | интервал отправки; только в keyframe (получатель берёт его оттуда, а без него — свою настройку Send rate) |
-| `k` | `1` — keyframe: все поля всех объектов. Остальные снимки — дельта к последнему keyframe |
+| `k` | `1` — keyframe: все поля всех объектов (сервер принимает и `true`, и `1`). Остальные снимки — дельта к последнему keyframe |
 | `objs` | массив записей `[slot, bits, ...значения]`: `bits` — поля, изменившиеся с keyframe, значения абсолютные; `[slot]` — объект есть, с keyframe не менялся. Формат полей — как в `_sf`-чанках, см. [GAME-GUIDE.md](GAME-GUIDE.md#162-что-внутри-и-когда-нужен-ручной-режим) |
 
 Сервер содержимое не разбирает — только проверяет:

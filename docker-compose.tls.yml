@@ -51,11 +51,12 @@ services:
       - starkflow
 
   # Вариант 2: https на своём домене через туннель Cloudflare, порты остаются закрытыми.
+  # Профиль cfdomain требует CF_TUNNEL_TOKEN в .env; без него контейнер упадёт с "token is required".
   cloudflared:
     profiles: ["cfdomain"]
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN:-}
     depends_on:
       - starkflow
 

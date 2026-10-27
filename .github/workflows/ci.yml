@@ -148,3 +148,12 @@ jobs:
       - name: Container logs
         if: always()
         run: docker logs starkflow
+
+
+  installer:
+    name: Installer script (shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -S warning install.sh

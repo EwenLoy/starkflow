@@ -99,7 +99,15 @@ docker compose logs tunnel | grep trycloudflare    # prints an address like http
 ## Your own domain and https
 
 One command: Caddy obtains and renews the Let's Encrypt certificate and proxies WebSocket on its own, there is nothing
-to configure by hand.
+to configure by hand. On a fresh VPS start with the installer — it installs Docker, asks whether this is a node or a
+directory, checks the A record and prints the address for the plugin:
+
+```bash
+git clone https://github.com/EwenLoy/starkflow.git && cd starkflow
+sudo bash install.sh
+```
+
+With Docker already installed, two commands are enough:
 
 ```bash
 cp .env.example .env     # set STARKFLOW_SECRET and SF_DOMAIN, for example game.example.com
@@ -170,6 +178,8 @@ All of it runs in CI on every push: 5 jobs (server, plugin, live protocol smoke 
 | `dist/starkflow.c3addon` | the built addon: C3 → View → Addon Manager → Install new addon |
 | `Dockerfile`, `docker-compose.yml` | the container and server deployment (includes a tunnel profile) |
 | `docker-compose.tls.yml`, `Caddyfile` | https on your own domain: Caddy or a Cloudflare Tunnel |
+| `docker-compose.ip.yml` | publishes the port for running without a domain (`install.sh --no-domain`) |
+| `install.sh` | one-script VPS installer: Docker, node or directory, domain with a certificate, status/logs/update |
 | `tests/` | Go unit tests, ACE reference check, live protocol smoke test |
 | `docs/` | the detailed documentation (currently in Russian) |
 

@@ -7,6 +7,7 @@
 
 | Вариант | Когда подходит | Что понадобится |
 |---|---|---|
+| [Установщик](#установщик-один-скрипт) | чистый VPS, хочется без ручной правки конфигов | Ubuntu/Debian, один скрипт |
 | [Свой ПК + туннель](#публичный-сервер-прямо-со-своего-пк-windows-без-docker) | поиграть с друзьями сегодня, без VPS и Docker | Windows, один скрипт, Cloudflare Tunnel |
 | [Свой VPS](#свой-vps-две-команды) | постоянный сервер для игры | VPS с Docker |
 | [Свой домен и https](#свой-домен-и-https-постоянный-адрес) | нужен постоянный адрес `wss://` с сертификатом | домен + порты 80/443 или Cloudflare |
@@ -15,6 +16,40 @@
 
 Дальше — [WebRTC-канал](#webrtc-канал-для-синка-объектов-udp-необязательно) для синка объектов по UDP (не
 обязателен) и [переменные окружения](#переменные-окружения) со всеми настройками.
+
+## Установщик: один скрипт
+
+`install.sh` — установка на чистый Ubuntu/Debian VPS: сам ставит Docker, спрашивает, что это за сервер и
+как к нему подключаться, поднимает всё через `docker compose` и печатает готовый адрес для плагина.
+
+```bash
+git clone https://github.com/EwenLoy/starkflow.git && cd starkflow
+sudo bash install.sh
+```
+
+Скрипт спросит:
+
+1. **Что ставим** — нода (игровой сервер) или `directory` (распределитель нескольких регионов, см.
+   [CLUSTER.md](CLUSTER.md)).
+2. **Как подключаться** — свой домен с https через Caddy, домен через Cloudflare Tunnel (порты открывать не
+   нужно) или без домена (`http://IP:8080`).
+3. **Домен** — скрипт сверит A-запись с IP сервера. Если домен за оранжевым прокси Cloudflare, он скажет сразу:
+   Let's Encrypt не подтвердит домен через прокси, нужен `Proxy status = DNS only` (серое облако).
+4. **WebRTC** — необязательный UDP-канал для синка объектов.
+
+Без вопросов (для автоматизации):
+
+```bash
+sudo bash install.sh --domain game.example.com --yes
+sudo bash install.sh --no-domain --yes
+sudo bash install.sh --mode directory --domain dir.example.com --yes
+sudo bash install.sh --token eyJhIjoi... --domain game.example.com --yes
+```
+
+После установки: `sudo bash install.sh --status`, `--logs`, `--update`, `--down`. `STARKFLOW_SECRET` скрипт
+генерирует сам и при повторном запуске не меняет, поэтому токены игроков не слетают. Порты всё равно надо
+открыть в фаерволе панели VPS: `80/tcp` и `443/tcp`+`443/udp` для варианта с Caddy, порт сервера — для варианта
+без домена.
 
 ## Публичный сервер прямо со своего ПК (Windows, без Docker)
 
@@ -116,6 +151,16 @@ DNS-запись и сертификат Cloudflare сделает сам. Ад�
 
 Если домен на Cloudflare и включён оранжевый прокси, для варианта 1 поставь SSL-режим **Full (strict)**: иначе
 получится петля редиректов между Cloudflare и Caddy.
+
+**Если сертификат не выпускается.** В логах (`docker compose -f docker-compose.tls.yml logs caddy`) видно
+`challenge failed ... Cannot negotiate ALPN protocol "acme-tls/1"` и следом неудачный `http-01` — значит до сервера
+доходит не Let's Encrypt, а прокси Cloudflare. Проверка **на самом сервере** (снаружи DNS может подменяться
+провайдером): `getent ahostsv4 game.example.com` должен вернуть IP этого VPS, а не `104.*`, `172.67.*` или
+`188.114.*`. Что делать: у записи A в Cloudflare выставить `Proxy status = DNS only` (серое облако) — явная запись
+перекрывает wildcard `*`, из-за которого любой субдомен тоже уходит в прокси; либо оставить прокси и перейти на
+туннель (`--profile cfdomain`). После правки DNS: `docker restart starkflow-caddy-1` — Caddy сбросит бэкофф и сразу
+пойдёт за сертификатом в production CA (staging-сертификат браузер не примет). Признак успеха в логе —
+`certificate obtained successfully` с `issuer: acme-v02.api.letsencrypt.org-directory`.
 
 
 ## Хостинг ботов вместо VPS (Bothost и подобные)

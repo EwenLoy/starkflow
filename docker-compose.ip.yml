@@ -1,0 +1,7 @@
+# Запуск без домена: сервер публикуется на порту STARKFLOW_PORT (по умолчанию 8080).
+#   docker compose -f docker-compose.tls.yml -f docker-compose.ip.yml up -d --build
+# Так ставит install.sh --no-domain; Caddy в этом варианте не нужен.
+services:
+  starkflow:
+    ports:
+      - "${STARKFLOW_PORT:-8080}:8080"

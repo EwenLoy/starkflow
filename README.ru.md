@@ -98,7 +98,15 @@ docker compose logs tunnel | grep trycloudflare    # получишь адрес
 ## Свой домен и https
 
 Домен ставится одной командой: Caddy сам получит и продлит сертификат Let's Encrypt и сам проксирует
-WebSocket, вручную настраивать нечего.
+WebSocket, вручную настраивать нечего. На чистом VPS проще начать с установщика — он поставит Docker, спросит
+режим и домен и проверит DNS:
+
+```bash
+git clone https://github.com/EwenLoy/starkflow.git && cd starkflow
+sudo bash install.sh
+```
+
+Если Docker уже есть, хватит двух команд:
 
 ```bash
 cp .env.example .env     # впиши STARKFLOW_SECRET и SF_DOMAIN, например game.example.com
@@ -170,6 +178,8 @@ Docker-образа).
 | `dist/starkflow.c3addon` | собранный аддон: C3 → View → Addon Manager → Install new addon |
 | `Dockerfile`, `docker-compose.yml` | контейнер и запуск на сервере (плюс профиль туннеля) |
 | `docker-compose.tls.yml`, `Caddyfile` | https на своём домене: Caddy или туннель Cloudflare |
+| `docker-compose.ip.yml` | публикует порт для запуска без домена (`install.sh --no-domain`) |
+| `install.sh` | установщик в один скрипт: Docker, нода или directory, домен с сертификатом, статус/логи/обновление |
 | `tests/` | тесты: unit-тесты Go, проверка ACE, живой smoke-тест протокола |
 | `docs/` | подробная документация |
 

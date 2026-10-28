@@ -28,6 +28,8 @@ jobs:
           node-version: '22'
       - name: Build the static bundle
         working-directory: demo/chess
+        env:
+          STARKFLOW_WS_URL: ${{ vars.STARKFLOW_WS_URL || secrets.STARKFLOW_WS_URL }}
         run: node scripts/build.mjs
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

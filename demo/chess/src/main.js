@@ -14,8 +14,13 @@ import {
   t,
 } from './i18n.js?v=20261028-14';
 
+import { WS_URL } from './env.js?v=20261028-16';
+
 const CONFIG = {
-  url: 'wss://starkflow.orkestr.run/ws',
+  // The working node is never in the repository: `env.js` is rewritten during
+  // the Pages build from the STARKFLOW_WS_URL variable, while the footer, the
+  // help text and the README keep naming the public endpoint.
+  url: WS_URL,
   app: 'starkflow-chess',
   lobby: 'salon',
 };

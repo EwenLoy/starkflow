@@ -809,22 +809,37 @@ console.log("ACE consistency OK (" + n + " entries)");
 	S1.inst._tokens = 20;
 	S1.inst._flush(performance.now());
 	assert.deepStrictEqual(wS1.sent[0].objs, [[0, 1, 40]], "the value is absolute, not a difference");
-	// a keyframe goes out on its own timer, even when nothing changed
-	wS1.sent.length = 0;
-	for (let i = 0; i < 40 && !wS1.sent.some((m) => m.k === 1); i++)
+	// A keyframe is a repair frame: after a delta it goes out once a second passed,
+	// and while nothing changes at all only a rare keepalive one travels.
+	let clockS = performance.now();
+	S1.inst._keyAt = clockS;			// the delta above happened "now": pin the timer
+	const flushS = (dt) =>
 	{
+		clockS += dt;
 		S1.inst._tokens = 20;
-		S1.inst._flush(performance.now());
-	}
+		S1.inst._flush(clockS);
+	};
+	wS1.sent.length = 0;
+	flushS(500);
+	flushS(400);
+	assert.strictEqual(wS1.sent.length, 0, "a keyframe must not follow a delta at once: " + JSON.stringify(wS1.sent));
+	flushS(200);
 	const kf = wS1.sent.find((m) => m.k === 1);
-	assert.ok(kf, "a keyframe must go out on its own, without a newcomer: " + JSON.stringify(wS1.sent));
+	assert.ok(kf, "a keyframe repairs a delta that could be lost, once a second passed: " + JSON.stringify(wS1.sent));
 	assert.deepStrictEqual(kf.objs, [[0, 1035, 40, 20, 90, "player"]], "a keyframe carries the whole object");
 	assert.ok(kf.iv > 0, "a keyframe carries the send interval");
+	// nothing changes since: a standing player costs no traffic
+	wS1.sent.length = 0;
+	for (let i = 0; i < 8; i++)
+		flushS(500);					// 4 s of standing still
+	assert.strictEqual(wS1.sent.length, 0, "an object that does not move costs no traffic: " + JSON.stringify(wS1.sent));
+	// ... except the idle keepalive keyframe, once per 5 s
+	flushS(1100);
+	assert.deepStrictEqual(wS1.sent.map((m) => [m.t, m.k]), [["sync", 1]], "the idle keepalive keyframe goes out once per 5 s: " + JSON.stringify(wS1.sent));
 	// a newcomer gets a keyframe right away, without waiting for the timer
 	wS1.recv({ t: "player.joined", player: { id: 2, name: "S2", props: {} } });
 	wS1.sent.length = 0;
-	S1.inst._tokens = 20;
-	S1.inst._flush(performance.now());
+	flushS(50);
 	assert.deepStrictEqual([wS1.sent[0].t, wS1.sent[0].k], ["sync", 1], "a newcomer must get a keyframe at once");
 
 	// the receiver: player 1 joined with his last snapshot, then two more arrive
@@ -910,6 +925,24 @@ console.log("ACE consistency OK (" + n + " entries)");
 	wS1.sent.length = 0;
 	P.Acts.StopSync.call(S1.inst);
 	assert.deepStrictEqual(wS1.sent.map((m) => [m.t, m.objs && m.objs.length]), [["sync", 0]], "stop sync must send an empty snapshot");
+	// a record of a destroyed object leaves the table: the state field is not the
+	// map key any more, so the delete finds the record (it used to stay forever)
+	const recGone = { key: "gone:0", owner: 1, slot: 7, uid: 987654 };
+	S1.inst._sync.set(recGone.key, recGone);
+	assert.strictEqual(S1.inst._resolve(recGone), null, "an unknown uid resolves to nothing");
+	assert.strictEqual(S1.inst._sync.has("gone:0"), false, "a destroyed object leaves the sync table");
+	// ... but a missing runtime is not "destroyed": the record must stay
+	const recNoRt = { key: "gone:1", owner: 1, slot: 8, uid: 987655 };
+	S1.inst._sync.set(recNoRt.key, recNoRt);
+	const fakeRt = globalThis.__FakeRuntime;
+	const instRt = S1.inst.__runtime;
+	globalThis.__FakeRuntime = null;	// "no runtime at all", as in a plugin without a layout
+	S1.inst.__runtime = null;
+	S1.inst._resolve(recNoRt);
+	globalThis.__FakeRuntime = fakeRt;
+	S1.inst.__runtime = instRt;
+	assert.ok(S1.inst._sync.has("gone:1"), "without a runtime a record must not be dropped");
+	S1.inst._sync.delete("gone:1");
 
 	// the expressions report what the buffers really do: the worst owner first, and
 	// the plain smoothing target on a server without remote data (no "sync" snapshots)

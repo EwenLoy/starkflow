@@ -67,9 +67,14 @@
 	const STALE_SEQ = SNAP_BUFFER;
 	const STALE_MS = 2000;
 	// A keyframe carries every masked field again: newcomers start from it, and a
-	// receiver that missed a snapshot catches up with the next one. Between
-	// keyframes a record only carries the fields that changed since the keyframe.
-	const SYNC_KEY_EVERY = 30;			// snapshots between keyframes (~1 s at 30 Hz)
+	// receiver that missed a delta catches up with the next one. Between keyframes
+	// a record only carries the fields that changed since the keyframe. A keyframe
+	// is a repair frame: while the objects really change one goes out at most once
+	// a second, and when nothing changed at all there is nothing to repair, so only
+	// a rare keepalive one travels - it also keeps the keyframe the server stores
+	// for newcomers fresh. A standing player therefore costs almost no traffic.
+	const SYNC_KEY_MS = 1000;			// ms between keyframes while something changes
+	const SYNC_KEY_IDLE_MS = 5000;		// ms between keepalive keyframes when nothing does
 
 	// ---- WebRTC (stage 4) -------------------------------------------------------
 	// A server with welcome.rtc opens an unreliable, unordered DataChannel "sync"
@@ -244,7 +249,8 @@
 			this._syncSeq = 0;				// number of our last snapshot
 			this._syncLast = "";				// JSON of our last snapshot ("" = none sent)
 			this._syncKey = false;				// send the next snapshot as a keyframe
-			this._kfCount = 0;					// snapshots since the last keyframe
+			this._keyAt = 0;					// when a keyframe really left
+			this._keyDirty = false;				// a delta left since the last keyframe
 			this._warnedSync = false;
 			this._snaps = new Map();			// owner id -> { buf, off, seq, iv, jit, delay }
 			this._statAt = 0;					// last "buffer:" diagnostics line
@@ -1586,7 +1592,7 @@
 			this._syncLast = "";				// send our snapshot again in the new room
 			this._syncKey = true;
 			for (const rec of this._sync.values())
-				rec.key = null;					// a new room: everyone starts from a keyframe
+				rec.base = null;				// a new room: everyone starts from a keyframe
 			this._sentChunks = [];
 			this._chunkTime = [];
 			this._sentProps.clear();
@@ -1938,7 +1944,11 @@
 			const inst = this._instByUid(rec.uid);
 			if (!inst)
 			{
-				this._sync.delete(rec.key);		// the object was destroyed
+				// Only a real lookup can tell "the object was destroyed": while the
+				// plugin has no runtime (no layout yet) the record must stay, or the
+				// object would silently stop being synced.
+				if (this.runtime)
+					this._sync.delete(rec.key);
 				return null;
 			}
 			return inst;
@@ -2003,7 +2013,7 @@
 		{
 			const a = [rec.slot, 0];
 			const next = {};
-			const last = key ? null : rec.key;
+			const last = key ? null : rec.base;
 			let bits = 0;
 			const put = (bit, name, value) =>
 			{
@@ -2088,9 +2098,12 @@
 		// Stage 2: all our objects as one numbered snapshot, sent only when something
 		// changed. ts is our clock: the receivers use the time between snapshots, not
 		// the absolute value, so the clocks of the players do not have to match.
+		// The keyframe timer counts real time, not flushes: the send rate alone must
+		// not decide how often the repair frame travels.
 		_flushSyncChannel(now)
 		{
-			const key = this._syncKey || (++this._kfCount % SYNC_KEY_EVERY === 0);
+			const since = now - this._keyAt;
+			const key = this._syncKey || (this._keyDirty ? since >= SYNC_KEY_MS : since >= SYNC_KEY_IDLE_MS);
 			const all = [];
 			const recs = [];
 			let dirty = false;
@@ -2135,8 +2148,17 @@
 			this._tokens--;
 			this._syncKey = false;
 			this._syncLast = mine.length ? text : "";
+			// A keyframe and the "no objects any more" snapshot are complete truths:
+			// after them there is nothing to repair. A plain snapshot was a delta.
+			if (key || !mine.length)
+			{
+				this._keyAt = now;
+				this._keyDirty = false;
+			}
+			else if (dirty)
+				this._keyDirty = true;
 			for (const rec of sent)
-				rec.key = rec.next;			// what really left is the new base
+				rec.base = rec.next;			// what really left is the new base
 			const msg = { t: "sync", seq: ++this._syncSeq, ts: Math.round(now), objs: mine };
 			if (key)
 			{

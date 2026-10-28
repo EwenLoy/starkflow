@@ -1,10 +1,10 @@
-import { ChessScene } from './scene.js?v=20261028-11';
-import { StarkFlowClient } from './net.js?v=20261028-11';
-import { ChessSession, START_FEN } from './session.js?v=20261028-11';
-import { ChessAudio } from './audio.js?v=20261028-11';
-import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-11';
-import { pieceGlyph } from './pieces.js?v=20261028-11';
-import { LocalNet } from './offline.js?v=20261028-11';
+import { ChessScene } from './scene.js?v=20261028-12';
+import { StarkFlowClient } from './net.js?v=20261028-12';
+import { ChessSession, START_FEN } from './session.js?v=20261028-12';
+import { ChessAudio } from './audio.js?v=20261028-12';
+import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-12';
+import { pieceGlyph } from './pieces.js?v=20261028-12';
+import { LocalNet } from './offline.js?v=20261028-12';
 import {
   applyTranslations,
   getLocale,
@@ -12,7 +12,7 @@ import {
   pluralRu,
   setLocale,
   t,
-} from './i18n.js?v=20261028-11';
+} from './i18n.js?v=20261028-12';
 
 const CONFIG = {
   url: 'wss://starkflow.orkestr.run/ws',
@@ -274,7 +274,7 @@ class SalonApp {
       }
       if (change.left) {
         const p = change.player;
-        if (p && p.id !== this.net.you) this.showToast(t('{name} left the table.', { name: p.name || t('Guest') }));
+        if (p && p.id !== this.net.you && change.reason !== 'timeout') this.showToast(t('{name} left the table.', { name: p.name || t('Guest') }));
       }
       if (change.suspended && change.suspended !== this.net.you) {
         this.showToast(t('Opponent lost connection — the seat is held for 30 seconds.'));
@@ -418,9 +418,6 @@ class SalonApp {
     window.addEventListener('pointerup', (e) => this.onGlobalPointerUp(e), true);
     window.addEventListener('online', () => {
       if (!this.net.connected) this.net.manualRetry();
-    });
-    window.addEventListener('beforeunload', () => {
-      if (this.net.room) this.net.request('room.leave');
     });
   }
 

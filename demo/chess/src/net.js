@@ -6,11 +6,12 @@ const TOKEN_PREFIX = 'ornate-chess:token:';
  * ping, token resume and automatic reconnection.
  */
 export class StarkFlowClient {
-  constructor({ url, app, lobby = 'salon', name = 'Guest' }) {
+  constructor({ url, app, lobby = 'salon', name = 'Guest', storage = null }) {
     this.url = url;
     this.app = app;
     this.lobby = lobby;
     this.name = name;
+    this.storage = storage || globalThis.sessionStorage || null;
 
     this.ws = null;
     this.connected = false;
@@ -64,8 +65,10 @@ export class StarkFlowClient {
   }
 
   #loadToken() {
+    const storage = this.storage;
+    if (!storage) return this.token || '';
     try {
-      return sessionStorage.getItem(this.#tokenKey()) || '';
+      return storage.getItem(this.#tokenKey()) || '';
     } catch {
       return this.token || '';
     }
@@ -73,9 +76,11 @@ export class StarkFlowClient {
 
   #saveToken(token) {
     this.token = token || '';
+    const storage = this.storage;
+    if (!storage) return;
     try {
-      if (token) sessionStorage.setItem(this.#tokenKey(), token);
-      else sessionStorage.removeItem(this.#tokenKey());
+      if (token) storage.setItem(this.#tokenKey(), token);
+      else storage.removeItem(this.#tokenKey());
     } catch {
       /* private mode */
     }
@@ -192,12 +197,8 @@ export class StarkFlowClient {
 
   #scheduleReconnect() {
     if (!this.active || this.intentionalClose) return;
-    if (this.retry >= 10) {
-      this.emit('status', { state: 'exhausted' });
-      return;
-    }
     this.retry += 1;
-    const delay = Math.min(700 * 2 ** (this.retry - 1), 7000);
+    const delay = Math.min(500 * 2 ** Math.min(this.retry - 1, 4), 6000);
     this.emit('status', { state: 'retrying', retry: this.retry, delay });
     clearTimeout(this.retryTimer);
     this.retryTimer = setTimeout(() => {
@@ -491,10 +492,11 @@ export class StarkFlowClient {
             }
           }, 250);
         }
-        if (m.code === 300 && !this.room) {
-          const missing = this.wantRoom;
-          this.wantRoom = null;
-          this.emit('room.missing', { room: missing });
+        if (m.code === 300) {
+          const missing = this.wantRoom || this.room?.id || this.room?.name || '';
+          const lost = !!this.room;
+          this.#clearRoom();
+          this.emit('room.missing', { room: missing, lost });
           this.listRooms();
         }
         if (m.code === 301) {

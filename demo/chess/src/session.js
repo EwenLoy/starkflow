@@ -26,6 +26,8 @@ function decodeGame(raw) {
     lastMove: value.lastMove && value.lastMove.from && value.lastMove.to ? value.lastMove : null,
     whiteId: Number(value.whiteId) || 0,
     blackId: Number(value.blackId) || 0,
+    whiteUserId: typeof value.whiteUserId === 'string' ? value.whiteUserId : '',
+    blackUserId: typeof value.blackUserId === 'string' ? value.blackUserId : '',
     status: typeof value.status === 'string' ? value.status : 'waiting',
     winner: value.winner === 'w' || value.winner === 'b' ? value.winner : null,
     reason: typeof value.reason === 'string' ? value.reason : null,
@@ -72,6 +74,8 @@ export class ChessSession {
     this.myColor = null;
     this.pending = false;
     this.pendingTimer = null;
+    this.resyncing = false;
+    this.resyncTimer = null;
     this.resultAnnounced = false;
     this.lastTurn = null;
     this.handlers = new Map();
@@ -145,7 +149,10 @@ export class ChessSession {
     this.unsubs.push(
       this.net.on('room.joined', () => this.#onJoined()),
       this.net.on('players.changed', (change) => this.#onPlayers(change)),
-      this.net.on('host.changed', () => this.#maybeSeat()),
+      this.net.on('host.changed', () => {
+        this.#maybeSeat();
+        this.#resyncSeats();
+      }),
       this.net.on('state.changed', (change) => {
         if (change.key === 'game') this.#onState(change.value, change.old);
       }),
@@ -157,10 +164,13 @@ export class ChessSession {
   destroy() {
     for (const off of this.unsubs) off();
     clearTimeout(this.pendingTimer);
+    clearTimeout(this.resyncTimer);
   }
 
   #reset() {
     clearTimeout(this.pendingTimer);
+    clearTimeout(this.resyncTimer);
+    this.resyncing = false;
     this.pending = false;
     this.game = null;
     this.chess = null;
@@ -189,7 +199,8 @@ export class ChessSession {
 
     if (this.net.isHost()) {
       const active = new Set(this.net.activePlayers().map((p) => p.id));
-      const nobodyAtTable = !active.has(this.game.whiteId) && !active.has(this.game.blackId);
+      const held = (id, userId) => active.has(id) || (!!userId && this.net.playerList().some((p) => p.userId === userId));
+      const nobodyAtTable = !held(this.game.whiteId, this.game.whiteUserId) && !held(this.game.blackId, this.game.blackUserId);
       if (nobodyAtTable) {
         // A link can outlive its players. A fresh host inherits the table,
         // not a frozen game between two ghosts.
@@ -200,6 +211,8 @@ export class ChessSession {
           lastMove: null,
           whiteId: this.net.you,
           blackId: 0,
+          whiteUserId: this.net.userId,
+          blackUserId: '',
           status: 'waiting',
           winner: null,
           reason: null,
@@ -213,7 +226,8 @@ export class ChessSession {
       }
     }
 
-    if (this.game.status === 'waiting' && this.net.isHost()) this.#maybeSeat();
+    if (this.game.status === 'waiting') this.#maybeSeat();
+    else this.#resyncSeats();
     this.emit('change', this.snapshot());
     this.#emitMoveIfAny(null);
     this.#announceTurn(true);
@@ -238,6 +252,11 @@ export class ChessSession {
     if (!this.game) return null;
     if (this.game.whiteId === this.you) return 'w';
     if (this.game.blackId === this.you) return 'b';
+    const userId = this.net.userId;
+    if (!userId) return null;
+    const released = (id) => !id || !this.net.players.has(id);
+    if (this.game.whiteUserId === userId && released(this.game.whiteId)) return 'w';
+    if (this.game.blackUserId === userId && released(this.game.blackId)) return 'b';
     return null;
   }
 
@@ -251,6 +270,8 @@ export class ChessSession {
       lastMove: null,
       whiteId: this.net.hostId || this.net.you,
       blackId: 0,
+      whiteUserId: this.net.userId,
+      blackUserId: '',
       status: 'waiting',
       winner: null,
       reason: null,
@@ -263,31 +284,68 @@ export class ChessSession {
     this.net.setState('game', JSON.stringify(game));
   }
 
+  #userIdOf(id) {
+    if (!id) return '';
+    if (id === this.net.you) return this.net.userId;
+    return this.net.players.get(id)?.userId || '';
+  }
+
   #maybeSeat() {
     if (!this.game || this.game.status !== 'waiting' || !this.net.isHost()) return;
     const active = this.net.activePlayers();
     let whiteId = this.game.whiteId;
     if (!active.some((p) => p.id === whiteId)) whiteId = this.net.you;
+    const whiteUserId = this.#userIdOf(whiteId) || this.game.whiteUserId || this.net.userId;
     const opponent = active.find((p) => p.id !== whiteId);
     if (!opponent) {
-      if (whiteId !== this.game.whiteId) this.#write({ ...this.game, whiteId });
+      if (whiteId !== this.game.whiteId || whiteUserId !== this.game.whiteUserId) {
+        this.#write({ ...this.game, whiteId, whiteUserId });
+      }
       return;
     }
     const now = Date.now();
     this.#write({
       ...this.game,
       whiteId,
+      whiteUserId,
       blackId: opponent.id,
+      blackUserId: opponent.userId || '',
       status: 'playing',
       startedAt: now,
       turnStartedAt: now,
     });
   }
 
+  /**
+   * Seats are stored twice: the player id the room gave me and the user id that
+   * survives a reconnect. When a side comes back with a new player id, the host
+   * moves the seat to it, so the game continues instead of turning into a
+   * spectator view.
+   */
+  #resyncSeats() {
+    if (!this.net.isHost() || this.game?.status !== 'playing' || this.resyncing) return;
+    const active = this.net.playerList().filter((p) => p.status !== 'suspended');
+    const seatId = (userId, id) => {
+      if (!userId) return id;
+      const player = active.find((p) => p.userId === userId);
+      return player ? player.id : id;
+    };
+    const whiteId = seatId(this.game.whiteUserId, this.game.whiteId);
+    const blackId = seatId(this.game.blackUserId, this.game.blackId);
+    if (whiteId === this.game.whiteId && blackId === this.game.blackId) return;
+    this.resyncing = true;
+    clearTimeout(this.resyncTimer);
+    this.resyncTimer = setTimeout(() => {
+      this.resyncing = false;
+    }, 2000);
+    this.#write({ ...this.game, whiteId, blackId, updatedAt: Date.now() });
+  }
+
   #onPlayers(change) {
     if (this.net.isHost()) {
-      this.#maybeSeat();
-      if (change.left && this.game?.status === 'playing') {
+      if (this.game?.status === 'waiting') this.#maybeSeat();
+      else this.#resyncSeats();
+      if (change.left && change.reason !== 'timeout' && this.game?.status === 'playing') {
         const isSide = change.left === this.game.whiteId || change.left === this.game.blackId;
         if (isSide) {
           setTimeout(() => this.#claimAbandon(change.left), 350);
@@ -336,6 +394,8 @@ export class ChessSession {
     this.myColor = this.#colorForYou();
     this.pending = false;
     clearTimeout(this.pendingTimer);
+    this.resyncing = false;
+    clearTimeout(this.resyncTimer);
 
     const snapshot = this.snapshot();
     this.emit('change', snapshot);

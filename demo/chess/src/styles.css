@@ -196,6 +196,15 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+.modal {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 button,
@@ -299,6 +308,7 @@ svg {
   width: 100%;
   height: 100%;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 1s ease 0.2s;
 }
 
@@ -674,6 +684,7 @@ svg {
   align-items: center;
   padding: 105px clamp(20px, 5vw, 76px) 58px;
   overflow-y: auto;
+  pointer-events: auto;
   background:
     linear-gradient(90deg, rgba(3, 8, 6, 0.9) 0%, rgba(3, 8, 6, 0.62) 38%, rgba(3, 8, 6, 0.12) 70%, transparent 100%),
     linear-gradient(0deg, rgba(3, 8, 6, 0.76), transparent 42%);
@@ -1805,6 +1816,7 @@ draw-offer .mini-btn {
   font-size: 9px;
   transform: translateX(-50%);
   backdrop-filter: blur(12px);
+  pointer-events: none;
 }
 
 .spectator-hint svg {
@@ -2072,6 +2084,122 @@ draw-offer .mini-btn {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+.bot-levels {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.bot-level {
+  display: grid;
+  grid-template-columns: 39px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.018);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.25s, background 0.25s;
+}
+
+.bot-level:hover {
+  border-color: var(--line-strong);
+  background: rgba(201, 161, 93, 0.06);
+}
+
+.bot-level.is-selected {
+  border-color: rgba(201, 161, 93, 0.62);
+  background: linear-gradient(100deg, rgba(201, 161, 93, 0.15), rgba(201, 161, 93, 0.03));
+}
+
+.bot-level__icon {
+  display: grid;
+  place-items: center;
+  width: 37px;
+  height: 37px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: 20px;
+}
+
+.bot-level__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.bot-level__text strong {
+  color: var(--ivory);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.bot-level__text small {
+  color: var(--muted-2);
+  font-size: 8.5px;
+  line-height: 1.45;
+}
+
+.bot-level__depth {
+  color: var(--gold);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.side-choice {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  margin-top: 22px;
+}
+
+.side-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 39px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.018);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 0.25s, color 0.25s, background 0.25s;
+}
+
+.side-btn:hover {
+  border-color: var(--line-strong);
+  color: var(--ivory);
+}
+
+.side-btn.is-selected {
+  border-color: rgba(201, 161, 93, 0.55);
+  background: rgba(201, 161, 93, 0.12);
+  color: var(--gold-bright);
+}
+
+.side-btn span {
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1;
 }
 
 .modal__field {

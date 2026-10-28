@@ -166,7 +166,7 @@ export class ChessScene {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.72;
+    this.renderer.toneMappingExposure = 0.62;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setClearColor(0x050c09, 0);
@@ -222,15 +222,15 @@ export class ChessScene {
     const room = new RoomEnvironment();
     this.envMap = pmrem.fromScene(room, 0.04).texture;
     this.scene.environment = this.envMap;
-    this.scene.environmentIntensity = 0.2;
+    this.scene.environmentIntensity = 0.17;
     room.dispose?.();
     pmrem.dispose();
   }
 
   #setupLights() {
-    this.scene.add(new THREE.HemisphereLight(0x9dc6b0, 0x07110d, 0.38));
+    this.scene.add(new THREE.HemisphereLight(0x9dc6b0, 0x07110d, 0.32));
 
-    const key = new THREE.SpotLight(0xffd7a0, 260, 30, 0.58, 0.76, 1.7);
+    const key = new THREE.SpotLight(0xffd7a0, 195, 30, 0.58, 0.78, 1.7);
     key.position.set(-1.5, 13.5, 7);
     key.target.position.set(0, 0, 0);
     key.castShadow = true;
@@ -242,22 +242,22 @@ export class ChessScene {
     this.scene.add(key, key.target);
     this.keyLight = key;
 
-    const rim = new THREE.SpotLight(0x6ea98f, 110, 28, 0.72, 0.88, 1.8);
+    const rim = new THREE.SpotLight(0x6ea98f, 90, 28, 0.72, 0.88, 1.8);
     rim.position.set(8.5, 8, -7);
     rim.target.position.set(0, 0.2, 0);
     this.scene.add(rim, rim.target);
 
-    const fill = new THREE.PointLight(0xc98b4c, 9, 18, 1.8);
+    const fill = new THREE.PointLight(0xc98b4c, 7, 18, 1.8);
     fill.position.set(-8, 3.2, 5.5);
     this.scene.add(fill);
 
-    const under = new THREE.PointLight(0x2b7b5e, 7, 12, 2);
+    const under = new THREE.PointLight(0x2b7b5e, 5, 12, 2);
     under.position.set(3, 0.6, 2);
     this.scene.add(under);
 
     this.brazierLights = [];
     for (const x of [-6.2, 6.2]) {
-      const flame = new THREE.PointLight(0xffb55e, 3, 7, 2);
+      const flame = new THREE.PointLight(0xffb55e, 2.5, 7, 2);
       flame.position.set(x, 2.1, -4.8);
       this.scene.add(flame);
       this.brazierLights.push(flame);
@@ -658,9 +658,9 @@ export class ChessScene {
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.18,
-      0.55,
-      0.95,
+      0.12,
+      0.5,
+      1,
     );
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());

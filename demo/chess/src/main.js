@@ -2,8 +2,9 @@ import { ChessScene } from './scene.js';
 import { StarkFlowClient } from './net.js';
 import { ChessSession, START_FEN } from './session.js';
 import { ChessAudio } from './audio.js';
-import { findHint, openingName } from './engine.js';
+import { chooseBotMove, findHint, openingName } from './engine.js';
 import { pieceGlyph } from './pieces.js';
+import { LocalNet } from './offline.js';
 import {
   applyTranslations,
   getLocale,
@@ -119,7 +120,8 @@ class SalonApp {
 
     this.audio = new ChessAudio();
     this.net = new StarkFlowClient({ ...CONFIG, name: this.name });
-    this.session = new ChessSession(this.net);
+    this.onlineSession = new ChessSession(this.net);
+    this.session = this.onlineSession;
     this.scene = new ChessScene($('scene'), { onSquareClick: (square) => this.onSquareClick(square) });
     this.scene.setPosition(START_FEN, { initial: true });
     this.scene.setMode('lobby');
@@ -146,11 +148,29 @@ class SalonApp {
     this.hintBusy = false;
     this.latency = null;
     this.lastNetStatus = { state: 'connecting' };
+    this.offline = false;
+    this.offlineLevel = 'medium';
+    this.offlineColor = 'w';
+    this.botColor = 'b';
+    this.botName = 'Bot';
+    this.botThinking = false;
+    this.botRequestId = 0;
+    this.botTimer = null;
+    this.botWorker = null;
+    this.botWorkerBroken = false;
+    this.offlineNet = null;
+    this.offlineSession = null;
+    this.botSetupLevel = 'medium';
+    this.botSetupColor = 'w';
 
     this.bindUi();
     this.bindNet();
-    this.bindSession();
+    this.bindSession(this.session);
     this.start();
+  }
+
+  get gnet() {
+    return this.offline ? this.offlineNet : this.net;
   }
 
   /* ------------------------------------------------------------- startup */
@@ -164,13 +184,13 @@ class SalonApp {
 
     this.clockTimer = setInterval(() => this.updateClock(), 1000);
     this.listTimer = setInterval(() => {
-      if (!this.net.room && document.visibilityState === 'visible' && this.net.connected) {
+      if (!this.offline && !this.net.room && document.visibilityState === 'visible' && this.net.connected) {
         this.net.listRooms();
       }
     }, 6000);
 
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && !this.net.room && this.net.connected) this.net.listRooms();
+      if (document.visibilityState === 'visible' && !this.offline && !this.net.room && this.net.connected) this.net.listRooms();
     });
 
     this.net.connect(this.name).catch(() => {
@@ -206,7 +226,7 @@ class SalonApp {
       this.nameInput.value = this.name;
       this.updateSeal();
       this.renderRooms();
-      if (this.directRoom && !this.triedDirect) {
+      if (this.directRoom && !this.triedDirect && !this.offline) {
         this.triedDirect = true;
         this.net.joinRoom(this.directRoom);
       }
@@ -225,12 +245,18 @@ class SalonApp {
       this.pendingCreate = null;
       this.pendingCreateTries = 0;
       $('createBtn').disabled = false;
+      if (this.offline) {
+        this.net.leaveRoom();
+        return;
+      }
       this.enterGame(detail);
     });
     this.net.on('room.left', () => {
+      if (this.offline) return;
       this.enterLobby();
     });
     this.net.on('room.missing', () => {
+      if (this.offline) return;
       this.clearRoomQuery();
       this.enterLobby();
       this.showToast(t('This table has already closed. Choose another.'), 'error');
@@ -267,14 +293,19 @@ class SalonApp {
     });
   }
 
-  bindSession() {
-    this.session.on('change', (snapshot) => {
+  bindSession(session) {
+    const current = () => this.session === session;
+    session.on('change', (snapshot) => {
+      if (!current()) return;
       this.syncBoardFromSnapshot(snapshot);
       this.renderGame();
+      this.maybeBotMove();
     });
-    this.session.on('move', (data) => {
+    session.on('move', (data) => {
+      if (!current()) return;
       if (data.fen === this.lastFen) {
         this.updateBoardMarkers();
+        this.maybeBotMove();
         return;
       }
       this.scene.setPosition(data.fen, { animate: true, lastMove: data.move });
@@ -286,32 +317,44 @@ class SalonApp {
       else this.audio.move();
       if (data.inCheck) setTimeout(() => this.audio.check(), 130);
       this.renderGame();
+      this.maybeBotMove();
     });
-    this.session.on('turn', (turn) => {
-      if (turn.inCheck) {
+    session.on('turn', (turn) => {
+      if (!current()) return;
+      if (this.offline && turn.color === this.botColor) {
+        this.showTurnToast(t('{name} is thinking', { name: this.botName }));
+      } else if (turn.inCheck) {
         this.showTurnToast(turn.mine ? t('Check! Your move') : t('Check on the opponent'));
       } else if (turn.mine) {
-        this.showTurnToast(t('Your move'));
+        this.showTurnToast(t('Your turn'));
       } else {
         this.showTurnToast(t(turn.color === 'w' ? 'White to move' : 'Black to move'));
       }
       if (!this.suppressTurnToast) this.audio.turn();
       this.suppressTurnToast = false;
+      this.maybeBotMove();
     });
-    this.session.on('pending', () => {
+    session.on('pending', () => {
+      if (!current()) return;
       this.syncInteraction();
-      this.showTurnToast(t('Move sent…'));
+      if (!this.offline) this.showTurnToast(t('Move sent…'));
     });
-    this.session.on('result', (snapshot) => {
+    session.on('result', (snapshot) => {
+      if (!current()) return;
       this.onResult(snapshot);
     });
-    this.session.on('toast', ({ text, type }) => this.showToast(text, type));
-    this.session.on('invalid-state', () => this.showToast(t('The table state arrived corrupted. Waiting for an update.'), 'error'));
+    session.on('toast', ({ text, type }) => {
+      if (current()) this.showToast(text, type);
+    });
+    session.on('invalid-state', () => {
+      if (current()) this.showToast(t('The table state arrived corrupted. Waiting for an update.'), 'error');
+    });
   }
 
   bindUi() {
     $('createBtn').addEventListener('click', () => this.createRoom());
     $('quickBtn').addEventListener('click', () => this.quickGame());
+    $('botBtn').addEventListener('click', () => this.openBotSetup());
     $('refreshBtn').addEventListener('click', () => this.refreshRooms());
     $('langBtn').addEventListener('click', () => this.switchLanguage());
     $('nameInput').addEventListener('change', () => this.applyName());
@@ -344,7 +387,7 @@ class SalonApp {
     });
     $('leaveBtn').addEventListener('click', () => this.confirmLeave());
     $('brandBtn').addEventListener('click', () => {
-      if (this.net.room) this.confirmLeave();
+      if (this.gnet.room) this.confirmLeave();
     });
     $('copyBtn').addEventListener('click', () => this.copyInvite());
     $('inviteBtn').addEventListener('click', () => this.copyInvite());
@@ -472,6 +515,15 @@ class SalonApp {
     this.updateSeal();
     if (this.roomAuto) this.roomInput.value = randomRoomName();
     this.refreshSoundButton();
+    if (this.offline) {
+      this.botName = this.botLevelName(this.offlineLevel);
+      const bot = this.offlineNet?.players.get(2);
+      if (bot) bot.name = this.botName;
+      $('roomTitle').textContent = this.botName;
+      $('roomKicker').textContent = `${t('Offline salon')} · ${this.botName}`;
+    } else if (this.net.room) {
+      $('roomKicker').textContent = `${t('Table')} #${this.net.room.id}`;
+    }
     this.renderRooms();
     this.renderGame();
     this.updateStatus(this.lastNetStatus || { state: 'connecting' });
@@ -484,7 +536,7 @@ class SalonApp {
     this.nameInput.value = value;
     store('ornate-chess:name', value);
     this.updateSeal();
-    if (this.net.room) return;
+    if (this.gnet.room) return;
     if (!this.net.connected) {
       if (this.net.active) await this.net.connect(value).catch(() => {});
       return;
@@ -642,6 +694,8 @@ class SalonApp {
   }
 
   enterGame(detail) {
+    this.offline = false;
+    this.session = this.onlineSession;
     this.suppressTurnToast = true;
     this.lastViewColor = null;
     this.hasRenderedBoard = false;
@@ -649,6 +703,8 @@ class SalonApp {
     this.selected = null;
     this.legal = [];
     this.resultKey = '';
+    $('game').classList.remove('offline');
+    $('copyBtn').hidden = false;
     $('lobby').hidden = true;
     $('game').hidden = false;
     document.body.classList.add('in-game');
@@ -668,7 +724,219 @@ class SalonApp {
     else this.showToast(t('You are at the table.'), 'ok');
   }
 
+  botLevelName(level) {
+    return t({ easy: 'Novice', medium: 'Club player', master: 'Maestro' }[level] || 'Club player');
+  }
+
+  openBotSetup() {
+    const levels = [
+      { id: 'easy', icon: '♟', title: t('Novice'), text: t('A relaxed opponent. Sees one move ahead.'), depth: t('1 move') },
+      { id: 'medium', icon: '♞', title: t('Club player'), text: t('A steady opponent. Looks two moves ahead.'), depth: t('2 moves') },
+      { id: 'master', icon: '♛', title: t('Maestro'), text: t('Deep calculation, captures and a short endgame search.'), depth: t('4 moves') },
+    ];
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.innerHTML = `
+      <button class="icon-btn icon-btn--small modal__close" id="botClose" aria-label="${t('Close')}"><svg><use href="#i-close"></use></svg></button>
+      <p class="panel-kicker">${t('Offline salon')}</p>
+      <h2>${t('Play vs bot')}</h2>
+      <p>${t('No network, no waiting. Pick an opponent and a side.')}</p>
+      <div class="bot-levels" id="botLevels">
+        ${levels.map((level) => `
+          <button class="bot-level${level.id === this.botSetupLevel ? ' is-selected' : ''}" type="button" data-level="${level.id}">
+            <span class="bot-level__icon">${level.icon}</span>
+            <span class="bot-level__text"><strong>${level.title}</strong><small>${level.text}</small></span>
+            <span class="bot-level__depth">${level.depth}</span>
+          </button>
+        `).join('')}
+      </div>
+      <p class="field-label" style="margin-top:22px">${t('Your side')}</p>
+      <div class="side-choice" id="botSides">
+        <button class="side-btn${this.botSetupColor === 'w' ? ' is-selected' : ''}" type="button" data-side="w"><span>♔</span>${t('White')}</button>
+        <button class="side-btn${this.botSetupColor === 'b' ? ' is-selected' : ''}" type="button" data-side="b"><span>♚</span>${t('Black')}</button>
+        <button class="side-btn${this.botSetupColor === 'r' ? ' is-selected' : ''}" type="button" data-side="r"><span>♠</span>${t('Random')}</button>
+      </div>
+      <div class="modal__actions">
+        <button class="btn btn--ghost btn--compact" id="botCancel" type="button">${t('Cancel')}</button>
+        <button class="btn btn--gold btn--compact" id="botStart" type="button">${t('Start game')}</button>
+      </div>
+    `;
+    const levelButtons = modal.querySelectorAll('[data-level]');
+    for (const btn of levelButtons) {
+      btn.addEventListener('click', () => {
+        this.botSetupLevel = btn.dataset.level;
+        levelButtons.forEach((item) => item.classList.toggle('is-selected', item === btn));
+      });
+    }
+    const sideButtons = modal.querySelectorAll('[data-side]');
+    for (const btn of sideButtons) {
+      btn.addEventListener('click', () => {
+        this.botSetupColor = btn.dataset.side;
+        sideButtons.forEach((item) => item.classList.toggle('is-selected', item === btn));
+      });
+    }
+    modal.querySelector('#botClose').addEventListener('click', () => this.closeModal());
+    modal.querySelector('#botCancel').addEventListener('click', () => this.closeModal());
+    modal.querySelector('#botStart').addEventListener('click', () => {
+      this.closeModal();
+      this.startOffline(this.botSetupLevel, this.botSetupColor);
+    });
+    this.openModal(modal, { focus: modal.querySelector('#botStart') });
+  }
+
+  startOffline(level, color) {
+    this.stopOfflineSession();
+    this.name = cleanName(this.nameInput.value);
+    this.nameInput.value = this.name;
+    store('ornate-chess:name', this.name);
+    this.updateSeal();
+    const chosen = color === 'r' ? (Math.random() < 0.5 ? 'w' : 'b') : color;
+    this.offline = true;
+    this.offlineLevel = level;
+    this.offlineColor = chosen;
+    this.botColor = chosen === 'w' ? 'b' : 'w';
+    this.botName = this.botLevelName(level);
+    this.botThinking = false;
+    this.botRequestId += 1;
+    this.offlineNet = new LocalNet({ playerName: this.name, botName: this.botName, playerColor: chosen });
+    this.offlineSession = new ChessSession(this.offlineNet);
+    this.session = this.offlineSession;
+    this.bindSession(this.offlineSession);
+    this.enterOfflineGame();
+    this.offlineNet.start();
+    this.maybeBotMove();
+  }
+
+  enterOfflineGame() {
+    this.suppressTurnToast = true;
+    this.lastViewColor = null;
+    this.hasRenderedBoard = false;
+    this.lastFen = '';
+    this.selected = null;
+    this.legal = [];
+    this.resultKey = '';
+    this.closeResult();
+    $('game').classList.add('offline');
+    $('copyBtn').hidden = true;
+    $('lobby').hidden = true;
+    $('game').hidden = false;
+    document.body.classList.add('in-game');
+    $('roomTitle').textContent = this.botName;
+    $('roomKicker').textContent = `${t('Offline salon')} · ${this.botLevelName(this.offlineLevel)}`;
+    $('inviteCode').textContent = '————————';
+    $('inviteStrip').hidden = true;
+    this.scene.setMode('game');
+    this.scene.clearSelection();
+    this.clearRoomQuery();
+    this.renderGame();
+    if (this.session.game) this.syncBoardFromSnapshot(this.session.snapshot());
+  }
+
+  stopOfflineSession() {
+    clearTimeout(this.botTimer);
+    this.botTimer = null;
+    this.botThinking = false;
+    this.botRequestId += 1;
+    if (this.offlineSession) {
+      this.offlineSession.destroy();
+      this.offlineSession = null;
+    }
+    this.offlineNet = null;
+    this.offline = false;
+    this.session = this.onlineSession;
+    $('game').classList.remove('offline');
+    $('copyBtn').hidden = false;
+  }
+
+  ensureBotWorker() {
+    if (this.botWorker || this.botWorkerBroken || typeof Worker === 'undefined') return;
+    try {
+      this.botWorker = new Worker(new URL('./bot-worker.js', import.meta.url), { type: 'module' });
+      this.botWorker.onmessage = (event) => {
+        const { id, move } = event.data || {};
+        if (id !== this.botRequestId) return;
+        this.botThinking = false;
+        if (!this.offline || !this.session?.isPlaying) return;
+        if (move) this.applyBotMove(move);
+        else this.runBotFallback();
+      };
+      this.botWorker.onerror = () => {
+        this.botWorkerBroken = true;
+        this.botWorker = null;
+        if (this.botThinking) this.runBotFallback();
+      };
+    } catch {
+      this.botWorkerBroken = true;
+      this.botWorker = null;
+    }
+  }
+
+  maybeBotMove() {
+    if (!this.offline || this.botThinking || !this.session?.isPlaying) return;
+    this.botColor = this.session.myColor === 'w' ? 'b' : 'w';
+    if (!this.session.chess || this.session.chess.turn() !== this.botColor) return;
+    this.botThinking = true;
+    clearTimeout(this.botTimer);
+    this.botTimer = setTimeout(() => this.requestBotMove(), 420 + Math.random() * 520);
+  }
+
+  requestBotMove() {
+    if (!this.offline || !this.session?.isPlaying || this.session.chess.turn() !== this.botColor) {
+      this.botThinking = false;
+      return;
+    }
+    const id = ++this.botRequestId;
+    const fen = this.session.chess.fen();
+    this.ensureBotWorker();
+    if (this.botWorker) {
+      this.botWorker.postMessage({ id, fen, level: this.offlineLevel });
+    } else {
+      setTimeout(() => {
+        if (id !== this.botRequestId || !this.offline) return;
+        try {
+          const move = chooseBotMove(fen, this.offlineLevel);
+          this.botThinking = false;
+          if (move) this.applyBotMove(move);
+          else this.botThinking = false;
+        } catch {
+          this.botThinking = false;
+        }
+      }, 30);
+    }
+  }
+
+  runBotFallback() {
+    if (!this.offline || !this.session?.isPlaying) return;
+    try {
+      const move = chooseBotMove(this.session.chess.fen(), this.offlineLevel);
+      this.botThinking = false;
+      if (move) this.applyBotMove(move);
+    } catch {
+      this.botThinking = false;
+    }
+  }
+
+  applyBotMove(move) {
+    if (!this.offline || !move) {
+      this.botThinking = false;
+      return;
+    }
+    const result = this.session.tryColorMove(move.from, move.to, move.promotion || '', this.botColor);
+    if (result !== 'ok') {
+      this.botThinking = false;
+      const legal = this.session.chess?.moves({ verbose: true }) || [];
+      const fallback = legal[Math.floor(Math.random() * legal.length)];
+      if (fallback && this.session.chess.turn() === this.botColor) {
+        this.session.tryColorMove(fallback.from, fallback.to, fallback.promotion || '', this.botColor);
+      }
+    }
+  }
+
   enterLobby() {
+    if (this.offline) this.stopOfflineSession();
+    this.session = this.onlineSession;
     this.clearRoomQuery();
     $('game').hidden = true;
     $('lobby').hidden = false;
@@ -678,6 +946,7 @@ class SalonApp {
     this.selected = null;
     this.legal = [];
     this.closeResult();
+    $('inviteStrip').hidden = false;
     this.scene.setMode('lobby');
     this.scene.clearSelection();
     this.scene.setCheck(null);
@@ -698,7 +967,7 @@ class SalonApp {
   /* ---------------------------------------------------------------- game */
   syncBoardFromSnapshot(snapshot) {
     const game = snapshot.game;
-    if (!game || !this.net.room) return;
+    if (!game || !this.gnet.room) return;
     const viewColor = snapshot.myColor || 'w';
     if (viewColor !== this.lastViewColor) {
       this.lastViewColor = viewColor;
@@ -747,7 +1016,7 @@ class SalonApp {
   renderGame() {
     if ($('game').hidden) return;
     const game = this.session.game;
-    const room = this.net.room;
+    const room = this.gnet.room;
     if (!room) return;
 
     if (!game) {
@@ -774,14 +1043,16 @@ class SalonApp {
     this.updateStatusCopy(game, white, black, myColor, turn);
 
     $('inviteCode').textContent = room.id || '————————';
-    $('inviteStrip').hidden = !!game.blackId && game.status === 'playing';
+    $('inviteStrip').hidden = this.offline || (!!game.blackId && game.status === 'playing');
+    $('copyBtn').hidden = this.offline;
     $('spectatorBadge').hidden = !this.session.isSpectator;
-    $('spectatorHint').hidden = !(this.session.isSpectator && game.blackId && game.whiteId);
+    $('spectatorHint').hidden = !(this.session.isSpectator && game.blackId && game.whiteId && !this.offline);
     $('moveCount').textContent = this.moveCountLabel(Math.ceil(game.moves.length / 2));
     $('openingName').textContent = openingName(game.moves, getLocale());
     this.updateClock();
 
-    $('drawBtn').disabled = !this.session.isPlaying || !!game.drawOffer || this.session.pending;
+    $('drawBtn').hidden = this.offline;
+    $('drawBtn').disabled = this.offline || !this.session.isPlaying || !!game.drawOffer || this.session.pending;
     $('resignBtn').disabled = !this.session.isPlaying;
     $('hintBtn').disabled = !this.session.isPlaying || this.session.pending;
     $('rematchBtn').hidden = game.status === 'playing' || game.status === 'waiting';
@@ -800,7 +1071,7 @@ class SalonApp {
     const meta = $(`${prefix}Meta`);
     const avatar = $(`${prefix}Avatar`);
     const turnPill = $(`${prefix}Turn`);
-    const isMe = player && player.id === this.net.you;
+    const isMe = player && player.id === this.gnet.you;
     const active = player && player.status !== 'suspended' && player.status !== 'gone';
     card.classList.toggle('is-you', !!isMe);
     if (isMe) card.dataset.youLabel = t('you');
@@ -816,8 +1087,10 @@ class SalonApp {
       return;
     }
     name.textContent = player.name || t('Player #{id}', { id: player.id });
-    if (!active) meta.textContent = t('disconnected · seat held');
-    else if (player.id === this.net.hostId) meta.textContent = t('table host · #{id}', { id: player.id });
+    if (this.offline) {
+      meta.textContent = player.id === 2 ? t('Bot · {level}', { level: this.botLevelName(this.offlineLevel) }) : t('Offline game');
+    } else if (!active) meta.textContent = t('disconnected · seat held');
+    else if (player.id === this.gnet.hostId) meta.textContent = t('table host · #{id}', { id: player.id });
     else meta.textContent = t('guest · #{id}', { id: player.id });
     const captures = this.session.capturedBy(color);
     this.fillCaptures(side, captures);
@@ -1014,8 +1287,8 @@ class SalonApp {
 
   playerName(id) {
     if (!id) return t('Opponent');
-    if (id === this.net.you) return this.net.welcomeInfo?.name || this.name;
-    const player = this.net.players.get(id);
+    if (id === this.gnet.you) return this.gnet.welcomeInfo?.name || this.name;
+    const player = this.gnet.players.get(id);
     return player?.name || t('Player #{id}', { id });
   }
 
@@ -1028,7 +1301,7 @@ class SalonApp {
   }
 
   syncInteraction() {
-    const allowed = !!this.net.room && this.net.connected && this.session.isPlaying && !this.session.pending && !this.modalOpen;
+    const allowed = !!this.gnet.room && this.gnet.connected && this.session.isPlaying && !this.session.pending && !this.modalOpen;
     this.scene.setInteractive(allowed);
     this.syncSelectionVisual();
   }
@@ -1051,7 +1324,7 @@ class SalonApp {
 
   /* ------------------------------------------------------------- actions */
   onSquareClick(square) {
-    if (!square || this.modalOpen || !this.net.connected || !this.net.room) return;
+    if (!square || this.modalOpen || !this.gnet.connected || !this.gnet.room) return;
     if (!this.session.isPlaying || this.session.pending) return;
 
     if (this.selected) {
@@ -1143,7 +1416,7 @@ class SalonApp {
 
   askDraw() {
     if (!this.session.isPlaying) return;
-    if (this.session.game?.drawOffer === this.net.you) {
+    if (this.session.game?.drawOffer === this.gnet.you) {
       this.showToast(t('Draw offer already sent.'));
       return;
     }
@@ -1182,6 +1455,24 @@ class SalonApp {
   }
 
   confirmLeave() {
+    if (this.offline) {
+      if (this.session.isPlaying) {
+        this.confirm({
+          kicker: t('Leave table'),
+          title: t('Leave the game?'),
+          text: t('The offline game will be lost. You can start a new one from the lobby at any time.'),
+          confirm: t('Leave to lobby'),
+          danger: true,
+          onConfirm: () => {
+            this.closeModal();
+            this.enterLobby();
+          },
+        });
+      } else {
+        this.enterLobby();
+      }
+      return;
+    }
     if (!this.net.room) return;
     if (this.session.isPlaying) {
       this.confirm({
@@ -1220,7 +1511,7 @@ class SalonApp {
   }
 
   async copyInvite() {
-    const room = this.net.room;
+    const room = this.gnet.room;
     if (!room) return;
     const link = roomUrl(room.id || room.name);
     const ok = await copyText(link);

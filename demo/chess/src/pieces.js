@@ -6,11 +6,11 @@ const ivoryMaterial = new THREE.MeshPhysicalMaterial({
   color: 0xf1e6cf,
   roughness: 0.34,
   metalness: 0.02,
-  clearcoat: 0.62,
+  clearcoat: 0.45,
   clearcoatRoughness: 0.32,
   sheen: 0.18,
   sheenColor: 0xfff3d4,
-  envMapIntensity: 0.72,
+  envMapIntensity: 0.52,
 });
 
 const ivoryShade = new THREE.MeshPhysicalMaterial({
@@ -25,11 +25,11 @@ const onyxMaterial = new THREE.MeshPhysicalMaterial({
   color: 0x15251f,
   roughness: 0.26,
   metalness: 0.28,
-  clearcoat: 0.9,
+  clearcoat: 0.68,
   clearcoatRoughness: 0.24,
   sheen: 0.25,
   sheenColor: 0x73a68f,
-  envMapIntensity: 0.95,
+  envMapIntensity: 0.7,
 });
 
 const onyxShade = new THREE.MeshPhysicalMaterial({

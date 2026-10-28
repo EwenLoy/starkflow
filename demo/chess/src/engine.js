@@ -1,3 +1,5 @@
+import { Chess } from '../vendor/chess.js/chess.js';
+
 const VALUE = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 };
 
 // Piece-square tables from White's point of view (a8 … h1).
@@ -76,6 +78,10 @@ function evaluate(chess) {
   if (chess.isCheckmate()) return chess.turn() === 'w' ? -99999 : 99999;
   if (chess.isDraw() || chess.isStalemate()) return 0;
   let score = 0;
+  let whiteBishops = 0;
+  let blackBishops = 0;
+  const whitePawns = [0, 0, 0, 0, 0, 0, 0, 0];
+  const blackPawns = [0, 0, 0, 0, 0, 0, 0, 0];
   for (const row of chess.board()) {
     for (const piece of row) {
       if (!piece) continue;
@@ -83,7 +89,24 @@ function evaluate(chess) {
       const pos = table[indexOf(piece.square, piece.color)];
       const value = VALUE[piece.type] + pos;
       score += piece.color === 'w' ? value : -value;
+      if (piece.type === 'b') {
+        if (piece.color === 'w') whiteBishops += 1;
+        else blackBishops += 1;
+      }
+      if (piece.type === 'p') {
+        const file = FILES.indexOf(piece.square[0]);
+        if (piece.color === 'w') whitePawns[file] += 1;
+        else blackPawns[file] += 1;
+      }
     }
+  }
+  if (whiteBishops >= 2) score += 28;
+  if (blackBishops >= 2) score -= 28;
+  for (let file = 0; file < 8; file += 1) {
+    if (whitePawns[file] > 1) score -= 12 * (whitePawns[file] - 1);
+    if (blackPawns[file] > 1) score += 12 * (blackPawns[file] - 1);
+    if (whitePawns[file] && !blackPawns[file]) score += 4;
+    if (blackPawns[file] && !whitePawns[file]) score -= 4;
   }
   return score;
 }
@@ -113,7 +136,7 @@ function search(chess, depth, alpha, beta, color) {
 
 /**
  * A compact depth-3 alpha-beta hint. This is not an opponent — it is just
- * enough to make the “Подсказка” button feel alive and sensible.
+ * enough to make the “Hint” button feel alive and sensible.
  */
 export function findHint(chess, depth = 3) {
   if (!chess || chess.isGameOver()) return null;
@@ -132,6 +155,115 @@ export function findHint(chess, depth = 3) {
     }
   }
   return best ? { from: best.from, to: best.to, promotion: best.promotion || '', san: best.san } : null;
+}
+
+const TIMEOUT = Symbol('timeout');
+
+function quiesce(chess, alpha, beta, color, deadline, depth = 0) {
+  if (Date.now() > deadline) throw TIMEOUT;
+  const side = color === 'w' ? 1 : -1;
+  const stand = evaluate(chess) * side;
+  if (depth >= 3) return stand;
+  if (stand >= beta) return beta;
+  if (stand > alpha) alpha = stand;
+  const captures = chess
+    .moves({ verbose: true })
+    .filter((move) => move.captured || move.promotion);
+  orderMoves(captures);
+  for (const move of captures) {
+    chess.move({ from: move.from, to: move.to, promotion: move.promotion });
+    const score = -quiesce(chess, -beta, -alpha, color === 'w' ? 'b' : 'w', deadline, depth + 1);
+    chess.undo();
+    if (score >= beta) return beta;
+    if (score > alpha) alpha = score;
+  }
+  return alpha;
+}
+
+function searchTimed(chess, depth, alpha, beta, color, deadline) {
+  if (Date.now() > deadline) throw TIMEOUT;
+  if (chess.isGameOver()) return evaluate(chess) * (color === 'w' ? 1 : -1);
+  if (depth === 0) return quiesce(chess, alpha, beta, color, deadline);
+  const moves = orderMoves(chess.moves({ verbose: true }));
+  let best = -Infinity;
+  for (const move of moves) {
+    chess.move({ from: move.from, to: move.to, promotion: move.promotion });
+    const score = -searchTimed(chess, depth - 1, -beta, -alpha, color === 'w' ? 'b' : 'w', deadline);
+    chess.undo();
+    if (score > best) best = score;
+    if (score > alpha) alpha = score;
+    if (alpha >= beta) break;
+  }
+  return best === -Infinity ? evaluate(chess) * (color === 'w' ? 1 : -1) : best;
+}
+
+function rootSearch(chess, depth, deadline, jitter = 0) {
+  const color = chess.turn();
+  const moves = orderMoves(chess.moves({ verbose: true }));
+  let best = null;
+  let bestScore = -Infinity;
+  for (const move of moves) {
+    chess.move({ from: move.from, to: move.to, promotion: move.promotion });
+    let score;
+    try {
+      score = -searchTimed(chess, depth - 1, -Infinity, Infinity, color === 'w' ? 'b' : 'w', deadline);
+    } finally {
+      chess.undo();
+    }
+    if (jitter) score += Math.random() * jitter;
+    if (score > bestScore) {
+      bestScore = score;
+      best = move;
+    }
+  }
+  return best;
+}
+
+function randomMove(chess) {
+  const moves = chess.moves({ verbose: true });
+  if (!moves.length) return null;
+  return moves[Math.floor(Math.random() * moves.length)];
+}
+
+/**
+ * Offline opponent with three personalities. `easy` is deliberately loose,
+ * `medium` looks two plies ahead, and `master` searches up to four plies with
+ * a short quiescence search and a time budget, all inside a Web Worker.
+ */
+export function chooseBotMove(fen, level = 'medium') {
+  const chess = new Chess(fen);
+  if (chess.isGameOver()) return null;
+  if (level === 'easy') {
+    if (Math.random() < 0.5) {
+      const move = randomMove(chess);
+      return move ? { from: move.from, to: move.to, promotion: move.promotion || '', san: move.san } : null;
+    }
+    const best = rootSearch(chess, 1, Date.now() + 450, 90);
+    return best ? { from: best.from, to: best.to, promotion: best.promotion || '', san: best.san } : null;
+  }
+
+  if (level === 'master') {
+    const deadline = Date.now() + 1500;
+    let best = null;
+    for (let depth = 2; depth <= 4; depth += 1) {
+      try {
+        const candidate = rootSearch(chess, depth, deadline, 4);
+        if (candidate) best = candidate;
+      } catch (err) {
+        if (err !== TIMEOUT) throw err;
+        break;
+      }
+      if (Date.now() > deadline - 120) break;
+    }
+    if (best) return { from: best.from, to: best.to, promotion: best.promotion || '', san: best.san };
+    const fallback = randomMove(chess);
+    return fallback ? { from: fallback.from, to: fallback.to, promotion: fallback.promotion || '', san: fallback.san } : null;
+  }
+
+  const best = rootSearch(chess, 2, Date.now() + 900, 18);
+  if (best) return { from: best.from, to: best.to, promotion: best.promotion || '', san: best.san };
+  const fallback = randomMove(chess);
+  return fallback ? { from: fallback.from, to: fallback.to, promotion: fallback.promotion || '', san: fallback.san } : null;
 }
 
 export function openingName(moves, locale = 'en') {

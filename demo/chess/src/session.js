@@ -393,9 +393,17 @@ export class ChessSession {
    * @returns {'ok'|'promotion'|'illegal'|'not-your-turn'|'pending'|'not-playing'}
    */
   tryMove(from, to, promotion = '') {
+    return this.tryColorMove(from, to, promotion, this.myColor);
+  }
+
+  /**
+   * Same move pipeline for a side controlled by the local bot. The online
+   * path never needs this, but it keeps offline and online rules identical.
+   */
+  tryColorMove(from, to, promotion = '', color = this.myColor) {
     if (!this.chess) return 'not-playing';
     if (this.game?.status !== 'playing') return 'not-playing';
-    if (!this.myColor || this.chess.turn() !== this.myColor) return 'not-your-turn';
+    if (!color || this.chess.turn() !== color) return 'not-your-turn';
     if (this.pending) return 'pending';
 
     const candidates = this.legalMoves(from).filter((m) => m.to === to);

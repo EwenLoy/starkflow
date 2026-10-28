@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#07110e" />
+    <meta
+      name="description"
+      content="Ornate Chess Salon — кинематографичные 3D-шахматы онлайн со списком столов. StarkFlow WebSocket, Three.js."
+    />
+    <title>Ornate · 3D Chess Salon</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./src/styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/",
+          "chess.js": "./vendor/chess.js/chess.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <svg class="svg-sprite" aria-hidden="true">
+      <symbol id="i-arrow" viewBox="0 0 24 24">
+        <path d="M4 12h15M13 6l6 6-6 6" />
+      </symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect x="8" y="8" width="11" height="12" rx="2" />
+        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2" />
+      </symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24">
+        <path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7" />
+      </symbol>
+      <symbol id="i-sound" viewBox="0 0 24 24">
+        <path d="M4 9v6h4l5 4V5L8 9H4Z" />
+        <path d="M17 8.5a5 5 0 0 1 0 7M19.5 6a8.5 8.5 0 0 1 0 12" />
+      </symbol>
+      <symbol id="i-mute" viewBox="0 0 24 24">
+        <path d="M4 9v6h4l5 4V5L8 9H4Z" />
+        <path d="m16 9 5 6M21 9l-5 6" />
+      </symbol>
+      <symbol id="i-help" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M9.5 9a2.5 2.5 0 1 1 3.3 2.38c-.8.3-.8 1.05-.8 1.62" />
+        <path d="M12 17h.01" />
+      </symbol>
+      <symbol id="i-expand" viewBox="0 0 24 24">
+        <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5" />
+      </symbol>
+      <symbol id="i-close" viewBox="0 0 24 24">
+        <path d="M6 6l12 12M18 6 6 18" />
+      </symbol>
+      <symbol id="i-link" viewBox="0 0 24 24">
+        <path d="M10 13a5 5 0 0 0 7.07 0l2.12-2.12a5 5 0 0 0-7.07-7.07L10.7 5.22" />
+        <path d="M14 11a5 5 0 0 0-7.07 0L4.8 13.12a5 5 0 0 0 7.07 7.07l1.42-1.42" />
+      </symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24">
+        <path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" />
+        <circle cx="12" cy="13" r="4" />
+      </symbol>
+      <symbol id="i-flag" viewBox="0 0 24 24">
+        <path d="M5 21V4M5 4h11l-1.5 4L16 12H5" />
+      </symbol>
+      <symbol id="i-handshake" viewBox="0 0 24 24">
+        <path d="m8 12 2.5-2.5a2 2 0 0 1 2.8 0L16 12" />
+        <path d="M2 10 5 7h4l3 3 3-3h4l3 3-5 7-3-3-3 3-5-7Z" />
+      </symbol>
+      <symbol id="i-users" viewBox="0 0 24 24">
+        <circle cx="9" cy="8" r="3.2" />
+        <path d="M3.5 20v-2.1A5.4 5.4 0 0 1 9 12.5a5.4 5.4 0 0 1 5.5 5.4V20" />
+        <path d="M16 5.3a3.2 3.2 0 0 1 0 6.1M17 13.5a5.5 5.5 0 0 1 4 5.3V20" />
+      </symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24">
+        <path d="m12 2 1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7L12 2Z" />
+      </symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24">
+        <path d="m8 10 4 4 4-4" />
+      </symbol>
+    </svg>
+
+    <div class="boot" id="boot">
+      <div class="boot__rays"></div>
+      <div class="boot__crest"><span>♞</span></div>
+      <div class="boot__brand">ORNATE</div>
+      <div class="boot__sub">CHESS SALON</div>
+      <div class="boot__track"><i id="bootBar"></i></div>
+      <p class="boot__label" id="bootLabel">Полируем фигуры и зажигаем свечи…</p>
+    </div>
+
+    <div class="app" id="app" aria-hidden="true">
+      <canvas id="scene" aria-label="Трёхмерная шахматная доска"></canvas>
+      <div class="atmosphere" aria-hidden="true"></div>
+      <div class="grain" aria-hidden="true"></div>
+
+      <header class="topbar">
+        <button class="brand" id="brandBtn" type="button" aria-label="Вернуться в лобби">
+          <span class="brand__mark">♞</span>
+          <span class="brand__text">
+            <strong>ORNATE</strong>
+            <small>chess salon</small>
+          </span>
+        </button>
+
+        <div class="topbar__tools">
+          <div class="net-pill is-connecting" id="netPill" title="Состояние соединения">
+            <i class="net-pill__dot"></i>
+            <span id="netText">Соединение…</span>
+            <span class="net-pill__ping" id="pingText"></span>
+          </div>
+          <button class="icon-btn" id="soundBtn" type="button" aria-label="Выключить звук" title="Звук">
+            <svg><use href="#i-sound"></use></svg>
+          </button>
+          <button class="icon-btn" id="helpBtn" type="button" aria-label="Правила и подсказки" title="Помощь">
+            <svg><use href="#i-help"></use></svg>
+          </button>
+          <button class="icon-btn" id="fullscreenBtn" type="button" aria-label="Полный экран" title="Полный экран">
+            <svg><use href="#i-expand"></use></svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="stage">
+        <section class="screen lobby is-active" id="lobby" aria-labelledby="lobbyTitle">
+          <div class="lobby__content">
+            <div class="lobby__hero">
+              <p class="eyebrow"><span class="eyebrow__line"></span>Онлайн-салон · StarkFlow</p>
+              <h1 id="lobbyTitle">Королевский<br /><em>салон</em></h1>
+              <p class="lobby__lead">
+                Шахматы, в которых хочется задержаться. Живой стол из тёмного камня и латуни,
+                скульптурные фигуры и соперник по ту сторону сети.
+              </p>
+
+              <div class="lobby__actions">
+                <button class="btn btn--gold" id="quickBtn" type="button">
+                  <span>Быстрая партия</span>
+                  <svg><use href="#i-arrow"></use></svg>
+                </button>
+                <button class="btn btn--ghost" id="howBtn" type="button">Как играть</button>
+              </div>
+
+              <div class="lobby__stats">
+                <div class="stat">
+                  <strong id="onlineCount">—</strong>
+                  <span>гостей в зале</span>
+                </div>
+                <div class="stat">
+                  <strong id="tableCount">—</strong>
+                  <span>столов открыто</span>
+                </div>
+                <div class="stat">
+                  <strong id="latencyStat">—</strong>
+                  <span>задержка сети</span>
+                </div>
+              </div>
+
+              <p class="lobby__fineprint">
+                <span class="fineprint-dot"></span>
+                Партия на двоих · зрители могут занять место за столом
+              </p>
+            </div>
+
+            <aside class="lobby__panel glass" aria-labelledby="tablesTitle">
+              <div class="lobby__panel-glow" aria-hidden="true"></div>
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">Гостиная</p>
+                  <h2 id="tablesTitle">Открытые столы</h2>
+                </div>
+                <button class="icon-btn icon-btn--small" id="refreshBtn" type="button" aria-label="Обновить список столов" title="Обновить">
+                  <svg><use href="#i-refresh"></use></svg>
+                </button>
+              </div>
+
+              <div class="identity">
+                <label class="field-label" for="nameInput">Ваше имя</label>
+                <div class="identity__row">
+                  <input class="text-input" id="nameInput" maxlength="20" autocomplete="nickname" spellcheck="false" />
+                  <span class="identity__seal" id="playerInitial">Г</span>
+                </div>
+              </div>
+
+              <div class="rooms" id="roomList" aria-live="polite">
+                <div class="room-skeleton"></div>
+                <div class="room-skeleton"></div>
+                <div class="room-skeleton"></div>
+              </div>
+
+              <div class="create-box">
+                <label class="field-label" for="roomNameInput">Новый стол</label>
+                <div class="create-box__row">
+                  <input class="text-input" id="roomNameInput" maxlength="32" autocomplete="off" spellcheck="false" />
+                  <button class="btn btn--gold btn--compact" id="createBtn" type="button">
+                    <span>Создать</span>
+                  </button>
+                </div>
+              </div>
+
+              <p class="lobby__panel-foot">
+                Скопируйте ссылку на стол и отправьте другу — он попадёт сразу в партию.
+              </p>
+            </aside>
+          </div>
+        </section>
+
+        <section class="screen game" id="game" aria-labelledby="roomTitle" hidden>
+          <div class="game__topline">
+            <button class="text-btn" id="leaveBtn" type="button">
+              <svg class="text-btn__arrow"><use href="#i-arrow"></use></svg>
+              <span>В лобби</span>
+            </button>
+            <div class="match-title">
+              <p class="panel-kicker" id="roomKicker">Стол</p>
+              <h2 id="roomTitle">Шахматный салон</h2>
+            </div>
+            <div class="match-tools">
+              <button class="icon-btn icon-btn--small" id="copyBtn" type="button" aria-label="Скопировать ссылку на стол" title="Пригласить друга">
+                <svg><use href="#i-link"></use></svg>
+              </button>
+              <button class="icon-btn icon-btn--small" id="resetCameraBtn" type="button" aria-label="Сбросить камеру" title="Сбросить камеру">
+                <svg><use href="#i-camera"></use></svg>
+              </button>
+            </div>
+          </div>
+
+          <aside class="player-card player-card--black" id="blackCard" aria-label="Чёрные">
+            <div class="player-card__avatar" id="blackAvatar">♚</div>
+            <div class="player-card__body">
+              <span class="player-card__role">Чёрные</span>
+              <strong class="player-card__name" id="blackName">Ждём соперника</strong>
+              <span class="player-card__meta" id="blackMeta">место свободно</span>
+            </div>
+            <span class="player-card__turn" id="blackTurn">ход</span>
+          </aside>
+
+          <aside class="player-card player-card--white" id="whiteCard" aria-label="Белые">
+            <div class="player-card__avatar" id="whiteAvatar">♔</div>
+            <div class="player-card__body">
+              <span class="player-card__role">Белые</span>
+              <strong class="player-card__name" id="whiteName">Хозяин стола</strong>
+              <span class="player-card__meta" id="whiteMeta">создаёт партию</span>
+            </div>
+            <span class="player-card__turn" id="whiteTurn">ход</span>
+          </aside>
+
+          <aside class="game-panel glass" aria-label="Ход партии">
+            <div class="game-panel__status">
+              <div class="status-head">
+                <p class="panel-kicker" id="phaseLabel">Партия</p>
+                <span class="turn-pill" id="turnPill">—</span>
+              </div>
+              <h3 id="statusTitle">Ожидание соперника</h3>
+              <p id="statusText">Стол создан. Пригласите друга по ссылке.</p>
+              <div class="status-meta">
+                <span id="moveCount">0 ходов</span>
+                <i></i>
+                <span id="gameClock">00:00</span>
+                <i></i>
+                <span id="openingName">Дебют впереди</span>
+              </div>
+            </div>
+
+            <div class="invite-strip" id="inviteStrip">
+              <div>
+                <span>Код стола</span>
+                <strong id="inviteCode">————</strong>
+              </div>
+              <button class="mini-btn" id="inviteBtn" type="button">
+                <svg><use href="#i-copy"></use></svg>
+                <span>Копировать</span>
+              </button>
+            </div>
+
+            <div class="move-log">
+              <div class="move-log__head">
+                <span>Ходы</span>
+                <span id="spectatorBadge" class="spectator-badge" hidden>вы наблюдаете</span>
+              </div>
+              <ol class="move-list" id="moveList" aria-live="polite">
+                <li class="move-list__empty">Первый ход ещё впереди.</li>
+              </ol>
+            </div>
+
+            <div class="game-panel__actions">
+              <button class="action-btn" id="drawBtn" type="button">
+                <svg><use href="#i-handshake"></use></svg>
+                <span>Ничья</span>
+              </button>
+              <button class="action-btn action-btn--danger" id="resignBtn" type="button">
+                <svg><use href="#i-flag"></use></svg>
+                <span>Сдаться</span>
+              </button>
+              <button class="action-btn action-btn--wide" id="rematchBtn" type="button" hidden>
+                <svg><use href="#i-spark"></use></svg>
+                <span>Новая партия</span>
+              </button>
+            </div>
+          </aside>
+
+          <div class="board-controls">
+            <button class="pill-btn" id="flipBtn" type="button">
+              <span>Перевернуть</span>
+              <svg><use href="#i-refresh"></use></svg>
+            </button>
+            <button class="pill-btn" id="hintBtn" type="button">
+              <span>Подсказка</span>
+              <svg><use href="#i-spark"></use></svg>
+            </button>
+          </div>
+
+          <div class="turn-toast" id="turnToast" aria-live="polite">
+            <span class="turn-toast__dot"></span>
+            <span id="turnToastText"></span>
+          </div>
+
+          <div class="draw-offer" id="drawOfferBar" hidden>
+            <span id="drawOfferText">Соперник предлагает ничью.</span>
+            <div class="draw-offer__actions">
+              <button class="mini-btn mini-btn--gold" id="acceptDrawBtn" type="button">Принять</button>
+              <button class="mini-btn" id="declineDrawBtn" type="button">Отклонить</button>
+            </div>
+          </div>
+
+          <div class="result-card glass" id="resultCard" hidden>
+            <div class="result-card__sigil" id="resultSigil">♛</div>
+            <p class="panel-kicker" id="resultKicker">Партия завершена</p>
+            <h2 id="resultTitle">Мат</h2>
+            <p id="resultText">Белые выиграли партию.</p>
+            <div class="result-card__actions">
+              <button class="btn btn--gold btn--compact" id="resultRematchBtn" type="button">Реванш</button>
+              <button class="btn btn--ghost btn--compact" id="resultLobbyBtn" type="button">К столам</button>
+            </div>
+          </div>
+
+          <div class="spectator-hint" id="spectatorHint" hidden>
+            <svg><use href="#i-users"></use></svg>
+            <span>Вы в зале как зритель. Место освободится — и вы сможете сесть за стол.</span>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>StarkFlow · WebSocket <i>wss://starkflow.orkestr.run/ws</i></span>
+        <span class="footer__right">Three.js · с любовью к игре</span>
+      </footer>
+
+      <div class="toasts" id="toasts" aria-live="polite"></div>
+      <div class="modal-root" id="modalRoot"></div>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

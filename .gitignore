@@ -108,3 +108,16 @@ gp-aces.txt
 server.zip
 game sdk.zip
 plugin/*.c3addon
+
+# ---- Chess demo ----
+demo/chess/node_modules/
+demo/chess/dist/
+demo/chess/.chrome-profile/
+demo/chess/.vite/
+demo/chess/shot-*.png
+demo/chess/three.tgz
+demo/chess/package/
+!demo/chess/vendor/three/build/
+!demo/chess/vendor/three/build/**
+.npm-cache/
+tmp/

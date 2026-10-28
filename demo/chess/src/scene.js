@@ -1,0 +1,1254 @@
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { createPiece, pieceGlyph } from './pieces.js';
+
+const FILES = 'abcdefgh';
+const PIECE_Y = 0.105;
+const TAU = Math.PI * 2;
+
+const easeOut = (t) => 1 - (1 - t) ** 3;
+const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+
+function squarePos(square, y = PIECE_Y) {
+  const file = FILES.indexOf(square[0]);
+  const rank = Number(square[1]);
+  return new THREE.Vector3(file - 3.5, y, 3.5 - (rank - 1));
+}
+
+function squareAt(x, z) {
+  const file = Math.floor(x + 4);
+  const rank = 8 - Math.floor(z + 4);
+  if (file < 0 || file > 7 || rank < 1 || rank > 8) return null;
+  return `${FILES[file]}${rank}`;
+}
+
+function parseFen(fen) {
+  const map = new Map();
+  const rows = String(fen).split(' ')[0].split('/');
+  if (rows.length !== 8) return map;
+  const types = { p: 'p', n: 'n', b: 'b', r: 'r', q: 'q', k: 'k' };
+  rows.forEach((row, r) => {
+    let file = 0;
+    for (const ch of row) {
+      if (/\d/.test(ch)) {
+        file += Number(ch);
+        continue;
+      }
+      const color = ch === ch.toUpperCase() ? 'w' : 'b';
+      const type = types[ch.toLowerCase()];
+      if (type && file < 8) map.set(`${FILES[file]}${8 - r}`, { type, color });
+      file += 1;
+    }
+  });
+  return map;
+}
+
+function seeded(seed) {
+  let s = seed % 2147483647;
+  if (s <= 0) s += 2147483646;
+  return () => {
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+function marbleTexture({ base, vein, fleck, seed = 7, dark = false }) {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const rand = seeded(seed);
+
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, size, size);
+
+  const wash = ctx.createRadialGradient(size * 0.25, size * 0.2, 10, size * 0.6, size * 0.65, size * 0.9);
+  wash.addColorStop(0, dark ? 'rgba(70,130,105,.16)' : 'rgba(255,255,255,.22)');
+  wash.addColorStop(0.55, 'rgba(0,0,0,0)');
+  wash.addColorStop(1, dark ? 'rgba(0,0,0,.34)' : 'rgba(120,86,38,.08)');
+  ctx.fillStyle = wash;
+  ctx.fillRect(0, 0, size, size);
+
+  for (let i = 0; i < 26; i += 1) {
+    const x = rand() * size;
+    const y = rand() * size;
+    const length = 70 + rand() * 420;
+    const angle = (rand() - 0.5) * 1.2 + (i % 3 === 0 ? 0.8 : 0);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    let px = x;
+    let py = y;
+    for (let j = 0; j < 8; j += 1) {
+      px += Math.cos(angle + (rand() - 0.5) * 0.42) * (length / 8);
+      py += Math.sin(angle + (rand() - 0.5) * 0.42) * (length / 8);
+      ctx.lineTo(px, py);
+    }
+    ctx.strokeStyle = vein;
+    ctx.globalAlpha = 0.08 + rand() * 0.22;
+    ctx.lineWidth = 0.55 + rand() * 2.4;
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  for (let i = 0; i < 900; i += 1) {
+    const x = rand() * size;
+    const y = rand() * size;
+    ctx.fillStyle = rand() > 0.45 ? fleck : 'rgba(0,0,0,.16)';
+    ctx.globalAlpha = 0.035 + rand() * 0.14;
+    ctx.fillRect(x, y, 0.5 + rand() * 1.5, 0.5 + rand() * 1.5);
+  }
+  ctx.globalAlpha = 1;
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = 8;
+  return texture;
+}
+
+function labelTexture(text) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, 128, 128);
+  ctx.fillStyle = 'rgba(218,184,119,.82)';
+  ctx.font = '500 62px Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 64, 67);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+function radialTexture(inner = 'rgba(230,196,124,.34)', outer = 'rgba(0,0,0,0)') {
+  const size = 256;
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, inner);
+  g.addColorStop(0.35, inner.replace(/[\d.]+\)$/, '0.16)'));
+  g.addColorStop(1, outer);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+export class ChessScene {
+  constructor(canvas, { onSquareClick } = {}) {
+    this.canvas = canvas;
+    this.onSquareClick = onSquareClick || (() => {});
+    this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.FogExp2(0x050c09, 0.022);
+
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.72;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.setClearColor(0x050c09, 0);
+
+    this.camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.1, 100);
+    this.camera.position.set(0.4, 9.2, 11.6);
+
+    this.controls = new OrbitControls(this.camera, canvas);
+    this.controls.target.set(0, 0.35, 0);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.065;
+    this.controls.enablePan = false;
+    this.controls.rotateSpeed = 0.5;
+    this.controls.zoomSpeed = 0.65;
+    this.controls.minDistance = 8.4;
+    this.controls.maxDistance = 18;
+    this.controls.minPolarAngle = 0.56;
+    this.controls.maxPolarAngle = 1.35;
+    this.controls.autoRotateSpeed = 0.55;
+    this.controls.update();
+
+    this.raycaster = new THREE.Raycaster();
+    this.pointer = new THREE.Vector2();
+    this.pointerDown = null;
+    this.hoverSquare = null;
+    this.interactive = false;
+    this.viewSide = 'w';
+    this.mode = 'lobby';
+    this.pieces = new Map();
+    this.animating = false;
+    this.moveAnims = [];
+    this.spawnAnims = [];
+    this.cameraTween = null;
+    this.particles = [];
+    this.hintTimer = null;
+    this.clock = new THREE.Clock();
+    this.time = 0;
+    this._raf = 0;
+
+    this.#setupEnvironment();
+    this.#setupLights();
+    this.#buildBoard();
+    this.#buildRoom();
+    this.#buildOverlays();
+    this.#setupPost();
+    this.#bindEvents();
+    this.#loop();
+  }
+
+  /* ------------------------------------------------------------ build */
+  #setupEnvironment() {
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    const room = new RoomEnvironment();
+    this.envMap = pmrem.fromScene(room, 0.04).texture;
+    this.scene.environment = this.envMap;
+    this.scene.environmentIntensity = 0.2;
+    room.dispose?.();
+    pmrem.dispose();
+  }
+
+  #setupLights() {
+    this.scene.add(new THREE.HemisphereLight(0x9dc6b0, 0x07110d, 0.38));
+
+    const key = new THREE.SpotLight(0xffd7a0, 260, 30, 0.58, 0.76, 1.7);
+    key.position.set(-1.5, 13.5, 7);
+    key.target.position.set(0, 0, 0);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.camera.near = 1;
+    key.shadow.camera.far = 26;
+    key.shadow.bias = -0.00035;
+    key.shadow.normalBias = 0.018;
+    this.scene.add(key, key.target);
+    this.keyLight = key;
+
+    const rim = new THREE.SpotLight(0x6ea98f, 110, 28, 0.72, 0.88, 1.8);
+    rim.position.set(8.5, 8, -7);
+    rim.target.position.set(0, 0.2, 0);
+    this.scene.add(rim, rim.target);
+
+    const fill = new THREE.PointLight(0xc98b4c, 9, 18, 1.8);
+    fill.position.set(-8, 3.2, 5.5);
+    this.scene.add(fill);
+
+    const under = new THREE.PointLight(0x2b7b5e, 7, 12, 2);
+    under.position.set(3, 0.6, 2);
+    this.scene.add(under);
+
+    this.brazierLights = [];
+    for (const x of [-6.2, 6.2]) {
+      const flame = new THREE.PointLight(0xffb55e, 3, 7, 2);
+      flame.position.set(x, 2.1, -4.8);
+      this.scene.add(flame);
+      this.brazierLights.push(flame);
+    }
+  }
+
+  #buildBoard() {
+    const lightTex = marbleTexture({
+      base: '#e9dfc7',
+      vein: '#988a70',
+      fleck: 'rgba(255,248,223,.7)',
+      seed: 11,
+    });
+    const darkTex = marbleTexture({
+      base: '#103c2e',
+      vein: '#04130e',
+      fleck: 'rgba(174,218,187,.35)',
+      seed: 31,
+      dark: true,
+    });
+
+    const lightMat = new THREE.MeshPhysicalMaterial({
+      map: lightTex,
+      bumpMap: lightTex,
+      bumpScale: 0.012,
+      roughness: 0.37,
+      metalness: 0.02,
+      clearcoat: 0.22,
+      clearcoatRoughness: 0.55,
+      envMapIntensity: 0.55,
+    });
+    const darkMat = new THREE.MeshPhysicalMaterial({
+      map: darkTex,
+      bumpMap: darkTex,
+      bumpScale: 0.015,
+      roughness: 0.3,
+      metalness: 0.08,
+      clearcoat: 0.4,
+      clearcoatRoughness: 0.42,
+      envMapIntensity: 0.7,
+    });
+    this.squareMaterials = { light: lightMat, dark: darkMat };
+
+    const wood = new THREE.MeshPhysicalMaterial({
+      color: 0x142720,
+      roughness: 0.29,
+      metalness: 0.24,
+      clearcoat: 0.45,
+      clearcoatRoughness: 0.3,
+      envMapIntensity: 0.6,
+    });
+    const stone = new THREE.MeshPhysicalMaterial({
+      color: 0x0a1511,
+      roughness: 0.35,
+      metalness: 0.16,
+      clearcoat: 0.35,
+      envMapIntensity: 0.42,
+    });
+    const brass = new THREE.MeshStandardMaterial({
+      color: 0xb78e4f,
+      roughness: 0.27,
+      metalness: 0.92,
+      envMapIntensity: 1.1,
+    });
+    const brassDim = new THREE.MeshStandardMaterial({
+      color: 0x6f5330,
+      roughness: 0.4,
+      metalness: 0.8,
+      envMapIntensity: 0.7,
+    });
+    this.brassMaterial = brass;
+
+    this.boardGroup = new THREE.Group();
+    this.scene.add(this.boardGroup);
+
+    const plinth = new THREE.Mesh(new RoundedBoxGeometry(9.65, 0.5, 9.65, 4, 0.12), stone);
+    plinth.position.y = -0.41;
+    plinth.receiveShadow = true;
+    plinth.castShadow = true;
+    this.boardGroup.add(plinth);
+
+    const frame = new THREE.Mesh(new RoundedBoxGeometry(9.1, 0.33, 9.1, 4, 0.075), wood);
+    frame.position.y = -0.12;
+    frame.receiveShadow = true;
+    frame.castShadow = true;
+    this.boardGroup.add(frame);
+
+    const brassFrame = new THREE.Mesh(new THREE.BoxGeometry(9.18, 0.035, 9.18), brass);
+    brassFrame.position.y = 0.015;
+    brassFrame.receiveShadow = true;
+    this.boardGroup.add(brassFrame);
+
+    const innerFrame = new THREE.Mesh(new THREE.BoxGeometry(8.22, 0.038, 8.22), stone);
+    innerFrame.position.y = 0.027;
+    innerFrame.receiveShadow = true;
+    this.boardGroup.add(innerFrame);
+
+    const squareGeometry = new RoundedBoxGeometry(0.965, 0.065, 0.965, 3, 0.018);
+    for (let rank = 1; rank <= 8; rank += 1) {
+      for (let file = 0; file < 8; file += 1) {
+        const light = (file + rank) % 2 === 0;
+        const tile = new THREE.Mesh(squareGeometry, light ? lightMat : darkMat);
+        tile.position.set(file - 3.5, 0.047, 3.5 - (rank - 1));
+        tile.receiveShadow = true;
+        this.boardGroup.add(tile);
+      }
+    }
+
+    // Thin brass separators around the playing field.
+    for (const offset of [-4.08, 4.08]) {
+      const h = new THREE.Mesh(new THREE.BoxGeometry(8.18, 0.018, 0.028), brass);
+      h.position.set(0, 0.084, offset);
+      this.boardGroup.add(h);
+      const v = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.018, 8.18), brass);
+      v.position.set(offset, 0.084, 0);
+      this.boardGroup.add(v);
+    }
+
+    // Engraved corner ornaments.
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const ornament = new THREE.Group();
+        const arc = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.012, 6, 24, Math.PI / 2), brass);
+        arc.rotation.x = Math.PI / 2;
+        arc.rotation.z = sx * sz > 0 ? Math.PI : Math.PI / 2;
+        arc.position.set(sx * 4.22, 0.083, sz * 4.22);
+        ornament.add(arc);
+        const dot = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8), brassDim);
+        dot.position.set(sx * 4.39, 0.087, sz * 4.39);
+        ornament.add(dot);
+        this.boardGroup.add(ornament);
+      }
+    }
+
+    this.#buildLabels();
+    this.#buildTable();
+
+    const hit = new THREE.Mesh(
+      new THREE.PlaneGeometry(8.24, 8.24),
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+    );
+    hit.rotation.x = -Math.PI / 2;
+    hit.position.y = 0.088;
+    this.boardGroup.add(hit);
+    this.hitPlane = hit;
+  }
+
+  #buildLabels() {
+    const labelGroup = new THREE.Group();
+    const mat = (text) =>
+      new THREE.MeshBasicMaterial({
+        map: labelTexture(text),
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      });
+    const geom = new THREE.PlaneGeometry(0.45, 0.45);
+
+    for (let i = 0; i < 8; i += 1) {
+      const letter = FILES[i];
+      const x = i - 3.5;
+      for (const [z, rot] of [
+        [4.47, 0],
+        [-4.47, Math.PI],
+      ]) {
+        const m = new THREE.Mesh(geom, mat(letter));
+        m.rotation.set(-Math.PI / 2, 0, rot);
+        m.position.set(x, 0.086, z);
+        labelGroup.add(m);
+      }
+    }
+    for (let rank = 1; rank <= 8; rank += 1) {
+      const z = 3.5 - (rank - 1);
+      for (const [x, rot] of [
+        [-4.47, -Math.PI / 2],
+        [4.47, Math.PI / 2],
+      ]) {
+        const m = new THREE.Mesh(geom, mat(String(rank)));
+        m.rotation.set(-Math.PI / 2, 0, rot);
+        m.position.set(x, 0.086, z);
+        labelGroup.add(m);
+      }
+    }
+    this.boardGroup.add(labelGroup);
+  }
+
+  #buildTable() {
+    const tableMat = new THREE.MeshPhysicalMaterial({
+      color: 0x101f19,
+      roughness: 0.24,
+      metalness: 0.4,
+      clearcoat: 0.3,
+      envMapIntensity: 0.35,
+    });
+    const table = new THREE.Mesh(new THREE.CylinderGeometry(7.2, 7.6, 0.38, 72), tableMat);
+    table.position.y = -0.86;
+    table.receiveShadow = true;
+    this.scene.add(table);
+
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(7.19, 0.035, 10, 120), this.brassMaterial);
+    rim.rotation.x = Math.PI / 2;
+    rim.position.y = -0.665;
+    this.scene.add(rim);
+
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0x07110d,
+      roughness: 0.36,
+      metalness: 0.48,
+      envMapIntensity: 0.25,
+    });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -1.06;
+    floor.receiveShadow = true;
+    this.scene.add(floor);
+
+    for (const [radius, opacity] of [
+      [8.4, 0.22],
+      [10.2, 0.13],
+      [13.2, 0.07],
+    ]) {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(radius, 0.018, 6, 160),
+        new THREE.MeshBasicMaterial({ color: 0xb18b52, transparent: true, opacity, blending: THREE.AdditiveBlending }),
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = -1.045;
+      this.scene.add(ring);
+    }
+
+    const glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(17, 17),
+      new THREE.MeshBasicMaterial({
+        map: radialTexture('rgba(78,150,116,.13)', 'rgba(0,0,0,0)'),
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = -1.04;
+    this.scene.add(glow);
+  }
+
+  #buildRoom() {
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x07110d, roughness: 0.92, metalness: 0.05 });
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(40, 17), wallMat);
+    wall.position.set(0, 5.5, -13);
+    this.scene.add(wall);
+
+    const arch = new THREE.Mesh(
+      new THREE.TorusGeometry(5.1, 0.055, 12, 180),
+      new THREE.MeshStandardMaterial({
+        color: 0xb08a50,
+        roughness: 0.3,
+        metalness: 0.9,
+        emissive: 0x4c3514,
+        emissiveIntensity: 0.35,
+      }),
+    );
+    arch.position.set(0, 3.35, -9.2);
+    this.scene.add(arch);
+
+    const halo = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: radialTexture('rgba(178,139,75,.13)', 'rgba(0,0,0,0)'),
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    halo.position.set(0, 4.2, -10.5);
+    halo.scale.set(18, 18, 1);
+    this.scene.add(halo);
+
+    const columnMat = new THREE.MeshStandardMaterial({ color: 0x0b1813, roughness: 0.62, metalness: 0.2 });
+    for (const x of [-8.2, 8.2]) {
+      const column = new THREE.Group();
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.46, 6.4, 24), columnMat);
+      shaft.position.y = 3.2;
+      shaft.castShadow = true;
+      column.add(shaft);
+      for (const y of [0.28, 6.2]) {
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.22, 24), this.brassMaterial);
+        cap.position.y = y;
+        column.add(cap);
+      }
+      column.position.set(x, -1, -7.4);
+      this.scene.add(column);
+    }
+
+    // Two braziers for depth and a second warm source.
+    for (const x of [-6.2, 6.2]) {
+      const group = new THREE.Group();
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.19, 1.9, 16), this.brassMaterial);
+      stem.position.y = 0.95;
+      group.add(stem);
+      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.2, 0.3, 20), this.brassMaterial);
+      bowl.position.y = 1.95;
+      group.add(bowl);
+      const flame = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: radialTexture('rgba(255,164,69,.95)', 'rgba(255,76,0,0)'),
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      );
+      flame.position.y = 2.32;
+      flame.scale.set(0.72, 1.15, 1);
+      group.add(flame);
+      group.position.set(x, -1.03, -4.8);
+      this.scene.add(group);
+      this.brazierFlames = this.brazierFlames || [];
+      this.brazierFlames.push(flame);
+    }
+
+    const coneMat = new THREE.MeshBasicMaterial({
+      color: 0xd8b477,
+      transparent: true,
+      opacity: 0.008,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    for (const x of [-2.6, 2.6]) {
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(2.8, 7, 32, 1, true), coneMat);
+      cone.position.set(x, 3.15, 0.4);
+      this.scene.add(cone);
+    }
+
+    // Fine suspended dust.
+    const count = 180;
+    const positions = new Float32Array(count * 3);
+    this.dustBase = new Float32Array(count * 3);
+    const rand = seeded(97);
+    for (let i = 0; i < count; i += 1) {
+      const x = (rand() - 0.5) * 22;
+      const y = rand() * 9;
+      const z = (rand() - 0.5) * 18 - 2;
+      positions[i * 3] = x;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = z;
+      this.dustBase[i * 3] = x;
+      this.dustBase[i * 3 + 1] = y;
+      this.dustBase[i * 3 + 2] = z;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const dust = new THREE.Points(
+      geom,
+      new THREE.PointsMaterial({
+        color: 0xe7cf9d,
+        size: 0.032,
+        transparent: true,
+        opacity: 0.42,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        sizeAttenuation: true,
+      }),
+    );
+    this.dust = dust;
+    this.scene.add(dust);
+  }
+
+  #buildOverlays() {
+    this.selectionGroup = new THREE.Group();
+    this.legalGroup = new THREE.Group();
+    this.lastMoveGroup = new THREE.Group();
+    this.checkGroup = new THREE.Group();
+    this.hintGroup = new THREE.Group();
+    this.scene.add(this.selectionGroup, this.legalGroup, this.lastMoveGroup, this.checkGroup, this.hintGroup);
+
+    this.hoverRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.38, 0.43, 48),
+      new THREE.MeshBasicMaterial({
+        color: 0xf3d99d,
+        transparent: true,
+        opacity: 0.55,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    this.hoverRing.rotation.x = -Math.PI / 2;
+    this.hoverRing.position.y = 0.086;
+    this.hoverRing.visible = false;
+    this.scene.add(this.hoverRing);
+  }
+
+  #setupPost() {
+    const mobile = window.matchMedia('(max-width: 820px)').matches;
+    this.usePost = !mobile;
+    if (!this.usePost) return;
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloom = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      0.18,
+      0.55,
+      0.95,
+    );
+    this.composer.addPass(this.bloom);
+    this.composer.addPass(new OutputPass());
+  }
+
+  #bindEvents() {
+    this._onResize = () => this.resize();
+    this._onMove = (e) => this.#onPointerMove(e);
+    this._onDown = (e) => {
+      this.pointerDown = { x: e.clientX, y: e.clientY };
+      this.canvas.style.cursor = 'grabbing';
+    };
+    this._onUp = (e) => {
+      const start = this.pointerDown;
+      this.pointerDown = null;
+      this.canvas.style.cursor = this.hoverSquare ? 'pointer' : 'grab';
+      if (!start) return;
+      const dist = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+      if (dist > 7) return;
+      const square = this.#pickSquare(e.clientX, e.clientY);
+      if (square) this.onSquareClick(square);
+    };
+    this._onLeave = () => {
+      this.hoverSquare = null;
+      this.hoverRing.visible = false;
+      this.canvas.style.cursor = 'default';
+    };
+
+    window.addEventListener('resize', this._onResize);
+    this.canvas.addEventListener('pointermove', this._onMove);
+    this.canvas.addEventListener('pointerdown', this._onDown);
+    this.canvas.addEventListener('pointerup', this._onUp);
+    this.canvas.addEventListener('pointerleave', this._onLeave);
+    this.controls.addEventListener('start', () => {
+      this.cameraTween = null;
+      this.controls.autoRotate = false;
+    });
+  }
+
+  resize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, w < 820 ? 1.6 : 2));
+    this.renderer.setSize(w, h);
+    this.composer?.setSize(w, h);
+  }
+
+  /* ------------------------------------------------------- camera / mode */
+  setMode(mode) {
+    this.mode = mode;
+    if (mode === 'lobby') {
+      this.setInteractive(false);
+      this.controls.autoRotate = true;
+      this.controls.autoRotateSpeed = 0.55;
+      this.#animateCamera(new THREE.Vector3(8.4, 7.8, 12.8), new THREE.Vector3(0, 0.55, 0), 1.8);
+    } else {
+      this.controls.autoRotate = false;
+      this.#animateCamera(this.#sidePosition(this.viewSide), new THREE.Vector3(0, 0.42, 0), 1.4);
+    }
+  }
+
+  #sidePosition(side) {
+    if (side === 'b') return new THREE.Vector3(-0.25, 9.4, -11.7);
+    return new THREE.Vector3(0.25, 9.4, 11.7);
+  }
+
+  setViewSide(side, animate = true) {
+    this.viewSide = side === 'b' ? 'b' : 'w';
+    if (this.mode !== 'game') return;
+    this.controls.autoRotate = false;
+    if (animate) this.#animateCamera(this.#sidePosition(this.viewSide), new THREE.Vector3(0, 0.42, 0), 1.35);
+    else {
+      this.camera.position.copy(this.#sidePosition(this.viewSide));
+      this.controls.target.set(0, 0.42, 0);
+      this.controls.update();
+    }
+  }
+
+  flipView() {
+    this.setViewSide(this.viewSide === 'w' ? 'b' : 'w');
+  }
+
+  resetCamera() {
+    this.setViewSide(this.viewSide, true);
+  }
+
+  #animateCamera(toPos, toTarget, duration) {
+    this.cameraTween = {
+      t: 0,
+      duration,
+      fromPos: this.camera.position.clone(),
+      toPos: toPos.clone(),
+      fromTarget: this.controls.target.clone(),
+      toTarget: toTarget.clone(),
+    };
+    this.controls.enabled = false;
+  }
+
+  setInteractive(value) {
+    this.interactive = !!value;
+    this.canvas.style.cursor = value ? 'grab' : 'default';
+    if (!value) {
+      this.hoverSquare = null;
+      this.hoverRing.visible = false;
+    }
+  }
+
+  /* ---------------------------------------------------------- position */
+  setPosition(fen, { animate = false, lastMove = null, initial = false, duration = 0.42 } = {}) {
+    const nextBoard = parseFen(fen);
+    if (!this.pieces.size || initial) {
+      this.#rebuild(nextBoard, { drop: true });
+      this.#updateLastMove(lastMove);
+      return;
+    }
+    if (!animate || !lastMove) {
+      this.#rebuild(nextBoard, { drop: false });
+      this.#updateLastMove(lastMove);
+      return;
+    }
+    this.#animateMove(nextBoard, lastMove, duration);
+  }
+
+  #animateMove(nextBoard, lastMove, duration) {
+    const { from, to } = lastMove;
+    const moving = this.pieces.get(from);
+    if (!moving) {
+      this.#rebuild(nextBoard, { drop: false });
+      this.#updateLastMove(lastMove);
+      return;
+    }
+
+    const start = moving.position.clone();
+    const end = squarePos(to);
+    const isKnight = moving.userData.type === 'n';
+    this.animating = true;
+    this.moveAnims = [
+      {
+        mesh: moving,
+        start,
+        end,
+        t: 0,
+        duration,
+        arc: isKnight ? 0.7 : 0.18,
+      },
+    ];
+
+    const captureSquare = lastMove.enPassant ? `${to[0]}${from[1]}` : to;
+    const captured = this.pieces.get(captureSquare);
+    if (captured && captured !== moving) {
+      this.pieces.delete(captureSquare);
+      this.moveAnims.push({
+        mesh: captured,
+        start: captured.position.clone(),
+        end: captured.position.clone().add(new THREE.Vector3(0, -0.35, 0)),
+        t: 0,
+        duration: duration * 0.82,
+        sink: true,
+        spin: (Math.random() - 0.5) * 0.8,
+      });
+      this.#burst(captured.position.clone().add(new THREE.Vector3(0, 0.4, 0)), 0xe2c487, 14);
+    }
+
+    // Castling: move the rook together with the king.
+    let castlingRook = null;
+    if (moving.userData.type === 'k' && Math.abs(FILES.indexOf(to[0]) - FILES.indexOf(from[0])) === 2) {
+      const rank = from[1];
+      const rookFrom = to[0] === 'g' ? `h${rank}` : `a${rank}`;
+      const rookTo = to[0] === 'g' ? `f${rank}` : `d${rank}`;
+      const rook = this.pieces.get(rookFrom);
+      if (rook) {
+        castlingRook = { rook, from: rookFrom, to: rookTo };
+        this.animating = true;
+        this.moveAnims.push({
+          mesh: rook,
+          start: rook.position.clone(),
+          end: squarePos(rookTo),
+          t: 0,
+          duration,
+          arc: 0.1,
+        });
+      }
+    }
+
+    this.pieces.delete(from);
+    this.pieces.set(to, moving);
+    if (castlingRook) {
+      this.pieces.delete(castlingRook.from);
+      this.pieces.set(castlingRook.to, castlingRook.rook);
+    }
+
+    this.#updateLastMove(lastMove);
+    this.#clearSelection();
+
+    setTimeout(() => {
+      this.#rebuild(nextBoard, { drop: false });
+      this.animating = false;
+      this.moveAnims = [];
+    }, duration * 1000 + 30);
+  }
+
+  #rebuild(nextBoard, { drop = false } = {}) {
+    for (const [square, group] of [...this.pieces.entries()]) {
+      const piece = nextBoard.get(square);
+      if (!piece || piece.type !== group.userData.type || piece.color !== group.userData.color) {
+        this.boardGroup.remove(group);
+        this.pieces.delete(square);
+      }
+    }
+    let index = 0;
+    for (const [square, piece] of nextBoard.entries()) {
+      if (this.pieces.has(square)) continue;
+      const group = createPiece(piece.type, piece.color);
+      group.position.copy(squarePos(square));
+      group.rotation.y = piece.type === 'n' ? (piece.color === 'w' ? Math.PI : 0) : 0;
+      group.userData.square = square;
+      this.boardGroup.add(group);
+      this.pieces.set(square, group);
+      if (drop) this.#queueDrop(group, index * 26 + 80);
+      index += 1;
+    }
+  }
+
+  #queueDrop(group, delay) {
+    const target = group.position.clone();
+    group.position.y = target.y + 1.8;
+    group.scale.setScalar(0.82);
+    this.spawnAnims.push({ group, target, t: -delay / 1000, duration: 0.72 });
+  }
+
+  clearBoard() {
+    for (const group of this.pieces.values()) this.boardGroup.remove(group);
+    this.pieces.clear();
+    this.#clearSelection();
+  }
+
+  /* ------------------------------------------------------------ markers */
+  #clearGroup(group) {
+    while (group.children.length) {
+      const child = group.children.pop();
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose?.());
+      else child.material?.dispose?.();
+      group.remove(child);
+    }
+  }
+
+  clearSelection() {
+    this.#clearSelection();
+  }
+
+  #clearSelection() {
+    this.#clearGroup(this.selectionGroup);
+    this.#clearGroup(this.legalGroup);
+  }
+
+  selectSquare(square, moves = []) {
+    this.#clearSelection();
+    const pos = squarePos(square, 0.09);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.39, 0.018, 10, 52),
+      new THREE.MeshBasicMaterial({
+        color: 0xf5d692,
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.copy(pos);
+    this.selectionGroup.add(ring);
+
+    for (const [i, move] of moves.entries()) {
+      const target = squarePos(move.to, 0.092);
+      const capture = !!move.captured;
+      const geom = capture
+        ? new THREE.TorusGeometry(0.36, 0.026, 8, 40)
+        : new THREE.CircleGeometry(0.11, 24);
+      const marker = new THREE.Mesh(
+        geom,
+        new THREE.MeshBasicMaterial({
+          color: capture ? 0xe7ad74 : 0xcfe3c2,
+          transparent: true,
+          opacity: capture ? 0.72 : 0.58,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      );
+      marker.rotation.x = -Math.PI / 2;
+      marker.position.copy(target);
+      marker.userData.phase = i * 0.35;
+      marker.userData.baseScale = 1;
+      this.legalGroup.add(marker);
+    }
+  }
+
+  #updateLastMove(lastMove) {
+    this.#clearGroup(this.lastMoveGroup);
+    if (!lastMove?.from || !lastMove?.to) return;
+    for (const square of [lastMove.from, lastMove.to]) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: lastMove.color === 'b' ? 0x72b596 : 0xd6b371,
+        transparent: true,
+        opacity: 0.13,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.88, 0.88), mat);
+      glow.rotation.x = -Math.PI / 2;
+      glow.position.copy(squarePos(square, 0.083));
+      this.lastMoveGroup.add(glow);
+      const border = new THREE.Mesh(
+        new THREE.RingGeometry(0.4, 0.42, 4, 1),
+        new THREE.MeshBasicMaterial({
+          color: lastMove.color === 'b' ? 0x8bd0ac : 0xefd196,
+          transparent: true,
+          opacity: 0.5,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
+      );
+      border.rotation.x = -Math.PI / 2;
+      border.rotation.z = Math.PI / 4;
+      border.position.copy(squarePos(square, 0.085));
+      this.lastMoveGroup.add(border);
+    }
+  }
+
+  setCheck(square) {
+    this.#clearGroup(this.checkGroup);
+    if (!square) return;
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.41, 0.03, 10, 48),
+      new THREE.MeshBasicMaterial({
+        color: 0xff6b57,
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.copy(squarePos(square, 0.094));
+    this.checkGroup.add(ring);
+    const light = new THREE.PointLight(0xff4f38, 5, 2.2, 2);
+    light.position.copy(squarePos(square, 0.7));
+    this.checkGroup.add(light);
+  }
+
+  setHint(move, duration = 4200) {
+    clearTimeout(this.hintTimer);
+    this.#clearGroup(this.hintGroup);
+    if (!move?.from || !move?.to) return;
+    for (const [square, color] of [
+      [move.from, 0x8cd9b2],
+      [move.to, 0xf1cd84],
+    ]) {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.4, 0.022, 8, 48),
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 0.9,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.copy(squarePos(square, 0.096));
+      this.hintGroup.add(ring);
+    }
+    const a = squarePos(move.from, 0.12);
+    const b = squarePos(move.to, 0.12);
+    const dir = b.clone().sub(a);
+    const len = dir.length();
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    const shaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.018, 0.018, len, 8),
+      new THREE.MeshBasicMaterial({
+        color: 0xe7c98d,
+        transparent: true,
+        opacity: 0.6,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    shaft.position.copy(mid);
+    shaft.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+    this.hintGroup.add(shaft);
+    this.hintTimer = setTimeout(() => this.#clearGroup(this.hintGroup), duration);
+  }
+
+  #burst(origin, color = 0xe2c487, count = 24) {
+    const geometry = new THREE.SphereGeometry(0.018, 5, 4);
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 1,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    for (let i = 0; i < count; i += 1) {
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.copy(origin);
+      const angle = Math.random() * TAU;
+      const speed = 0.4 + Math.random() * 1.2;
+      this.scene.add(mesh);
+      this.particles.push({
+        mesh,
+        velocity: new THREE.Vector3(Math.cos(angle) * speed * 0.55, 0.6 + Math.random() * 1.1, Math.sin(angle) * speed * 0.55),
+        life: 0,
+        maxLife: 0.65 + Math.random() * 0.55,
+      });
+    }
+  }
+
+  celebrate(winner) {
+    const origin = new THREE.Vector3(0, 0.8, winner === 'b' ? -2 : 2);
+    this.#burst(origin, winner === 'b' ? 0x8bd5b2 : 0xf0cf8b, 60);
+    this.#burst(origin.clone().add(new THREE.Vector3(0, 0.7, 0)), 0xffe6b0, 35);
+    if (this.keyLight) {
+      this.keyLight.color.set(winner === 'b' ? 0x9fe3c0 : 0xffd995);
+      this.keyLight.intensity = 900;
+      setTimeout(() => {
+        if (!this.keyLight) return;
+        this.keyLight.color.set(0xffd9a3);
+        this.keyLight.intensity = 620;
+      }, 1900);
+    }
+  }
+
+  /* -------------------------------------------------------------- input */
+  #pickSquare(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hits = this.raycaster.intersectObject(this.hitPlane, false);
+    if (!hits.length) return null;
+    const p = hits[0].point;
+    return squareAt(p.x, p.z);
+  }
+
+  #onPointerMove(e) {
+    if (!this.interactive || this.pointerDown) {
+      if (this.hoverRing) this.hoverRing.visible = false;
+      return;
+    }
+    const square = this.#pickSquare(e.clientX, e.clientY);
+    if (square !== this.hoverSquare) {
+      this.hoverSquare = square;
+      this.canvas.style.cursor = square ? 'pointer' : 'grab';
+      if (square) {
+        this.hoverRing.visible = true;
+        this.hoverRing.position.copy(squarePos(square, 0.086));
+      } else {
+        this.hoverRing.visible = false;
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------- update */
+  #loop() {
+    this._raf = requestAnimationFrame(() => this.#loop());
+    const dt = Math.min(this.clock.getDelta(), 0.05);
+    this.time += dt;
+
+    this.controls.update();
+    this.#updateCamera(dt);
+    this.#updatePieces(dt);
+    this.#updateMarkers(dt);
+    this.#updateDust(dt);
+    this.#updateParticles(dt);
+
+    if (this.brazierFlames) {
+      for (const [i, flame] of this.brazierFlames.entries()) {
+        const flicker = 0.92 + Math.sin(this.time * 8.2 + i * 3.1) * 0.08 + Math.sin(this.time * 13.7 + i) * 0.04;
+        flame.scale.set(0.72 * flicker, 1.15 * flicker, 1);
+        if (this.brazierLights?.[i]) this.brazierLights[i].intensity = 8 + flicker * 3;
+      }
+    }
+
+    if (this.usePost && this.composer) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
+  }
+
+  #updateCamera(dt) {
+    if (!this.cameraTween) return;
+    this.cameraTween.t += dt;
+    const raw = clamp(this.cameraTween.t / this.cameraTween.duration, 0, 1);
+    const k = easeInOut(raw);
+    this.camera.position.lerpVectors(this.cameraTween.fromPos, this.cameraTween.toPos, k);
+    this.controls.target.lerpVectors(this.cameraTween.fromTarget, this.cameraTween.toTarget, k);
+    if (raw >= 1) {
+      this.cameraTween = null;
+      this.controls.enabled = true;
+    }
+  }
+
+  #updatePieces(dt) {
+    for (const anim of this.moveAnims) {
+      if (anim.done) continue;
+      anim.t += dt / anim.duration;
+      const k = clamp(anim.t, 0, 1);
+      const e = easeOut(k);
+      anim.mesh.position.lerpVectors(anim.start, anim.end, e);
+      if (anim.arc) anim.mesh.position.y += Math.sin(Math.PI * k) * anim.arc;
+      if (anim.sink) {
+        anim.mesh.scale.setScalar(1 - e * 0.55);
+        anim.mesh.rotation.z = anim.spin * e;
+      }
+      if (k >= 1) anim.done = true;
+    }
+
+    for (const spawn of this.spawnAnims) {
+      spawn.t += dt;
+      if (spawn.t < 0) continue;
+      const k = clamp(spawn.t / spawn.duration, 0, 1);
+      const e = easeOut(k);
+      spawn.group.position.y = spawn.target.y + (1 - e) * 1.8;
+      spawn.group.scale.setScalar(0.82 + e * 0.18);
+      if (k >= 1) {
+        spawn.group.position.copy(spawn.target);
+        spawn.group.scale.setScalar(1);
+        spawn.done = true;
+      }
+    }
+    this.spawnAnims = this.spawnAnims.filter((s) => !s.done);
+  }
+
+  #updateMarkers(dt) {
+    for (const marker of this.legalGroup.children) {
+      const phase = marker.userData.phase || 0;
+      const pulse = 1 + Math.sin(this.time * 2.6 + phase) * 0.09;
+      marker.scale.setScalar(pulse);
+    }
+    if (this.checkGroup.children[0]) {
+      const ring = this.checkGroup.children[0];
+      const pulse = 1 + Math.sin(this.time * 4.4) * 0.06;
+      ring.scale.setScalar(pulse);
+    }
+  }
+
+  #updateDust(dt) {
+    if (!this.dust) return;
+    const attr = this.dust.geometry.attributes.position;
+    for (let i = 0; i < attr.count; i += 1) {
+      const baseY = this.dustBase[i * 3 + 1];
+      attr.array[i * 3 + 1] = baseY + Math.sin(this.time * 0.35 + i) * 0.16;
+      attr.array[i * 3] = this.dustBase[i * 3] + Math.sin(this.time * 0.12 + i * 0.7) * 0.2;
+    }
+    attr.needsUpdate = true;
+    this.dust.rotation.y = this.time * 0.005;
+  }
+
+  #updateParticles(dt) {
+    if (!this.particles.length) return;
+    for (const p of this.particles) {
+      p.life += dt;
+      p.velocity.y -= 1.5 * dt;
+      p.mesh.position.addScaledVector(p.velocity, dt);
+      p.mesh.material.opacity = clamp(1 - p.life / p.maxLife, 0, 1);
+      p.mesh.scale.setScalar(1 - p.life / p.maxLife);
+    }
+    const dead = this.particles.filter((p) => p.life >= p.maxLife);
+    for (const p of dead) {
+      this.scene.remove(p.mesh);
+      p.mesh.material.dispose();
+    }
+    this.particles = this.particles.filter((p) => p.life < p.maxLife);
+  }
+
+  dispose() {
+    cancelAnimationFrame(this._raf);
+    clearTimeout(this.hintTimer);
+    window.removeEventListener('resize', this._onResize);
+    this.canvas.removeEventListener('pointermove', this._onMove);
+    this.canvas.removeEventListener('pointerdown', this._onDown);
+    this.canvas.removeEventListener('pointerup', this._onUp);
+    this.canvas.removeEventListener('pointerleave', this._onLeave);
+    this.controls.dispose();
+    this.renderer.dispose();
+    this.composer?.dispose?.();
+  }
+}
+
+export { squarePos, pieceGlyph };

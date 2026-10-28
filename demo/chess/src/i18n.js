@@ -44,6 +44,7 @@ const ru = {
   'Play vs bot': 'Играть с ботом',
   'Offline salon': 'Оффлайн-салон',
   'No network, no waiting. Pick an opponent and a side.': 'Без сети и ожидания. Выберите соперника и сторону.',
+  'No open tables — starting a bot game.': 'Свободных столов нет — запускаем партию с ботом.',
   'Novice': 'Новичок',
   'Club player': 'Клубный игрок',
   'Maestro': 'Маэстро',

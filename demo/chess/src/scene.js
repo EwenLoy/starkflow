@@ -6,7 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { createPiece, pieceGlyph } from './pieces.js';
+import { createPiece, pieceGlyph } from './pieces.js?v=20261028-7';
 
 const FILES = 'abcdefgh';
 const PIECE_Y = 0.105;
@@ -925,8 +925,22 @@ export class ChessScene {
   selectSquare(square, moves = []) {
     this.#clearSelection();
     const pos = squarePos(square, 0.09);
+    const tile = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.98, 0.98),
+      new THREE.MeshBasicMaterial({
+        color: 0xf0cd86,
+        transparent: true,
+        opacity: 0.16,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    tile.rotation.x = -Math.PI / 2;
+    tile.position.copy(pos);
+    this.selectionGroup.add(tile);
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.39, 0.018, 10, 52),
+      new THREE.TorusGeometry(0.4, 0.026, 10, 52),
       new THREE.MeshBasicMaterial({
         color: 0xf5d692,
         transparent: true,

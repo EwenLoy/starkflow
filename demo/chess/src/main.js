@@ -1,10 +1,10 @@
-import { ChessScene } from './scene.js';
-import { StarkFlowClient } from './net.js';
-import { ChessSession, START_FEN } from './session.js';
-import { ChessAudio } from './audio.js';
-import { chooseBotMove, findHint, openingName } from './engine.js';
-import { pieceGlyph } from './pieces.js';
-import { LocalNet } from './offline.js';
+import { ChessScene } from './scene.js?v=20261028-7';
+import { StarkFlowClient } from './net.js?v=20261028-7';
+import { ChessSession, START_FEN } from './session.js?v=20261028-7';
+import { ChessAudio } from './audio.js?v=20261028-7';
+import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-7';
+import { pieceGlyph } from './pieces.js?v=20261028-7';
+import { LocalNet } from './offline.js?v=20261028-7';
 import {
   applyTranslations,
   getLocale,
@@ -12,7 +12,7 @@ import {
   pluralRu,
   setLocale,
   t,
-} from './i18n.js';
+} from './i18n.js?v=20261028-7';
 
 const CONFIG = {
   url: 'wss://starkflow.orkestr.run/ws',
@@ -678,9 +678,8 @@ class SalonApp {
       this.joinRoom(free[0].id || free[0].room);
       return;
     }
-    this.roomInput.value = randomRoomName();
-    this.roomAuto = true;
-    this.createRoom(this.roomInput.value);
+    this.showToast(t('No open tables — starting a bot game.'), 'ok');
+    this.openBotSetup();
   }
 
   async joinRoom(ref) {
@@ -857,7 +856,7 @@ class SalonApp {
   ensureBotWorker() {
     if (this.botWorker || this.botWorkerBroken || typeof Worker === 'undefined') return;
     try {
-      this.botWorker = new Worker(new URL('./bot-worker.js', import.meta.url), { type: 'module' });
+      this.botWorker = new Worker(new URL('./bot-worker.js?v=20261028-7', import.meta.url), { type: 'module' });
       this.botWorker.onmessage = (event) => {
         const { id, move } = event.data || {};
         if (id !== this.botRequestId) return;
@@ -944,6 +943,7 @@ class SalonApp {
     this.clearRoomQuery();
     $('game').hidden = true;
     $('lobby').hidden = false;
+    $('game').classList.remove('view-black');
     document.body.classList.remove('in-game');
     this.hasRenderedBoard = false;
     this.lastFen = '';
@@ -1315,13 +1315,16 @@ class SalonApp {
       this.scene.clearSelection();
       return;
     }
-    const legal = this.session.legalMoves(this.selected);
-    if (!legal.length || !this.session.canMoveFrom(this.selected)) {
+    const piece = this.session.chess?.get(this.selected);
+    if (!piece || piece.color !== this.session.myColor) {
       this.selected = null;
       this.legal = [];
       this.scene.clearSelection();
       return;
     }
+    const legal = this.session.game?.status === 'playing' && this.session.chess.turn() === this.session.myColor
+      ? this.session.legalMoves(this.selected)
+      : [];
     this.legal = legal;
     this.scene.selectSquare(this.selected, legal);
   }
@@ -1350,19 +1353,21 @@ class SalonApp {
     if (!square || this.modalOpen || !this.gnet.connected || !this.gnet.room) return;
     const game = this.session.game;
     if (!game) return;
-    if (game.status === 'waiting') {
-      this.showTurnToast(t('Waiting for opponent'));
-      return;
-    }
-    if (!this.session.isPlaying) {
-      if (this.session.isSpectator) this.showTurnToast(t('You are watching'));
-      return;
-    }
-    if (this.session.chess?.turn() !== this.session.myColor) {
-      this.showTurnToast(t('Wait for your turn'));
-      return;
-    }
     if (this.session.pending) return;
+
+    if (game.status === 'waiting') {
+      if (this.session.myColor && this.session.chess?.get(square)?.color === this.session.myColor) {
+        this.selectSquare(square);
+      } else {
+        this.showTurnToast(t('Waiting for opponent'));
+      }
+      return;
+    }
+    if (game.status !== 'playing') return;
+    if (!this.session.myColor) {
+      this.showTurnToast(t('You are watching'));
+      return;
+    }
 
     if (this.selected) {
       if (square === this.selected) {
@@ -1374,6 +1379,10 @@ class SalonApp {
       const own = this.session.chess?.get(square);
       if (own && own.color === this.session.myColor) {
         this.selectSquare(square);
+        return;
+      }
+      if (this.session.chess?.turn() !== this.session.myColor) {
+        this.showTurnToast(t('Wait for your turn'));
         return;
       }
       const candidates = this.legal.filter((m) => m.to === square);
@@ -1395,16 +1404,23 @@ class SalonApp {
   }
 
   selectSquare(square) {
-    if (!this.session.canMoveFrom(square)) {
+    const piece = this.session.chess?.get(square);
+    if (!piece || piece.color !== this.session.myColor) {
       this.scene.clearSelection();
       return;
     }
-    const piece = this.session.chess.get(square);
-    if (!piece || piece.color !== this.session.myColor) return;
     this.selected = square;
-    this.legal = this.session.legalMoves(square);
+    this.legal = this.session.game?.status === 'playing' && this.session.chess.turn() === this.session.myColor
+      ? this.session.legalMoves(square)
+      : [];
     this.scene.selectSquare(square, this.legal);
-    this.audio.select();
+    if (this.session.game?.status === 'waiting') {
+      this.showTurnToast(t('Waiting for opponent'));
+    } else if (this.session.chess.turn() !== this.session.myColor) {
+      this.showTurnToast(t('Wait for your turn'));
+    } else {
+      this.audio.select();
+    }
   }
 
   commitMove(from, to, promotion) {

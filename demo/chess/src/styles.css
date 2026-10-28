@@ -681,6 +681,44 @@ svg {
 }
 
 .footer__right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-transform: uppercase;
+}
+
+.footer__repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid rgba(201, 161, 93, 0.2);
+  border-radius: 99px;
+  color: rgba(241, 231, 210, 0.55);
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  text-decoration: none;
+  text-transform: uppercase;
+  pointer-events: auto;
+  transition: color 0.25s, border-color 0.25s, background 0.25s;
+}
+
+.footer__repo svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  stroke: none;
+}
+
+.footer__repo:hover,
+.footer__repo:focus-visible {
+  border-color: rgba(240, 212, 154, 0.5);
+  background: rgba(201, 161, 93, 0.1);
+  color: var(--gold-bright);
+  outline: none;
+}
+
+.footer__made {
   text-transform: uppercase;
 }
 
@@ -2786,6 +2824,11 @@ draw-offer .mini-btn {
     padding: 0 10px;
   }
 
+  .footer__repo {
+    min-height: 34px;
+    padding: 6px 11px;
+  }
+
   /* A live WebGL canvas under a blurred panel is re-blurred every frame: the
      most expensive thing on a phone HUD, and barely visible on a small screen. */
   .player-card,
@@ -2805,6 +2848,15 @@ draw-offer .mini-btn {
 @media (max-width: 560px) {
   .game {
     padding-bottom: calc(46px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .footer {
+    gap: 8px;
+    font-size: 8px;
+  }
+
+  .footer__made {
+    display: none;
   }
 
   .player-card__captures {

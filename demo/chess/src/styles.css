@@ -2366,6 +2366,172 @@ draw-offer .mini-btn {
   margin-top: 18px;
 }
 
+/* ------------------------------------------------------------ readability */
+/* The salon was set for a poster: 7-8 px captions read as decoration, not as
+   text. Everything a player has to read or hit gets a real size, and the
+   compact phone blocks further down still have the last word. */
+.panel-kicker {
+  font-size: 9.5px;
+}
+
+.field-label {
+  font-size: 9.5px;
+}
+
+.modal {
+  width: min(480px, calc(100vw - 32px));
+  padding: 32px;
+}
+
+.modal h2 {
+  font-size: 36px;
+}
+
+.modal p {
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.modal__actions {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.help-grid {
+  gap: 16px;
+}
+
+.help-item {
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.help-item__icon {
+  width: 34px;
+  height: 34px;
+  font-size: 18px;
+}
+
+.help-item strong {
+  font-size: 13px;
+}
+
+.help-item p {
+  font-size: 11.5px;
+}
+
+.bot-level {
+  padding: 12px 14px;
+}
+
+.bot-level__text strong {
+  font-size: 19px;
+}
+
+.bot-level__text small {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.bot-level__depth {
+  font-size: 8.5px;
+}
+
+.side-btn {
+  min-height: 44px;
+  font-size: 10px;
+}
+
+.side-btn span {
+  font-size: 19px;
+}
+
+.promo-btn small {
+  font-size: 9px;
+}
+
+.btn {
+  font-size: 12px;
+}
+
+.btn--compact {
+  min-height: 44px;
+  font-size: 11px;
+}
+
+.mini-btn {
+  min-height: 30px;
+  font-size: 9.5px;
+}
+
+.pill-btn {
+  font-size: 9.5px;
+}
+
+.turn-pill {
+  font-size: 8.5px;
+}
+
+.status-meta {
+  font-size: 9.5px;
+}
+
+.player-card__meta {
+  font-size: 10px;
+}
+
+.game-panel__status p {
+  font-size: 12px;
+}
+
+.action-btn {
+  font-size: 9.5px;
+}
+
+.room-card__name {
+  font-size: 18.5px;
+}
+
+.room-card__meta {
+  font-size: 10.5px;
+}
+
+.room-card__badge {
+  font-size: 8.5px;
+}
+
+.lobby__panel-foot {
+  font-size: 10.5px;
+}
+
+.invite-strip span {
+  font-size: 8.5px;
+}
+
+.invite-strip strong {
+  font-size: 12.5px;
+}
+
+.move-log__head {
+  font-size: 9px;
+}
+
+.draw-offer {
+  font-size: 11.5px;
+}
+
+.result-card p:not(.panel-kicker) {
+  font-size: 12px;
+}
+
+.toast {
+  font-size: 11px;
+}
+
+.presence-bar__body span {
+  font-size: 10px;
+}
+
 /* ------------------------------------------------------------- responsive */
 @media (max-width: 1180px) {
   .lobby__content {
@@ -2983,6 +3149,123 @@ draw-offer .mini-btn {
   .presence-bar__actions .mini-btn {
     min-height: 28px;
     font-size: 6.5px;
+  }
+}
+
+/* -------------------------------------------------------- phones, for real */
+/* A sheet taller than the phone used to clip its own buttons. Now it scrolls
+   inside the viewport, the copy wraps instead of shrinking, and the actions
+   stay reachable with a thumb. */
+@media (max-width: 640px) and (min-height: 521px) {
+  .modal-root {
+    padding: 10px;
+  }
+
+  .modal {
+    width: 100%;
+    max-height: calc(100vh - 20px);
+    max-height: calc(100dvh - 20px);
+    padding: 22px 18px 20px;
+    border-radius: 16px;
+  }
+
+  .modal h2 {
+    margin-right: 40px;
+    font-size: 27px;
+  }
+
+  .modal p {
+    margin-bottom: 14px;
+    font-size: 12.5px;
+  }
+
+  .modal__close {
+    top: 12px;
+    right: 12px;
+  }
+
+  .bot-levels {
+    gap: 7px;
+    margin-top: 14px;
+  }
+
+  .bot-level {
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 10px 11px;
+  }
+
+  .bot-level__icon {
+    width: 32px;
+    height: 32px;
+    font-size: 17px;
+  }
+
+  .bot-level__text strong {
+    font-size: 17px;
+  }
+
+  .bot-level__text small {
+    font-size: 10.5px;
+  }
+
+  .side-choice {
+    gap: 6px;
+    margin-top: 16px;
+  }
+
+  .side-btn {
+    gap: 5px;
+    min-height: 46px;
+    padding: 0 6px;
+    font-size: 9.5px;
+  }
+
+  .modal__actions {
+    gap: 8px;
+    margin-top: 18px;
+  }
+
+  .modal__actions .btn {
+    flex: 1 1 46%;
+    min-width: 0;
+  }
+
+  .help-grid {
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .lobby {
+    padding-top: 92px;
+    padding-bottom: 84px;
+  }
+
+  .lobby__panel {
+    max-height: none;
+    padding: 18px;
+  }
+}
+
+/* Phones on their side have no room for a tall sheet either. */
+@media (max-height: 520px) {
+  .modal {
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 18px 20px;
+  }
+
+  .modal h2 {
+    font-size: 26px;
+  }
+
+  .bot-levels {
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .side-choice {
+    margin-top: 14px;
   }
 }
 

@@ -620,11 +620,14 @@ export class ChessScene {
       metalness: 0.26,
       envMapIntensity: 0.3,
     });
-    const velvet = new THREE.MeshStandardMaterial({
-      color: 0x14322a,
-      roughness: 0.96,
-      metalness: 0.01,
-      envMapIntensity: 0.18,
+    const velvet = new THREE.MeshPhysicalMaterial({
+      color: 0x141110,
+      roughness: 0.94,
+      metalness: 0.02,
+      sheen: 0.6,
+      sheenRoughness: 0.65,
+      sheenColor: 0x7d6c52,
+      envMapIntensity: 0.16,
     });
     this.hallMaterials = { wood, stone, velvet };
 
@@ -665,36 +668,62 @@ export class ChessScene {
       put(brassParts, new THREE.BoxGeometry(0.06, 0.03, 10.7), [s * 5.33, -0.662, 0]);
     }
 
-    // Two thrones stand at the ends of the board - white on the near side, black
-    // on the far one - far enough out that the orbit never passes behind them.
+    // A gilded throne on each end of the board: black tufted velvet in an ornate
+    // gold frame, two columns with urn finials, scrolled arms with rosettes and a
+    // crested top. There is a short stone step under it, and both stand far enough
+    // out that the orbit never reaches them.
     const throne = (sign) => {
-      const cz = sign * 14.8;
+      const cz = sign * 16.2;
       const ry = sign > 0 ? Math.PI : 0;
       const cos = Math.cos(ry);
       const sin = Math.sin(ry);
       const at = (lx, y, lz) => [lx * cos + lz * sin, floorY + y, cz - lx * sin + lz * cos];
       const add = (list, geometry, lx, y, lz, rx = 0) => put(list, geometry, at(lx, y, lz), [rx, ry, 0]);
 
-      add(stoneParts, new RoundedBoxGeometry(4.6, 0.26, 4.2, 3, 0.08), 0, 0.13, 0, 0);
-      for (const [lx, lz] of [[-1.5, -1.15], [1.5, -1.15], [-1.5, 1.15], [1.5, 1.15]]) {
-        add(woodParts, new THREE.CylinderGeometry(0.13, 0.18, 1.1, 10), lx, 0.78, lz);
-        add(brassParts, new THREE.CylinderGeometry(0.2, 0.2, 0.08, 12), lx, 0.3, lz);
-      }
-      add(woodParts, new RoundedBoxGeometry(3.5, 0.3, 2.9, 3, 0.09), 0, 1.5, 0);
-      add(velvetParts, new RoundedBoxGeometry(3.05, 0.24, 2.45, 3, 0.09), 0, 1.75, 0);
+      // step, moulded base, corner bosses and the rosette on the front
+      add(stoneParts, new RoundedBoxGeometry(5.4, 0.26, 4.5, 3, 0.08), 0, 0.13, 0, 0);
+      add(brassParts, new RoundedBoxGeometry(4.8, 0.2, 3.9, 3, 0.06), 0, 0.28, 0, 0);
+      add(brassParts, new RoundedBoxGeometry(4.4, 0.36, 3.5, 3, 0.08), 0, 0.48, 0);
+      add(brassParts, new THREE.TorusGeometry(0.3, 0.075, 8, 16), 0, 0.48, 1.76);
+      add(brassParts, new THREE.SphereGeometry(0.15, 12, 10), 0, 0.48, 1.83);
       for (const s of [-1, 1]) {
-        add(woodParts, new THREE.CylinderGeometry(0.12, 0.15, 2.9, 10), s * 1.62, 2.98, -1.3);
-        add(brassParts, new THREE.SphereGeometry(0.2, 12, 10), s * 1.62, 4.53, -1.3);
-        add(brassParts, new THREE.TorusGeometry(0.15, 0.03, 6, 14), s * 1.62, 4.32, -1.3, Math.PI / 2);
-        add(woodParts, new THREE.BoxGeometry(0.18, 0.16, 1.7), s * 1.62, 2.2, -0.42);
-        add(velvetParts, new THREE.BoxGeometry(0.2, 0.07, 1.6), s * 1.62, 2.3, -0.42);
-        add(woodParts, new THREE.CylinderGeometry(0.1, 0.11, 0.8, 8), s * 1.62, 1.86, 0.44);
-        add(brassParts, new THREE.SphereGeometry(0.12, 10, 8), s * 1.62, 2.2, 0.46);
+        add(brassParts, new THREE.SphereGeometry(0.21, 14, 12), s * 1.88, 0.54, 1.56);
       }
-      add(woodParts, new RoundedBoxGeometry(3.3, 3, 0.24, 3, 0.08), 0, 3.08, -1.38, -0.04);
-      add(velvetParts, new RoundedBoxGeometry(2.75, 2.4, 0.14, 3, 0.06), 0, 3.04, -1.24, -0.04);
-      add(brassParts, new THREE.TorusGeometry(0.42, 0.06, 8, 20), 0, 4.72, -1.34);
-      add(brassParts, new THREE.SphereGeometry(0.11, 10, 8), 0, 4.28, -1.3);
+
+      // seat: gold frame, thick black cushion
+      add(brassParts, new RoundedBoxGeometry(4.05, 0.3, 3.25, 3, 0.08), 0, 0.82, 0);
+      add(velvetParts, new RoundedBoxGeometry(3.55, 0.34, 2.8, 4, 0.14), 0, 1.06, 0.05);
+
+      // two gold columns with collars and urn finials
+      for (const s of [-1, 1]) {
+        add(brassParts, new THREE.CylinderGeometry(0.17, 0.21, 5.3, 12), s * 1.88, 3.66, -1.34);
+        add(brassParts, new THREE.CylinderGeometry(0.27, 0.27, 0.16, 12), s * 1.88, 1.12, -1.34);
+        add(brassParts, new THREE.CylinderGeometry(0.24, 0.27, 0.2, 12), s * 1.88, 6.16, -1.34);
+        add(brassParts, new THREE.SphereGeometry(0.24, 14, 12), s * 1.88, 6.5, -1.34);
+        add(brassParts, new THREE.ConeGeometry(0.13, 0.34, 10), s * 1.88, 6.84, -1.34);
+      }
+
+      // the back: gold surround, tufted velvet panel, diamond buttons, crest
+      add(brassParts, new RoundedBoxGeometry(3.75, 5.2, 0.34, 3, 0.1), 0, 3.75, -1.44, -0.03);
+      add(velvetParts, new RoundedBoxGeometry(2.95, 4.35, 0.2, 4, 0.1), 0, 3.68, -1.24, -0.03);
+      for (let row = 0; row < 5; row += 1) {
+        for (let col = 0; col < 3; col += 1) {
+          const bx = (col - 1) * 0.88 + (row % 2 ? 0.44 : 0);
+          add(brassParts, new THREE.SphereGeometry(0.075, 8, 6), bx, 2.0 + row * 0.8, -1.14);
+        }
+      }
+      add(brassParts, new THREE.TorusGeometry(0.66, 0.09, 8, 20, Math.PI), 0, 6.34, -1.38);
+      add(brassParts, new THREE.SphereGeometry(0.19, 12, 10), 0, 6.72, -1.38);
+      add(brassParts, new THREE.ConeGeometry(0.11, 0.3, 10), 0, 7.0, -1.38);
+
+      // scrolled arms with a rosette and a black velvet pad
+      for (const s of [-1, 1]) {
+        add(brassParts, new THREE.CylinderGeometry(0.15, 0.2, 0.95, 10), s * 1.88, 1.4, 0.34);
+        add(brassParts, new THREE.BoxGeometry(0.26, 0.16, 2.1), s * 1.88, 1.92, -0.5);
+        add(brassParts, new THREE.SphereGeometry(0.2, 12, 10), s * 1.88, 1.92, 0.6);
+        add(brassParts, new THREE.CylinderGeometry(0.1, 0.1, 0.08, 10), s * 2.0, 1.92, 0.6);
+        add(velvetParts, new THREE.BoxGeometry(0.3, 0.08, 1.9), s * 1.88, 2.03, -0.55);
+      }
     };
     throne(1);
     throne(-1);
@@ -755,10 +784,16 @@ export class ChessScene {
       emissiveIntensity: 0.55,
     });
     const shelfWood = new THREE.MeshStandardMaterial({
-      color: 0x140d08,
-      roughness: 0.82,
+      color: 0x3a2416,
+      roughness: 0.78,
+      metalness: 0.05,
+      envMapIntensity: 0.16,
+    });
+    const bookLeather = new THREE.MeshStandardMaterial({
+      color: 0x55241c,
+      roughness: 0.86,
       metalness: 0.06,
-      envMapIntensity: 0.14,
+      envMapIntensity: 0.12,
     });
 
     const marbleParts = [];
@@ -771,8 +806,8 @@ export class ChessScene {
     // fill the bays behind them, and a curved wall closes the room. The shafts are
     // tall enough that their capitals stay out of frame - the hall has no ceiling
     // you can see, only darkness above.
-    const R = 18.8;
-    const bays = 18;
+    const R = 22.5;
+    const bays = 20;
     const shaft = 17.6;
     const archRadius = R * Math.sin(Math.PI / bays);
     for (let i = 0; i < bays; i += 1) {
@@ -821,25 +856,35 @@ export class ChessScene {
       );
     }
 
-    // Bookcases in the bays: tall dark cases with shelves and a hint of gilded
-    // spines, so the room reads as a library rather than a void.
+    // Bookcases in the bays: warm open wood shelving in three heights, packed
+    // with gilded, pale and leather-bound spines - a fairy-tale library rather
+    // than a wall.
     const shelfParts = [];
+    const bookParts = [];
     for (let i = 0; i < bays; i += 1) {
       const a = ((i + 0.5) / bays) * Math.PI * 2;
-      const x = Math.cos(a) * (R + 2.6);
-      const z = Math.sin(a) * (R + 2.6);
+      const x = Math.cos(a) * (R + 2.9);
+      const z = Math.sin(a) * (R + 2.9);
       const ry = -a - Math.PI / 2;
       const cos = Math.cos(ry);
       const sin = Math.sin(ry);
-      put(shelfParts, new RoundedBoxGeometry(5.2, 12.4, 0.7, 2, 0.05), [x, floorY + 6.6, z], [0, ry, 0]);
-      for (const level of [2.2, 4.6, 7, 9.4, 11.4]) {
-        put(shelfParts, new RoundedBoxGeometry(4.6, 0.16, 0.6, 2, 0.03), [x, floorY + level, z], [0, ry, 0]);
-        for (let b = 0; b < 7; b += 1) {
-          const off = -1.85 + b * 0.62;
+      const height = 11.5 + (i % 3) * 1.5;
+      const width = 5.9;
+      put(shelfParts, new RoundedBoxGeometry(width, height, 0.8, 2, 0.05), [x, floorY + height / 2 + 0.3, z], [0, ry, 0]);
+      put(shelfParts, new RoundedBoxGeometry(width + 0.6, 0.36, 1.15, 2, 0.05), [x, floorY + height + 0.44, z], [0, ry, 0]);
+      put(shelfParts, new RoundedBoxGeometry(width + 0.45, 0.32, 1.05, 2, 0.05), [x, floorY + 0.2, z], [0, ry, 0]);
+      const levels = Math.floor((height - 1.5) / 2.3);
+      for (let l = 0; l < levels; l += 1) {
+        const y = floorY + 0.78 + l * 2.3;
+        put(shelfParts, new RoundedBoxGeometry(width - 0.5, 0.14, 0.72, 2, 0.03), [x, y, z], [0, ry, 0]);
+        for (let b = 0; b < 8; b += 1) {
+          const off = -2.25 + b * 0.63;
+          const tall = 1.5 + ((b * 7 + l * 3 + i) % 4) * 0.14;
+          const bucket = [brassParts, waxParts, bookParts][(b + l + i) % 3];
           put(
-            brassParts,
-            new THREE.BoxGeometry(0.1, 1.5, 0.32),
-            [x + cos * off, floorY + level + 0.84, z - sin * off],
+            bucket,
+            new THREE.BoxGeometry(0.11, tall, 0.36),
+            [x + cos * off, y + tall / 2 + 0.08, z - sin * off],
             [0, ry, 0],
           );
         }
@@ -859,11 +904,11 @@ export class ChessScene {
     wall.position.y = floorY + 18;
     this.scene.add(wall);
 
-    // Sconces on every third column, and candlesticks on the table.
-    for (let i = 0; i < bays; i += 3) {
+    // Sconces on every fourth column, and candlesticks on the table.
+    for (let i = 0; i < bays; i += 4) {
       const a = (i / bays) * Math.PI * 2;
-      const x = Math.cos(a) * (R - 1.15);
-      const z = Math.sin(a) * (R - 1.15);
+      const x = Math.cos(a) * (R - 1.35);
+      const z = Math.sin(a) * (R - 1.35);
       const y = floorY + 6.1;
       put(brassParts, new THREE.BoxGeometry(0.8, 0.14, 0.14), [x, y, z], [0, -a, 0]);
       put(brassParts, new THREE.CylinderGeometry(0.34, 0.19, 0.2, 10), [x, y + 0.08, z]);
@@ -923,6 +968,7 @@ export class ChessScene {
     };
     addMerged(marbleParts, marbleCol);
     addMerged(shelfParts, shelfWood);
+    addMerged(bookParts, bookLeather);
     addMerged(brassParts, this.brassMaterial);
     addMerged(waxParts, wax);
 

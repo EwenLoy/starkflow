@@ -237,7 +237,7 @@ export class ChessScene {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.8;
+    this.renderer.toneMappingExposure = 0.74;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setClearColor(0x050c09, 0);
@@ -383,9 +383,9 @@ export class ChessScene {
   #setupLights() {
     // The hall is lit by candles: a low cold wash so shapes exist, warm pools
     // on the table, and only as much key light as the board needs to be read.
-    this.scene.add(new THREE.HemisphereLight(0x7c96a6, 0x050b08, 0.36));
+    this.scene.add(new THREE.HemisphereLight(0x6d8494, 0x040806, 0.2));
 
-    const key = new THREE.SpotLight(0xffd2a0, 140, 30, 0.7, 0.85, 2);
+    const key = new THREE.SpotLight(0xffd2a0, 120, 30, 0.62, 0.88, 2);
     key.position.set(-2.2, 11.8, 5.4);
     key.target.position.set(0, 0, 0);
     key.castShadow = true;
@@ -398,53 +398,39 @@ export class ChessScene {
     this.keyLight = key;
     this.keyLightBase = key.intensity;
 
-    // A broad overhead shaft straight down on the table: the "god ray" pool that
-    // makes the board readable from a low camera. No shadow map - the key already
-    // casts the only shadow in the room.
-    const shaft = new THREE.SpotLight(0xfff0d2, 95, 34, 0.56, 0.95, 2);
+    // A broad overhead shaft straight down on the table: the pool that makes the
+    // board readable from a low camera. No cone mesh - it read as a curtain - and
+    // no shadow map: the key already casts the only shadow in the room.
+    const shaft = new THREE.SpotLight(0xfff0d2, 85, 34, 0.56, 0.95, 2);
     shaft.position.set(0.4, 15.6, 1.2);
     shaft.target.position.set(0, 0, 0);
     this.scene.add(shaft, shaft.target);
-    const beam = new THREE.Mesh(
-      new THREE.ConeGeometry(5.4, 13.4, 26, 1, true),
-      new THREE.MeshBasicMaterial({
-        color: 0xffe9c4,
-        transparent: true,
-        opacity: 0.05,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      }),
-    );
-    beam.position.set(0.4, 8.9, 1.2);
-    this.scene.add(beam);
 
-    const rim = new THREE.SpotLight(0x6f94a6, 34, 28, 0.82, 0.9, 2);
+    const rim = new THREE.SpotLight(0x6f94a6, 18, 28, 0.82, 0.9, 2);
     rim.position.set(8.5, 7.6, -7);
     rim.target.position.set(0, 0.2, 0);
     this.scene.add(rim, rim.target);
 
-    const fill = new THREE.PointLight(0xffa860, 9, 18, 2);
+    const fill = new THREE.PointLight(0xffa860, 3.5, 18, 2);
     fill.position.set(-8.6, 1.8, 3.4);
     this.scene.add(fill);
 
-    const under = new THREE.PointLight(0x4a8199, 3.4, 10, 2);
-    under.position.set(2.4, 0.4, 1.8);
-    this.scene.add(under);
-
-    // Two candle pools on the near table corners carry the scene.
-    this.brazierLights = [];
-    for (const x of [-7.4, 7.4]) {
-      const flame = new THREE.PointLight(0xffab5c, 20, 14, 2);
-      flame.position.set(x, 1.1, 6.1);
-      this.scene.add(flame);
-      this.brazierLights.push(flame);
+    // One warm pool per candlestick on the table - four candles, four lights, so
+    // no candle is left standing there dark.
+    this.candleLights = [];
+    for (const cx of [-6.9, 6.9]) {
+      for (const cz of [-6.5, 6.5]) {
+        const pool = new THREE.PointLight(0xffab5c, 16, 13, 2);
+        pool.position.set(cx, 1.15, cz);
+        this.scene.add(pool);
+        this.candleLights.push(pool);
+      }
     }
     // Two warm washes behind the colonnade: the library has to read from the
-    // table. Created once here, so the light count never changes at runtime.
+    // table, but low enough that the hall stays a dark cathedral.
     this.libraryLights = [];
     for (const [lx, lz] of [[16, 16], [-16, -16]]) {
-      const wash = new THREE.PointLight(0xffb066, 95, 36, 2);
+      const wash = new THREE.PointLight(0xffb066, 50, 34, 2);
       wash.position.set(lx, 10.5, lz);
       this.scene.add(wash);
       this.libraryLights.push(wash);
@@ -776,7 +762,7 @@ export class ChessScene {
       new THREE.MeshBasicMaterial({
         map: radialTexture('rgba(255,172,92,.1)', 'rgba(0,0,0,0)'),
         transparent: true,
-        opacity: 0.55,
+        opacity: 0.42,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       }),
@@ -801,10 +787,10 @@ export class ChessScene {
   #buildRoom() {
     const floorY = this.floorY ?? -2.35;
     const marbleCol = new THREE.MeshStandardMaterial({
-      color: 0xe6dfcd,
-      roughness: 0.58,
-      metalness: 0.04,
-      envMapIntensity: 0.26,
+      color: 0x1d2023,
+      roughness: 0.32,
+      metalness: 0.16,
+      envMapIntensity: 0.55,
     });
     const wax = new THREE.MeshStandardMaterial({
       color: 0xe6d8b6,
@@ -844,6 +830,30 @@ export class ChessScene {
       roughness: 0.6,
       metalness: 0.02,
       emissive: 0x3d3527,
+      emissiveIntensity: 1,
+      envMapIntensity: 0.2,
+    });
+    const emeraldSpine = new THREE.MeshStandardMaterial({
+      color: 0x35664a,
+      roughness: 0.5,
+      metalness: 0.12,
+      emissive: 0x0e2418,
+      emissiveIntensity: 1,
+      envMapIntensity: 0.3,
+    });
+    const indigoSpine = new THREE.MeshStandardMaterial({
+      color: 0x35406e,
+      roughness: 0.55,
+      metalness: 0.1,
+      emissive: 0x101733,
+      emissiveIntensity: 1,
+      envMapIntensity: 0.3,
+    });
+    const slateSpine = new THREE.MeshStandardMaterial({
+      color: 0x4a4148,
+      roughness: 0.6,
+      metalness: 0.08,
+      emissive: 0x16121a,
       emissiveIntensity: 1,
       envMapIntensity: 0.2,
     });
@@ -924,6 +934,10 @@ export class ChessScene {
     const goldSpineParts = [];
     const paleSpineParts = [];
     const bookParts = [];
+    const emeraldParts = [];
+    const indigoParts = [];
+    const slateParts = [];
+    const spineBuckets = [goldSpineParts, paleSpineParts, bookParts, emeraldParts, indigoParts, slateParts];
     for (let i = 0; i < bays; i += 1) {
       const a = ((i + 0.5) / bays) * Math.PI * 2;
       const dist = R + 1.2;
@@ -969,7 +983,7 @@ export class ChessScene {
           const thick = 0.09 + rnd() * 0.09;
           if (cursor + thick > usable) break;
           const tall = 1.15 + rnd() * 0.9;
-          const bucket = rnd() < 0.34 ? goldSpineParts : rnd() < 0.5 ? paleSpineParts : bookParts;
+          const bucket = spineBuckets[Math.floor(rnd() * spineBuckets.length)];
           add(
             bucket,
             new THREE.BoxGeometry(thick, tall, 0.28 + rnd() * 0.1),
@@ -1079,6 +1093,9 @@ export class ChessScene {
     addMerged(goldSpineParts, goldSpine);
     addMerged(paleSpineParts, paleSpine);
     addMerged(bookParts, bookLeather);
+    addMerged(emeraldParts, emeraldSpine);
+    addMerged(indigoParts, indigoSpine);
+    addMerged(slateParts, slateSpine);
     addMerged(carpetParts, carpet);
     addMerged(brassParts, this.brassMaterial);
     addMerged(waxParts, wax);
@@ -2058,10 +2075,11 @@ export class ChessScene {
       const flicker = 0.9 + Math.sin(this.time * 7.3) * 0.07 + Math.sin(this.time * 13.1 + 1.7) * 0.04;
       this.flameMaterial.opacity = 0.95 * flicker;
       if (this.flameHaloMaterial) this.flameHaloMaterial.opacity = 0.22 * (0.82 + flicker * 0.22);
-      // The two warm lamps behind the table breathe with the candles.
-      if (this.brazierLights?.length) {
-        this.brazierLights[0].intensity = 24 + flicker * 8;
-        if (this.brazierLights[1]) this.brazierLights[1].intensity = 24 + (1.06 - flicker) * 8;
+      // Every candle on the table breathes with the flames.
+      if (this.candleLights?.length) {
+        this.candleLights.forEach((light, i) => {
+          light.intensity = 12 + (i % 2 === 0 ? flicker : 1.06 - flicker) * 6;
+        });
       }
     }
 

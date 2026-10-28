@@ -1,5 +1,5 @@
 import { Chess, validateFen } from '../vendor/chess.js/chess.js';
-import { t } from './i18n.js?v=20261028-9';
+import { t } from './i18n.js?v=20261028-14';
 
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const MAX_STORED_MOVES = 360;
@@ -560,6 +560,24 @@ export class ChessSession {
   declineDraw() {
     if (!this.game?.drawOffer || this.game.drawOffer === this.you) return false;
     this.#write({ ...this.game, drawOffer: 0, updatedAt: Date.now() });
+    return true;
+  }
+
+  /**
+   * The lost seat is held by the room, but the side that is still here decides
+   * when the waiting is over: the host closes the game in their favour instead
+   * of leaving it frozen with a ghost at the board.
+   */
+  abandonGame() {
+    if (!this.net.isHost() || this.game?.status !== 'playing' || !this.myColor) return false;
+    this.#write({
+      ...this.game,
+      status: 'abandoned',
+      winner: this.myColor,
+      reason: 'abandoned',
+      drawOffer: 0,
+      updatedAt: Date.now(),
+    });
     return true;
   }
 

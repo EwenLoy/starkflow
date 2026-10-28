@@ -23,6 +23,8 @@ export class StarkFlowClient {
     this.connectTimer = null;
     this.heartbeatTimer = null;
     this.lastPongAt = 0;
+    this.openedAt = 0;
+    this.shortDrops = 0;
 
     this.token = this.#loadToken();
     this.userId = '';
@@ -136,6 +138,7 @@ export class StarkFlowClient {
       return;
     }
     this.ws = ws;
+    this.openedAt = 0;
     clearTimeout(this.connectTimer);
     this.connectTimer = setTimeout(() => {
       if (this.ws !== ws || ws.readyState !== WebSocket.CONNECTING) return;
@@ -152,6 +155,7 @@ export class StarkFlowClient {
 
     ws.addEventListener('open', () => {
       if (this.ws !== ws) return;
+      this.openedAt = Date.now();
       clearTimeout(this.connectTimer);
       this.connectTimer = null;
       this.connecting = false;
@@ -182,6 +186,8 @@ export class StarkFlowClient {
 
     ws.addEventListener('close', (event) => {
       if (this.ws !== ws) return;
+      const shortLived = !!this.openedAt && Date.now() - this.openedAt < 2500;
+      this.openedAt = 0;
       clearTimeout(this.connectTimer);
       this.connectTimer = null;
       this.ws = null;
@@ -190,6 +196,15 @@ export class StarkFlowClient {
       this.latency = null;
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
+      if (shortLived && !this.intentionalClose) {
+        // A socket that dies right after hello, over and over, is the signature
+        // of a second tab with the same stored identity: the server keeps only
+        // the newest session and the two tabs kick each other out in a loop.
+        this.shortDrops += 1;
+        if (this.shortDrops === 3) this.emit('duplicate-hint');
+      } else {
+        this.shortDrops = 0;
+      }
       this.emit('status', { state: 'offline', code: event.code });
       if (!this.intentionalClose && this.active) this.#scheduleReconnect();
     });
@@ -310,6 +325,7 @@ export class StarkFlowClient {
       maxPlayers: options.maxPlayers || 8,
       emptyTTL: options.emptyTTL || 300,
       lobby: this.lobby,
+      ...(options.suspendTTL ? { suspendTTL: options.suspendTTL } : {}),
       ...(options.password ? { password: options.password } : {}),
     });
   }
@@ -397,6 +413,7 @@ export class StarkFlowClient {
           suspendTTL: m.suspendTTL,
         };
         this.you = m.you;
+        this.shortDrops = 0;
         this.hostId = m.hostId || 0;
         this.wantRoom = this.room.id || this.room.name;
         this.players.clear();

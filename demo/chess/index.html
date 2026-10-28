@@ -13,7 +13,7 @@
     />
     <title>Ornate · 3D Chess Salon</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src/styles.css?v=20261028-13" />
+    <link rel="stylesheet" href="./src/styles.css?v=20261028-14" />
     <script type="importmap">
       {
         "imports": {
@@ -325,6 +325,18 @@
             <span id="turnToastText"></span>
           </div>
 
+          <div class="presence-bar" id="presenceBar" hidden role="status" aria-live="polite">
+            <span class="presence-bar__dot"></span>
+            <div class="presence-bar__body">
+              <strong id="presenceTitle"></strong>
+              <span id="presenceText"></span>
+            </div>
+            <div class="presence-bar__actions">
+              <button class="mini-btn mini-btn--gold" id="presenceWaitBtn" type="button" data-i18n="Wait 30 s more">Wait 30 s more</button>
+              <button class="mini-btn" id="presenceEndBtn" type="button" data-i18n="End the game">End the game</button>
+            </div>
+          </div>
+
           <div class="draw-offer" id="drawOfferBar" hidden>
             <span id="drawOfferText" data-i18n="Opponent offers a draw.">Opponent offers a draw.</span>
             <div class="draw-offer__actions">
@@ -360,6 +372,6 @@
       <div class="modal-root" id="modalRoot"></div>
     </div>
 
-    <script type="module" src="./src/main.js?v=20261028-13"></script>
+    <script type="module" src="./src/main.js?v=20261028-14"></script>
   </body>
 </html>

@@ -6,7 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { createPiece, pieceGlyph } from './pieces.js?v=20261028-9';
+import { createPiece, pieceGlyph } from './pieces.js?v=20261028-14';
 
 const FILES = 'abcdefgh';
 const PIECE_Y = 0.105;

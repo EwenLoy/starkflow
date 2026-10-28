@@ -1,10 +1,10 @@
-import { ChessScene } from './scene.js?v=20261028-13';
-import { StarkFlowClient } from './net.js?v=20261028-13';
-import { ChessSession, START_FEN } from './session.js?v=20261028-13';
-import { ChessAudio } from './audio.js?v=20261028-13';
-import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-13';
-import { pieceGlyph } from './pieces.js?v=20261028-13';
-import { LocalNet } from './offline.js?v=20261028-13';
+import { ChessScene } from './scene.js?v=20261028-14';
+import { StarkFlowClient } from './net.js?v=20261028-14';
+import { ChessSession, START_FEN } from './session.js?v=20261028-14';
+import { ChessAudio } from './audio.js?v=20261028-14';
+import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-14';
+import { pieceGlyph } from './pieces.js?v=20261028-14';
+import { LocalNet } from './offline.js?v=20261028-14';
 import {
   applyTranslations,
   getLocale,
@@ -12,13 +12,20 @@ import {
   pluralRu,
   setLocale,
   t,
-} from './i18n.js?v=20261028-13';
+} from './i18n.js?v=20261028-14';
 
 const CONFIG = {
   url: 'wss://starkflow.orkestr.run/ws',
   app: 'starkflow-chess',
   lobby: 'salon',
 };
+
+/** How long the side that is still at the table promises to wait before asking again. */
+const SUSPEND_HOLD_MS = 30000;
+/** The room keeps a lost seat this long; the server caps the request at 5 minutes. */
+const SUSPEND_SEAT_MS = 300000;
+const RESUME_KEY = 'ornate-chess:resume';
+const RESUME_TTL_MS = 30 * 60 * 1000;
 
 const EN_ADJECTIVES = ['Emerald', 'Midnight', 'Golden', 'Quiet', 'Royal', 'Azure', 'Copper', 'Northern', 'Amethyst', 'Silver'];
 const EN_NOUNS = ['Gambit', 'Salon', 'Study', 'Queen', 'Manoeuvre', 'Endgame', 'Opening', 'Caprice', 'Vernissage', 'Tournament'];
@@ -78,6 +85,28 @@ function roomUrl(roomId) {
   return url.toString();
 }
 
+function loadResumeHint() {
+  try {
+    const raw = sessionStorage.getItem(RESUME_KEY);
+    if (!raw) return null;
+    const hint = JSON.parse(raw);
+    if (!hint || typeof hint.room !== 'string' || !hint.room) return null;
+    if (Date.now() - (Number(hint.savedAt) || 0) > RESUME_TTL_MS) return null;
+    return hint;
+  } catch {
+    return null;
+  }
+}
+
+function saveResumeHint(hint) {
+  try {
+    if (hint) sessionStorage.setItem(RESUME_KEY, JSON.stringify(hint));
+    else sessionStorage.removeItem(RESUME_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
@@ -128,6 +157,20 @@ class SalonApp {
 
     this.directRoom = new URLSearchParams(location.search).get('room') || '';
     this.triedDirect = false;
+    this.resumeHint = loadResumeHint();
+    this.resumeTried = false;
+    this.resumeRetried = false;
+    this.suspendedSeat = 0;
+    this.holdUntil = 0;
+    this.presenceWasMine = false;
+    if (this.resumeHint && (!this.directRoom || this.directRoom === this.resumeHint.room)) {
+      // Back in the same tab after a reload: ask first instead of walking in silently.
+      this.directRoom = '';
+    } else if (this.resumeHint) {
+      // An invitation to another table wins over the old unfinished game.
+      saveResumeHint(null);
+      this.resumeHint = null;
+    }
     this.hasRenderedBoard = false;
     this.lastFen = '';
     this.lastViewColor = null;
@@ -217,6 +260,7 @@ class SalonApp {
     app.classList.add('is-ready');
     app.setAttribute('aria-hidden', 'false');
     setTimeout(() => boot.classList.add('is-done'), 450);
+    if (this.resumeHint) setTimeout(() => this.offerResume(), 420);
   }
 
   /* --------------------------------------------------------------- net UI */
@@ -258,15 +302,27 @@ class SalonApp {
     });
     this.net.on('room.missing', () => {
       if (this.offline) return;
+      const hint = loadResumeHint();
+      if (hint?.room && this.resumeTried && !this.resumeRetried) {
+        // A rejoin right after a drop can race the room registry. Try once more
+        // before telling the player that the whole game is gone.
+        this.resumeRetried = true;
+        setTimeout(() => {
+          if (!this.net.room && this.net.connected) this.net.joinRoom(hint.room);
+        }, 1500);
+        return;
+      }
+      saveResumeHint(null);
       this.clearRoomQuery();
       this.enterLobby();
-      this.showToast(t('This table has already closed. Choose another.'), 'error');
+      this.showToast(t('That table has already closed — the game is gone.'), 'error');
     });
     this.net.on('room.full', () => {
       this.joining = false;
       this.showToast(t('There are no seats left at this table.'), 'error');
     });
     this.net.on('players.changed', (change) => {
+      const backFromAway = !!change.resumed && change.resumed !== this.net.you && this.suspendedSeat === change.resumed;
       this.renderGame();
       if (change.joined && change.joined !== this.net.you) {
         const p = this.net.players.get(change.joined);
@@ -276,15 +332,17 @@ class SalonApp {
         const p = change.player;
         if (p && p.id !== this.net.you && change.reason !== 'timeout') this.showToast(t('{name} left the table.', { name: p.name || t('Guest') }));
       }
-      if (change.suspended && change.suspended !== this.net.you) {
+      if (change.suspended && change.suspended !== this.net.you && !this.session.isPlaying) {
+        // A game in progress explains the wait itself, on the presence bar.
         this.showToast(t('Opponent lost connection — the seat is held for 30 seconds.'));
       }
-      if (change.resumed && change.resumed !== this.net.you) {
-        this.showToast(t('Opponent is back at the table.'), 'ok');
-      }
+      if (backFromAway) this.showToast(t('Opponent is back at the table.'), 'ok');
     });
     this.net.on('host.changed', () => {
       this.renderGame();
+    });
+    this.net.on('duplicate-hint', () => {
+      this.showToast(t('This table is already open in another tab — close the extra one.'), 'error');
     });
     this.net.on('error', (err) => this.onNetError(err));
     this.net.on('game.event', (event) => {
@@ -405,6 +463,8 @@ class SalonApp {
       this.session.declineDraw();
       this.showToast(t('Draw declined.'));
     });
+    $('presenceWaitBtn').addEventListener('click', () => this.extendHold());
+    $('presenceEndBtn').addEventListener('click', () => this.endAbandonedGame());
     $('rematchBtn').addEventListener('click', () => this.rematch());
     $('resultRematchBtn').addEventListener('click', () => this.rematch());
     $('resultLobbyBtn').addEventListener('click', () => this.confirmLeave());
@@ -454,7 +514,14 @@ class SalonApp {
     }
     $('pingText').textContent = this.net.latency != null ? `${this.net.latency} ${isRussian() ? 'мс' : 'ms'}` : '';
     this.syncInteraction();
-    if (status.state === 'online') this.renderRooms();
+    if (status.state === 'online') {
+      if (this.presenceWasMine) {
+        this.presenceWasMine = false;
+        if (this.gnet.room) this.showToast(t('Back at your table'), 'ok');
+      }
+      this.renderRooms();
+    }
+    this.renderPresence();
   }
 
   onNetError({ code, msg }) {
@@ -483,7 +550,7 @@ class SalonApp {
       this.roomInput.value = next;
       this.roomAuto = true;
       this.pendingCreate = next;
-      this.net.createRoom(next, { maxPlayers: 8, emptyTTL: 300 });
+      this.net.createRoom(next, { maxPlayers: 8, emptyTTL: 300, suspendTTL: 300 });
       this.showToast(t('Name already taken — opening a neighbouring table.'), 'ok');
       return;
     }
@@ -651,7 +718,7 @@ class SalonApp {
     this.pendingCreateTries = 0;
     try {
       await this.prepareIdentity();
-      this.net.createRoom(room, { maxPlayers: 8, emptyTTL: 300 });
+      this.net.createRoom(room, { maxPlayers: 8, emptyTTL: 300, suspendTTL: 300 });
     } catch {
       this.joining = false;
       this.pendingCreate = null;
@@ -704,6 +771,9 @@ class SalonApp {
     this.selected = null;
     this.legal = [];
     this.resultKey = '';
+    this.resumeRetried = false;
+    this.suspendedSeat = 0;
+    this.holdUntil = 0;
     $('game').classList.remove('offline');
     $('copyBtn').hidden = false;
     $('lobby').hidden = true;
@@ -861,7 +931,7 @@ class SalonApp {
   ensureBotWorker() {
     if (this.botWorker || this.botWorkerBroken || typeof Worker === 'undefined') return;
     try {
-      this.botWorker = new Worker(new URL('./bot-worker.js?v=20261028-8', import.meta.url), { type: 'module' });
+      this.botWorker = new Worker(new URL('./bot-worker.js?v=20261028-14', import.meta.url), { type: 'module' });
       this.botWorker.onmessage = (event) => {
         const { id, move } = event.data || {};
         if (id !== this.botRequestId) return;
@@ -974,6 +1044,11 @@ class SalonApp {
     if (this.offline) this.stopOfflineSession();
     this.session = this.onlineSession;
     this.clearRoomQuery();
+    this.suspendedSeat = 0;
+    this.holdUntil = 0;
+    this.presenceWasMine = false;
+    saveResumeHint(null);
+    if ($('presenceBar')) $('presenceBar').hidden = true;
     $('game').hidden = true;
     $('lobby').hidden = false;
     $('game').classList.remove('view-black');
@@ -1087,6 +1162,8 @@ class SalonApp {
     $('moveCount').textContent = this.moveCountLabel(Math.ceil(game.moves.length / 2));
     $('openingName').textContent = openingName(game.moves, getLocale());
     this.updateClock();
+    this.syncPresence(game, myColor);
+    this.saveResume(game, room);
 
     $('drawBtn').hidden = this.offline;
     $('drawBtn').disabled = this.offline || !this.session.isPlaying || !!game.drawOffer || this.session.pending;
@@ -1320,6 +1397,7 @@ class SalonApp {
     }
     const from = game.startedAt || game.createdAt || Date.now();
     $('gameClock').textContent = formatClock(Date.now() - from);
+    this.renderPresence();
   }
 
   playerName(id) {
@@ -1741,6 +1819,123 @@ class SalonApp {
     this.openModal(modal, { focus: modal.querySelector('#helpOk') });
   }
 
+  /* ------------------------------------------------------------- presence */
+  syncPresence(game, myColor) {
+    if (this.offline || !myColor || game.status !== 'playing') {
+      this.suspendedSeat = 0;
+      this.holdUntil = 0;
+      this.renderPresence();
+      return;
+    }
+    const opponentId = myColor === 'w' ? game.blackId : game.whiteId;
+    const opponent = opponentId ? this.gnet.players.get(opponentId) : null;
+    if (opponent && opponent.status === 'suspended') {
+      if (this.suspendedSeat !== opponentId) {
+        this.suspendedSeat = opponentId;
+        this.holdUntil = Date.now() + SUSPEND_HOLD_MS;
+      }
+    } else if (this.suspendedSeat === opponentId) {
+      this.suspendedSeat = 0;
+      this.holdUntil = 0;
+    }
+    this.renderPresence();
+  }
+
+  renderPresence() {
+    const bar = $('presenceBar');
+    if (!bar) return;
+    const net = this.gnet;
+    if (this.offline || $('game').hidden) {
+      bar.hidden = true;
+      return;
+    }
+    if (net.room && !net.connected) {
+      bar.hidden = false;
+      bar.classList.add('is-mine');
+      $('presenceTitle').textContent = t('Connection lost — your table is held');
+      $('presenceText').textContent = t('Reconnecting {n}', { n: Math.max(1, this.lastNetStatus?.retry || 1) });
+      $('presenceWaitBtn').hidden = true;
+      $('presenceEndBtn').hidden = true;
+      this.presenceWasMine = true;
+      return;
+    }
+    const seat = this.suspendedSeat;
+    if (!seat || !this.session.isPlaying) {
+      bar.hidden = true;
+      return;
+    }
+    const away = Date.now() >= this.holdUntil;
+    bar.hidden = false;
+    bar.classList.remove('is-mine');
+    $('presenceTitle').textContent = away ? t('The opponent did not come back') : t('The opponent stepped away');
+    $('presenceText').textContent = away
+      ? t('The seat is still held — wait a little longer?')
+      : t('Waiting for the return — {n}s', { n: Math.max(1, Math.ceil((this.holdUntil - Date.now()) / 1000)) });
+    $('presenceWaitBtn').hidden = false;
+    $('presenceWaitBtn').textContent = t('Wait 30 s more');
+    $('presenceEndBtn').hidden = false;
+    $('presenceEndBtn').textContent = t('End the game');
+  }
+
+  extendHold() {
+    if (!this.suspendedSeat) return;
+    const now = Date.now();
+    this.holdUntil = Math.min(Math.max(this.holdUntil, now) + SUSPEND_HOLD_MS, now + SUSPEND_SEAT_MS);
+    this.renderPresence();
+  }
+
+  endAbandonedGame() {
+    if (this.offline || !this.session.isPlaying || !this.session.isHost) return;
+    if (!this.session.abandonGame()) return;
+    this.suspendedSeat = 0;
+    this.holdUntil = 0;
+    this.renderPresence();
+  }
+
+  saveResume(game, room) {
+    if (this.offline || !room || !game || game.status !== 'playing') return;
+    saveResumeHint({
+      room: room.id || room.name,
+      name: room.name,
+      move: Math.floor(game.moves.length / 2) + 1,
+      color: this.session.myColor || '',
+      savedAt: Date.now(),
+    });
+  }
+
+  offerResume() {
+    const hint = this.resumeHint;
+    this.resumeHint = null;
+    if (!hint) return;
+    const label = hint.name || t('Table');
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.innerHTML = `
+      <button class="icon-btn icon-btn--small modal__close" id="resumeClose" aria-label="${t('Close')}"><svg><use href="#i-close"></use></svg></button>
+      <p class="panel-kicker">${t('Unfinished game')}</p>
+      <h2>${escapeHtml(label)}</h2>
+      <p>${escapeHtml(t('Your table {name} is waiting — move {n}.', { name: label, n: hint.move || 1 }))}</p>
+      <div class="modal__actions">
+        <button class="btn btn--ghost btn--compact" id="resumeDrop" type="button">${t('New table')}</button>
+        <button class="btn btn--gold btn--compact" id="resumeContinue" type="button">${t('Continue')}</button>
+      </div>
+    `;
+    this.openModal(modal, { focus: modal.querySelector('#resumeContinue') });
+    modal.querySelector('#resumeClose').addEventListener('click', () => this.closeModal());
+    modal.querySelector('#resumeDrop').addEventListener('click', () => {
+      this.closeModal();
+      saveResumeHint(null);
+      this.resumeRetried = false;
+    });
+    modal.querySelector('#resumeContinue').addEventListener('click', () => {
+      this.closeModal();
+      this.resumeTried = true;
+      this.net.joinRoom(hint.room);
+    });
+  }
+
   /* --------------------------------------------------------------- toast */
   showToast(text, type = '') {
     if (!text) return;
@@ -1761,6 +1956,7 @@ class SalonApp {
   onResult(snapshot) {
     const game = snapshot.game;
     if (!game) return;
+    saveResumeHint(null);
     this.scene.setCheck(null);
     this.scene.celebrate(game.winner);
     this.showTurnToast(this.resultTitle(game));

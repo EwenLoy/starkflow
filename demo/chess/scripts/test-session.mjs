@@ -161,6 +161,34 @@ async function testOfferDrawAndResign() {
   session.destroy();
 }
 
+async function testAbandonKeepsTheWin() {
+  const net = new MockNet();
+  const session = new ChessSession(net);
+  const g = {
+    v: 1, rev: 1, fen: START_FEN, moves: [], lastMove: null,
+    whiteId: 1, blackId: 2, status: 'playing', winner: null, reason: null, drawOffer: 2,
+    createdAt: Date.now(), startedAt: Date.now(), updatedAt: Date.now(), turnStartedAt: Date.now(),
+  };
+  net.open({ id: 'room5', name: 'Presence' }, 2, 1, [
+    { id: 1, name: 'A', status: 'active' },
+    { id: 2, name: 'B', status: 'active' },
+  ], { game: JSON.stringify(g) });
+  await wait();
+  ok(session.myColor === 'b', 'guest sits at the black side');
+  ok(session.abandonGame() === false, 'a guest cannot close the table');
+  net.you = 1;
+  net.hostId = 1;
+  net.emit('players.changed', { players: net.playerList() });
+  await wait();
+  ok(session.myColor === 'w', 'the host that stayed is white');
+  ok(session.abandonGame(), 'the host closes a game the opponent never came back to');
+  await wait();
+  const closed = game(net);
+  ok(closed.status === 'abandoned' && closed.winner === 'w' && closed.reason === 'abandoned', 'the waiting side takes the game');
+  ok(closed.drawOffer === 0, 'a pending draw offer does not survive the abandonment');
+  session.destroy();
+}
+
 async function testRulesEngine() {
   const { Chess } = await import('../vendor/chess.js/chess.js');
   const c = new Chess();
@@ -172,5 +200,6 @@ async function testRulesEngine() {
 await testInitializationAndSeats();
 await testMovesAndOutcome();
 await testOfferDrawAndResign();
+await testAbandonKeepsTheWin();
 await testRulesEngine();
 console.log(`\n${passed} checks passed`);

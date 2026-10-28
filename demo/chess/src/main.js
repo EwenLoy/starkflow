@@ -122,7 +122,7 @@ class SalonApp {
     this.net = new StarkFlowClient({ ...CONFIG, name: this.name });
     this.onlineSession = new ChessSession(this.net);
     this.session = this.onlineSession;
-    this.scene = new ChessScene($('scene'), { onSquareClick: (square) => this.onSquareClick(square) });
+    this.scene = new ChessScene($('scene'));
     this.scene.setPosition(START_FEN, { initial: true });
     this.scene.setMode('lobby');
 
@@ -411,6 +411,10 @@ class SalonApp {
       if (e.target === $('modalRoot') || e.target.classList.contains('modal-backdrop')) this.closeModal();
     });
     document.addEventListener('keydown', (e) => this.onKeyDown(e));
+    window.addEventListener('pointerdown', (e) => {
+      this.globalDown = { x: e.clientX, y: e.clientY };
+    }, true);
+    window.addEventListener('pointerup', (e) => this.onGlobalPointerUp(e), true);
     window.addEventListener('online', () => {
       if (!this.net.connected) this.net.manualRetry();
     });
@@ -1323,9 +1327,42 @@ class SalonApp {
   }
 
   /* ------------------------------------------------------------- actions */
+  onGlobalPointerUp(event) {
+    const start = this.globalDown;
+    this.globalDown = null;
+    if (!start || $('game').hidden || this.modalOpen) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) return;
+    if (!this.net.room && !this.offline) return;
+
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('button, a, input, textarea, select, .topbar, .game-panel, .player-card, .board-controls, .result-card, .draw-offer, .turn-toast, .spectator-hint, .modal-root')) {
+      return;
+    }
+    const square = this.scene.squareFromPoint(event.clientX, event.clientY);
+    if (square) {
+      event.preventDefault();
+      this.onSquareClick(square);
+    }
+  }
+
   onSquareClick(square) {
     if (!square || this.modalOpen || !this.gnet.connected || !this.gnet.room) return;
-    if (!this.session.isPlaying || this.session.pending) return;
+    const game = this.session.game;
+    if (!game) return;
+    if (game.status === 'waiting') {
+      this.showTurnToast(t('Waiting for opponent'));
+      return;
+    }
+    if (!this.session.isPlaying) {
+      if (this.session.isSpectator) this.showTurnToast(t('You are watching'));
+      return;
+    }
+    if (this.session.chess?.turn() !== this.session.myColor) {
+      this.showTurnToast(t('Wait for your turn'));
+      return;
+    }
+    if (this.session.pending) return;
 
     if (this.selected) {
       if (square === this.selected) {

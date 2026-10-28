@@ -147,6 +147,8 @@ const ru = {
   'Check! Your move': 'Шах! Ваш ход',
   'Check on the opponent': 'Шах сопернику',
   'Your move': 'Ваш ход',
+  'Wait for your turn': 'Дождитесь своего хода',
+  'You are watching': 'Вы наблюдаете',
   'Move sent…': 'Ход отправлен…',
   'The table state arrived corrupted. Waiting for an update.': 'Состояние стола пришло повреждённым. Ждём обновления.',
   'The host is preparing the table': 'Хозяин готовит стол',

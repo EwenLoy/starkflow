@@ -848,8 +848,10 @@ export class ChessScene {
     }
 
     this.pieces.delete(from);
+    moving.userData.square = to;
     this.pieces.set(to, moving);
     if (castlingRook) {
+      castlingRook.rook.userData.square = castlingRook.to;
       this.pieces.delete(castlingRook.from);
       this.pieces.set(castlingRook.to, castlingRook.rook);
     }
@@ -865,6 +867,7 @@ export class ChessScene {
   }
 
   #rebuild(nextBoard, { drop = false } = {}) {
+    for (const [square, group] of this.pieces.entries()) group.userData.square = square;
     for (const [square, group] of [...this.pieces.entries()]) {
       const piece = nextBoard.get(square);
       if (!piece || piece.type !== group.userData.type || piece.color !== group.userData.color) {
@@ -1102,10 +1105,25 @@ export class ChessScene {
     this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const hits = this.raycaster.intersectObject(this.hitPlane, false);
-    if (!hits.length) return null;
-    const p = hits[0].point;
+
+    // Tall pieces hide the board plane. If a piece is under the cursor,
+    // its own square wins: otherwise clicking the top of a king would map
+    // to the empty square in front of it.
+    const hits = this.raycaster.intersectObjects([...this.pieces.values()], true);
+    for (const hit of hits) {
+      let node = hit.object;
+      while (node && !node.userData?.square) node = node.parent;
+      if (node?.userData?.square) return node.userData.square;
+    }
+
+    const boardHits = this.raycaster.intersectObject(this.hitPlane, false);
+    if (!boardHits.length) return null;
+    const p = boardHits[0].point;
     return squareAt(p.x, p.z);
+  }
+
+  squareFromPoint(clientX, clientY) {
+    return this.#pickSquare(clientX, clientY);
   }
 
   #onPointerMove(e) {

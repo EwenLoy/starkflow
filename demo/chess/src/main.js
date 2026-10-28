@@ -1,10 +1,10 @@
-import { ChessScene } from './scene.js?v=20261028-9';
-import { StarkFlowClient } from './net.js?v=20261028-9';
-import { ChessSession, START_FEN } from './session.js?v=20261028-9';
-import { ChessAudio } from './audio.js?v=20261028-9';
-import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-9';
-import { pieceGlyph } from './pieces.js?v=20261028-9';
-import { LocalNet } from './offline.js?v=20261028-9';
+import { ChessScene } from './scene.js?v=20261028-11';
+import { StarkFlowClient } from './net.js?v=20261028-11';
+import { ChessSession, START_FEN } from './session.js?v=20261028-11';
+import { ChessAudio } from './audio.js?v=20261028-11';
+import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-11';
+import { pieceGlyph } from './pieces.js?v=20261028-11';
+import { LocalNet } from './offline.js?v=20261028-11';
 import {
   applyTranslations,
   getLocale,
@@ -12,7 +12,7 @@ import {
   pluralRu,
   setLocale,
   t,
-} from './i18n.js?v=20261028-9';
+} from './i18n.js?v=20261028-11';
 
 const CONFIG = {
   url: 'wss://starkflow.orkestr.run/ws',

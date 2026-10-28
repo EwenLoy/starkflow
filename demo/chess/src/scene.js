@@ -207,6 +207,11 @@ export class ChessScene {
     this.ripples = [];
     this.flares = [];
     this.burstAssets = [];
+    this.shards = [];
+    this.flashLights = [];
+    this.pulses = [];
+    this.pendingBoard = null;
+    this.disposed = false;
     this.moveToken = 0;
     this.hintTimer = null;
     this.clock = new THREE.Clock();
@@ -833,6 +838,7 @@ export class ChessScene {
   }
 
   #animateMove(nextBoard, lastMove, duration) {
+    this.#flushMoves();
     const { from, to } = lastMove;
     const moving = this.pieces.get(from);
     if (!moving) {
@@ -846,8 +852,7 @@ export class ChessScene {
     const isKnight = moving.userData.type === 'n';
     const isPromotion = !!lastMove.promotion;
     const moveDuration = isPromotion ? duration * 1.3 : duration;
-    const token = this.moveToken + 1;
-    this.moveToken = token;
+    this.moveToken += 1;
     this.animating = true;
     this.moveAnims = [
       {
@@ -877,8 +882,8 @@ export class ChessScene {
         sink: true,
         spin: (Math.random() - 0.5) * 1.6,
       });
-      this.#burst(captured.position.clone().add(new THREE.Vector3(0, 0.4, 0)), 0xe2c487, 18);
-      this.#ripple(captured.position.clone(), captured.userData.color);
+      this.#captureEffect(captured.position.clone(), captured.userData.color, moving.userData.color);
+      this.pulses.push({ mesh: moving, t: 0, duration: 0.5 });
     }
 
     // Castling: move the rook together with the king.
@@ -913,13 +918,27 @@ export class ChessScene {
 
     this.#updateLastMove(lastMove);
     this.#clearSelection();
+    this.pendingBoard = nextBoard;
+  }
 
-    setTimeout(() => {
-      if (this.moveToken !== token) return;
-      this.#rebuild(nextBoard, { drop: false });
+  #flushMoves() {
+    if (!this.moveAnims.length) {
       this.animating = false;
-      this.moveAnims = [];
-    }, moveDuration * 1000 + 30);
+      return;
+    }
+    for (const anim of this.moveAnims) {
+      if (anim.done) continue;
+      anim.done = true;
+      if (anim.sink) {
+        this.boardGroup.remove(anim.mesh);
+      } else {
+        anim.mesh.position.copy(anim.end);
+        anim.mesh.rotation.set(0, anim.mesh.rotation.y, 0);
+        anim.mesh.scale.setScalar(1);
+      }
+    }
+    this.moveAnims = [];
+    this.animating = false;
   }
 
   #rebuild(nextBoard, { drop = false } = {}) {
@@ -931,6 +950,19 @@ export class ChessScene {
         this.pieces.delete(square);
       }
     }
+    const busy = new Set();
+    for (const anim of this.moveAnims) {
+      if (!anim.done) busy.add(anim.mesh);
+    }
+    for (const spawn of this.spawnAnims) busy.add(spawn.group);
+    for (const [square, group] of this.pieces.entries()) {
+      if (busy.has(group)) continue;
+      group.position.copy(squarePos(square));
+      group.rotation.x = 0;
+      group.rotation.z = 0;
+      group.scale.setScalar(1);
+    }
+
     let index = 0;
     for (const [square, piece] of nextBoard.entries()) {
       if (this.pieces.has(square)) continue;
@@ -953,6 +985,8 @@ export class ChessScene {
   }
 
   clearBoard() {
+    this.#flushMoves();
+    this.pendingBoard = null;
     for (const group of this.pieces.values()) this.boardGroup.remove(group);
     this.pieces.clear();
     this.#clearSelection();
@@ -1216,6 +1250,44 @@ export class ChessScene {
     this.#burst(squarePos(square, 0.5), 0xffe8b6, 26);
   }
 
+  #captureEffect(position, victimColor, captorColor) {
+    const accent = victimColor === 'b' ? 0x9bd4b7 : 0xf2d69a;
+    this.#burst(position.clone().setY(position.y + 0.46), accent, 22);
+    this.#burst(position.clone().setY(position.y + 0.22), 0xffe9bd, 12);
+    this.#ripple(position.clone(), victimColor);
+    this.#shards(position.clone().setY(position.y + 0.42), 7);
+    const light = new THREE.PointLight(captorColor === 'b' ? 0x8fd7b4 : 0xffd7a0, 30, 3.6, 2);
+    light.position.copy(position).setY(0.85);
+    this.scene.add(light);
+    this.flashLights.push({ light, t: 0, duration: 0.45, peak: 30 });
+  }
+
+  #shards(origin, count) {
+    for (let i = 0; i < count; i += 1) {
+      const mesh = new THREE.Mesh(
+        new THREE.TetrahedronGeometry(0.036 + Math.random() * 0.032),
+        new THREE.MeshStandardMaterial({
+          color: 0xe9d9b8,
+          roughness: 0.32,
+          metalness: 0.3,
+          transparent: true,
+          opacity: 1,
+        }),
+      );
+      mesh.position.copy(origin);
+      this.scene.add(mesh);
+      const angle = Math.random() * TAU;
+      const speed = 0.9 + Math.random() * 1.5;
+      this.shards.push({
+        mesh,
+        velocity: new THREE.Vector3(Math.cos(angle) * speed * 0.55, 1.2 + Math.random() * 1.4, Math.sin(angle) * speed * 0.55),
+        spin: new THREE.Vector3(Math.random() * 7, Math.random() * 7, Math.random() * 7),
+        t: 0,
+        duration: 0.9 + Math.random() * 0.45,
+      });
+    }
+  }
+
   #updateEffects(dt) {
     if (this.ripples.length) {
       for (const ripple of this.ripples) {
@@ -1248,14 +1320,61 @@ export class ChessScene {
       }
       this.flares = this.flares.filter((flare) => flare.t < flare.duration);
     }
+    if (this.shards.length) {
+      for (const shard of this.shards) {
+        shard.t += dt;
+        shard.velocity.y -= 9.4 * dt;
+        shard.mesh.position.addScaledVector(shard.velocity, dt);
+        shard.mesh.rotation.x += shard.spin.x * dt;
+        shard.mesh.rotation.y += shard.spin.y * dt;
+        shard.mesh.rotation.z += shard.spin.z * dt;
+        shard.mesh.material.opacity = clamp(1 - shard.t / shard.duration, 0, 1);
+      }
+      const dead = this.shards.filter((shard) => shard.t >= shard.duration);
+      for (const shard of dead) {
+        this.scene.remove(shard.mesh);
+        shard.mesh.geometry.dispose();
+        shard.mesh.material.dispose();
+      }
+      this.shards = this.shards.filter((shard) => shard.t < shard.duration);
+    }
+    if (this.flashLights.length) {
+      for (const flash of this.flashLights) {
+        flash.t += dt;
+        const k = clamp(flash.t / flash.duration, 0, 1);
+        flash.light.intensity = flash.peak * (1 - k) ** 2;
+      }
+      const dead = this.flashLights.filter((flash) => flash.t >= flash.duration);
+      for (const flash of dead) this.scene.remove(flash.light);
+      this.flashLights = this.flashLights.filter((flash) => flash.t < flash.duration);
+    }
+    if (this.pulses.length) {
+      for (const pulse of this.pulses) {
+        pulse.t += dt;
+        const k = clamp(pulse.t / pulse.duration, 0, 1);
+        pulse.mesh.scale.setScalar(1 + Math.sin(k * Math.PI) * 0.14);
+      }
+      const dead = this.pulses.filter((pulse) => pulse.t >= pulse.duration);
+      for (const pulse of dead) pulse.mesh.scale.setScalar(1);
+      this.pulses = this.pulses.filter((pulse) => pulse.t < pulse.duration);
+    }
   }
 
   celebrate(winner) {
+    const accent = winner === 'b' ? 0x8bd5b2 : 0xf0cf8b;
     const origin = new THREE.Vector3(0, 0.8, winner === 'b' ? -2 : 2);
-    this.#burst(origin, winner === 'b' ? 0x8bd5b2 : 0xf0cf8b, 60);
+    this.#burst(origin, accent, 60);
     this.#burst(origin.clone().add(new THREE.Vector3(0, 0.7, 0)), 0xffe6b0, 35);
     for (let i = -2; i <= 2; i += 1) {
       this.#ripple(new THREE.Vector3(i * 1.1, 0, winner === 'b' ? -2.4 : 2.4), winner === 'b' ? 'b' : 'w');
+    }
+    for (let i = 0; i < 5; i += 1) {
+      setTimeout(() => {
+        if (this.disposed) return;
+        const spot = new THREE.Vector3((Math.random() - 0.5) * 7.5, 0.7 + Math.random() * 0.9, (Math.random() - 0.5) * 6.5);
+        this.#burst(spot, i % 2 ? 0xffe6b0 : accent, 24);
+        this.#ripple(spot.clone().setY(0), winner === 'b' ? 'b' : 'w');
+      }, 180 + i * 170);
     }
     if (this.keyLight) {
       this.keyLight.color.set(winner === 'b' ? 0x9fe3c0 : 0xffd995);
@@ -1373,7 +1492,9 @@ export class ChessScene {
       }
       if (k >= 1) {
         anim.done = true;
-        if (!anim.sink) {
+        if (anim.sink) {
+          this.boardGroup.remove(anim.mesh);
+        } else {
           anim.mesh.rotation.z = 0;
           anim.mesh.rotation.x = 0;
           this.#burst(anim.end.clone().setY(0.16), anim.color === 'b' ? 0x9bd4b7 : 0xf2d69a, 6);
@@ -1396,6 +1517,16 @@ export class ChessScene {
       }
     }
     this.spawnAnims = this.spawnAnims.filter((s) => !s.done);
+
+    if (this.animating && this.moveAnims.length && this.moveAnims.every((anim) => anim.done)) {
+      this.animating = false;
+      this.moveAnims = [];
+      if (this.pendingBoard) {
+        const board = this.pendingBoard;
+        this.pendingBoard = null;
+        this.#rebuild(board, { drop: false });
+      }
+    }
   }
 
   #updateMarkers(dt) {
@@ -1475,6 +1606,7 @@ export class ChessScene {
   }
 
   dispose() {
+    this.disposed = true;
     cancelAnimationFrame(this._raf);
     clearTimeout(this.hintTimer);
     window.removeEventListener('resize', this._onResize);

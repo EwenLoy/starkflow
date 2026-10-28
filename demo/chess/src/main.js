@@ -392,11 +392,6 @@ class SalonApp {
     });
     $('copyBtn').addEventListener('click', () => this.copyInvite());
     $('inviteBtn').addEventListener('click', () => this.copyInvite());
-    $('resetCameraBtn').addEventListener('click', () => this.scene.resetCamera());
-    $('orbitLeftBtn').addEventListener('click', () => this.scene.orbitBy(-0.24));
-    $('orbitRightBtn').addEventListener('click', () => this.scene.orbitBy(0.24));
-    $('zoomInBtn').addEventListener('click', () => this.scene.zoomBy(0.86));
-    $('zoomOutBtn').addEventListener('click', () => this.scene.zoomBy(1.14));
     $('topViewBtn').addEventListener('click', () => this.scene.topView());
     $('flipBtn').addEventListener('click', () => this.scene.flipView());
     $('hintBtn').addEventListener('click', () => this.giveHint());
@@ -1734,7 +1729,7 @@ class SalonApp {
       <p>${t('Choose a table in the lounge or open your own. The first guest plays White, the second plays Black, everyone else watches.')}</p>
       <div class="help-grid">
         <div class="help-item"><span class="help-item__icon">♟</span><div><strong>${t('Move')}</strong><p>${t('Click your piece, then a highlighted square. Dots are empty squares, rings are captures.')}</p></div></div>
-        <div class="help-item"><span class="help-item__icon">♜</span><div><strong>${t('Camera')}</strong><p>${t('Drag anywhere on the board to spin the view, scroll to zoom, and press <b>T</b> for a clean top-down angle. “Flip” changes sides, “Camera” returns to the ceremonial view.')}</p></div></div>
+        <div class="help-item"><span class="help-item__icon">♜</span><div><strong>${t('Camera')}</strong><p>${t('Drag the board with the mouse or a finger to spin the camera, the wheel or a pinch zooms, and “Top view” lays the board flat for a clean plan.')}</p></div></div>
         <div class="help-item"><span class="help-item__icon">♞</span><div><strong>${t('Opponent')}</strong><p>${t('Send a friend the table link. They will land straight in the game. For two players on one computer, a private window or a second browser profile is best.')}</p></div></div>
         <div class="help-item"><span class="help-item__icon">♛</span><div><strong>${t('Fair play')}</strong><p>${t('The server relays the position and moves, while the rules are checked on the client. This is a friendly salon, not an anti-cheat tournament.')}</p></div></div>
         <div class="help-item"><span class="help-item__icon">✦</span><div><strong>${t('Keys')}</strong><p>${t('<b>R</b> — camera, <b>F</b> — flip, <b>M</b> — sound, <b>Esc</b> — close a window.')}</p></div></div>

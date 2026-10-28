@@ -180,8 +180,8 @@ export class ChessScene {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.075;
     this.controls.enablePan = false;
-    this.controls.rotateSpeed = 0.62;
-    this.controls.zoomSpeed = 0.8;
+    this.controls.rotateSpeed = 0.7;
+    this.controls.zoomSpeed = 0.9;
     this.controls.minDistance = 6.6;
     this.controls.maxDistance = 20;
     this.controls.minPolarAngle = 0.22;
@@ -195,6 +195,7 @@ export class ChessScene {
     this.hoverSquare = null;
     this.interactive = false;
     this.viewSide = 'w';
+    this.topViewActive = false;
     this.mode = 'lobby';
     this.pieces = new Map();
     this.animating = false;
@@ -738,11 +739,18 @@ export class ChessScene {
 
   topView() {
     this.controls.autoRotate = false;
+    if (this.topViewActive) {
+      this.topViewActive = false;
+      this.setViewSide(this.viewSide, true);
+      return;
+    }
+    this.topViewActive = true;
     this.#animateCamera(new THREE.Vector3(0.01, 15.8, 4.2), new THREE.Vector3(0, 0.3, 0.5), 1.05);
   }
 
   setViewSide(side, animate = true) {
     this.viewSide = side === 'b' ? 'b' : 'w';
+    this.topViewActive = false;
     if (this.mode !== 'game') return;
     this.controls.autoRotate = false;
     if (animate) this.#animateCamera(this.#sidePosition(this.viewSide), new THREE.Vector3(0, 0.42, 0), 1.35);

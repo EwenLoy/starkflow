@@ -1,4 +1,4 @@
-import { ChessScene } from './scene.js?v=20261028-17';
+import { ChessScene } from './scene.js?v=20261028-18';
 import { StarkFlowClient } from './net.js?v=20261028-14';
 import { ChessSession, START_FEN } from './session.js?v=20261028-14';
 import { ChessAudio } from './audio.js?v=20261028-14';

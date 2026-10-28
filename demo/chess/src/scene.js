@@ -6,13 +6,14 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { createPiece, pieceGlyph } from './pieces.js?v=20261028-7';
+import { createPiece, pieceGlyph } from './pieces.js?v=20261028-9';
 
 const FILES = 'abcdefgh';
 const PIECE_Y = 0.105;
 const TAU = Math.PI * 2;
 
 const easeOut = (t) => 1 - (1 - t) ** 3;
+const easeOutBack = (t) => 1 + 2.4 * (t - 1) ** 3 + 1.4 * (t - 1) ** 2;
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
@@ -171,20 +172,20 @@ export class ChessScene {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setClearColor(0x050c09, 0);
 
-    this.camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.1, 100);
-    this.camera.position.set(0.4, 9.2, 11.6);
+    this.camera = new THREE.PerspectiveCamera(36, window.innerWidth / window.innerHeight, 0.1, 100);
+    this.camera.position.set(0.4, 7.6, 11.4);
 
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.target.set(0, 0.35, 0);
     this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.065;
+    this.controls.dampingFactor = 0.075;
     this.controls.enablePan = false;
-    this.controls.rotateSpeed = 0.5;
-    this.controls.zoomSpeed = 0.65;
-    this.controls.minDistance = 8.4;
-    this.controls.maxDistance = 18;
-    this.controls.minPolarAngle = 0.56;
-    this.controls.maxPolarAngle = 1.35;
+    this.controls.rotateSpeed = 0.62;
+    this.controls.zoomSpeed = 0.8;
+    this.controls.minDistance = 6.6;
+    this.controls.maxDistance = 20;
+    this.controls.minPolarAngle = 0.22;
+    this.controls.maxPolarAngle = 1.45;
     this.controls.autoRotateSpeed = 0.55;
     this.controls.update();
 
@@ -201,6 +202,11 @@ export class ChessScene {
     this.spawnAnims = [];
     this.cameraTween = null;
     this.particles = [];
+    this.trails = [];
+    this.ripples = [];
+    this.flares = [];
+    this.burstAssets = [];
+    this.moveToken = 0;
     this.hintTimer = null;
     this.clock = new THREE.Clock();
     this.time = 0;
@@ -241,6 +247,7 @@ export class ChessScene {
     key.shadow.normalBias = 0.018;
     this.scene.add(key, key.target);
     this.keyLight = key;
+    this.keyLightBase = key.intensity;
 
     const rim = new THREE.SpotLight(0x6ea98f, 90, 28, 0.72, 0.88, 1.8);
     rim.position.set(8.5, 8, -7);
@@ -725,8 +732,13 @@ export class ChessScene {
   }
 
   #sidePosition(side) {
-    if (side === 'b') return new THREE.Vector3(-0.25, 9.4, -11.7);
-    return new THREE.Vector3(0.25, 9.4, 11.7);
+    if (side === 'b') return new THREE.Vector3(-0.35, 7.4, -11.2);
+    return new THREE.Vector3(0.35, 7.4, 11.2);
+  }
+
+  topView() {
+    this.controls.autoRotate = false;
+    this.#animateCamera(new THREE.Vector3(0.01, 15.8, 4.2), new THREE.Vector3(0, 0.3, 0.5), 1.05);
   }
 
   setViewSide(side, animate = true) {
@@ -747,6 +759,32 @@ export class ChessScene {
 
   resetCamera() {
     this.setViewSide(this.viewSide, true);
+  }
+
+  orbitBy(theta, phi = 0) {
+    this.cameraTween = null;
+    this.controls.enabled = true;
+    const target = this.controls.target.clone();
+    const offset = this.camera.position.clone().sub(target);
+    const spherical = new THREE.Spherical().setFromVector3(offset);
+    spherical.theta += theta;
+    spherical.phi = clamp(spherical.phi + phi, this.controls.minPolarAngle, this.controls.maxPolarAngle);
+    offset.setFromSpherical(spherical);
+    this.camera.position.copy(target).add(offset);
+    this.camera.lookAt(target);
+    this.controls.update();
+  }
+
+  zoomBy(factor) {
+    this.cameraTween = null;
+    this.controls.enabled = true;
+    const target = this.controls.target.clone();
+    const offset = this.camera.position.clone().sub(target);
+    const distance = clamp(offset.length() * factor, this.controls.minDistance, this.controls.maxDistance);
+    offset.setLength(distance);
+    this.camera.position.copy(target).add(offset);
+    this.camera.lookAt(target);
+    this.controls.update();
   }
 
   #animateCamera(toPos, toTarget, duration) {
@@ -798,6 +836,10 @@ export class ChessScene {
     const start = moving.position.clone();
     const end = squarePos(to);
     const isKnight = moving.userData.type === 'n';
+    const isPromotion = !!lastMove.promotion;
+    const moveDuration = isPromotion ? duration * 1.3 : duration;
+    const token = this.moveToken + 1;
+    this.moveToken = token;
     this.animating = true;
     this.moveAnims = [
       {
@@ -805,10 +847,14 @@ export class ChessScene {
         start,
         end,
         t: 0,
-        duration,
-        arc: isKnight ? 0.7 : 0.18,
+        duration: moveDuration,
+        arc: isKnight ? 0.72 : isPromotion ? 0.48 : 0.24,
+        color: moving.userData.color,
+        spin: isPromotion ? TAU : 0,
       },
     ];
+    this.#moveTrail(start, end, isKnight, moving.userData.color);
+    if (isPromotion) this.#promoteFlare(to, moving.userData.color);
 
     const captureSquare = lastMove.enPassant ? `${to[0]}${from[1]}` : to;
     const captured = this.pieces.get(captureSquare);
@@ -817,13 +863,14 @@ export class ChessScene {
       this.moveAnims.push({
         mesh: captured,
         start: captured.position.clone(),
-        end: captured.position.clone().add(new THREE.Vector3(0, -0.35, 0)),
+        end: captured.position.clone().add(new THREE.Vector3(0, -0.34, 0)),
         t: 0,
-        duration: duration * 0.82,
+        duration: duration * 0.78,
         sink: true,
-        spin: (Math.random() - 0.5) * 0.8,
+        spin: (Math.random() - 0.5) * 1.6,
       });
-      this.#burst(captured.position.clone().add(new THREE.Vector3(0, 0.4, 0)), 0xe2c487, 14);
+      this.#burst(captured.position.clone().add(new THREE.Vector3(0, 0.4, 0)), 0xe2c487, 18);
+      this.#ripple(captured.position.clone(), captured.userData.color);
     }
 
     // Castling: move the rook together with the king.
@@ -860,10 +907,11 @@ export class ChessScene {
     this.#clearSelection();
 
     setTimeout(() => {
+      if (this.moveToken !== token) return;
       this.#rebuild(nextBoard, { drop: false });
       this.animating = false;
       this.moveAnims = [];
-    }, duration * 1000 + 30);
+    }, moveDuration * 1000 + 30);
   }
 
   #rebuild(nextBoard, { drop = false } = {}) {
@@ -1051,6 +1099,7 @@ export class ChessScene {
       );
       ring.rotation.x = -Math.PI / 2;
       ring.position.copy(squarePos(square, 0.096));
+      ring.userData.baseOpacity = 0.9;
       this.hintGroup.add(ring);
     }
     const a = squarePos(move.from, 0.12);
@@ -1070,8 +1119,30 @@ export class ChessScene {
     );
     shaft.position.copy(mid);
     shaft.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+    shaft.userData.baseOpacity = 0.6;
     this.hintGroup.add(shaft);
     this.hintTimer = setTimeout(() => this.#clearGroup(this.hintGroup), duration);
+  }
+
+  #moveTrail(start, end, isKnight, color) {
+    const a = start.clone();
+    a.y = 0.22;
+    const b = end.clone();
+    b.y = 0.22;
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    mid.y += isKnight ? 1.05 : 0.4;
+    const points = new THREE.QuadraticBezierCurve3(a, mid, b).getPoints(24);
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({
+      color: color === 'b' ? 0x9bd4b7 : 0xf2d69a,
+      transparent: true,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const line = new THREE.Line(geometry, material);
+    this.scene.add(line);
+    this.trails.push({ line, life: 0, maxLife: 0.55 });
   }
 
   #burst(origin, color = 0xe2c487, count = 24) {
@@ -1083,6 +1154,8 @@ export class ChessScene {
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
+    const asset = { geometry, material, count };
+    this.burstAssets.push(asset);
     for (let i = 0; i < count; i += 1) {
       const mesh = new THREE.Mesh(geometry, material);
       mesh.position.copy(origin);
@@ -1091,6 +1164,7 @@ export class ChessScene {
       this.scene.add(mesh);
       this.particles.push({
         mesh,
+        asset,
         velocity: new THREE.Vector3(Math.cos(angle) * speed * 0.55, 0.6 + Math.random() * 1.1, Math.sin(angle) * speed * 0.55),
         life: 0,
         maxLife: 0.65 + Math.random() * 0.55,
@@ -1098,17 +1172,90 @@ export class ChessScene {
     }
   }
 
+  #ripple(position, color) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.26, 0.34, 44),
+      new THREE.MeshBasicMaterial({
+        color: color === 'b' ? 0x9bd4b7 : 0xf2d69a,
+        transparent: true,
+        opacity: 0.62,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.copy(position).setY(0.1);
+    this.scene.add(ring);
+    this.ripples.push({ mesh: ring, t: 0, duration: 0.62 });
+  }
+
+  #promoteFlare(square, color) {
+    const column = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.32, 1.9, 22, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: color === 'b' ? 0x8fd7b4 : 0xf6dda2,
+        transparent: true,
+        opacity: 0.5,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    column.position.copy(squarePos(square, 1.0));
+    this.scene.add(column);
+    this.flares.push({ mesh: column, t: 0, duration: 0.95, baseY: column.position.y });
+    this.#burst(squarePos(square, 0.5), 0xffe8b6, 26);
+  }
+
+  #updateEffects(dt) {
+    if (this.ripples.length) {
+      for (const ripple of this.ripples) {
+        ripple.t += dt;
+        const k = clamp(ripple.t / ripple.duration, 0, 1);
+        ripple.mesh.scale.setScalar(1 + k * 2.7);
+        ripple.mesh.material.opacity = 0.62 * (1 - k);
+      }
+      const dead = this.ripples.filter((ripple) => ripple.t >= ripple.duration);
+      for (const ripple of dead) {
+        this.scene.remove(ripple.mesh);
+        ripple.mesh.geometry.dispose();
+        ripple.mesh.material.dispose();
+      }
+      this.ripples = this.ripples.filter((ripple) => ripple.t < ripple.duration);
+    }
+    if (this.flares.length) {
+      for (const flare of this.flares) {
+        flare.t += dt;
+        const k = clamp(flare.t / flare.duration, 0, 1);
+        flare.mesh.material.opacity = 0.5 * (1 - k);
+        flare.mesh.scale.set(1 + k * 0.45, 1 + k * 0.6, 1 + k * 0.45);
+        flare.mesh.position.y = flare.baseY + k * 0.75;
+      }
+      const dead = this.flares.filter((flare) => flare.t >= flare.duration);
+      for (const flare of dead) {
+        this.scene.remove(flare.mesh);
+        flare.mesh.geometry.dispose();
+        flare.mesh.material.dispose();
+      }
+      this.flares = this.flares.filter((flare) => flare.t < flare.duration);
+    }
+  }
+
   celebrate(winner) {
     const origin = new THREE.Vector3(0, 0.8, winner === 'b' ? -2 : 2);
     this.#burst(origin, winner === 'b' ? 0x8bd5b2 : 0xf0cf8b, 60);
     this.#burst(origin.clone().add(new THREE.Vector3(0, 0.7, 0)), 0xffe6b0, 35);
+    for (let i = -2; i <= 2; i += 1) {
+      this.#ripple(new THREE.Vector3(i * 1.1, 0, winner === 'b' ? -2.4 : 2.4), winner === 'b' ? 'b' : 'w');
+    }
     if (this.keyLight) {
       this.keyLight.color.set(winner === 'b' ? 0x9fe3c0 : 0xffd995);
-      this.keyLight.intensity = 900;
+      this.keyLight.intensity = this.keyLightBase * 1.55;
       setTimeout(() => {
         if (!this.keyLight) return;
         this.keyLight.color.set(0xffd9a3);
-        this.keyLight.intensity = 620;
+        this.keyLight.intensity = this.keyLightBase;
       }, 1900);
     }
   }
@@ -1170,6 +1317,8 @@ export class ChessScene {
     this.#updateMarkers(dt);
     this.#updateDust(dt);
     this.#updateParticles(dt);
+    this.#updateTrails(dt);
+    this.#updateEffects(dt);
 
     if (this.brazierFlames) {
       for (const [i, flame] of this.brazierFlames.entries()) {
@@ -1205,19 +1354,33 @@ export class ChessScene {
       anim.mesh.position.lerpVectors(anim.start, anim.end, e);
       if (anim.arc) anim.mesh.position.y += Math.sin(Math.PI * k) * anim.arc;
       if (anim.sink) {
-        anim.mesh.scale.setScalar(1 - e * 0.55);
+        anim.mesh.scale.setScalar(1 - e * 0.62);
         anim.mesh.rotation.z = anim.spin * e;
+        anim.mesh.rotation.x = e * 0.7;
+      } else {
+        const lift = Math.sin(Math.PI * k);
+        anim.mesh.rotation.z = lift * (anim.start.x >= anim.end.x ? -0.08 : 0.08);
+        anim.mesh.rotation.x = lift * 0.045;
+        if (anim.spin) anim.mesh.rotation.y = anim.spin * e;
       }
-      if (k >= 1) anim.done = true;
+      if (k >= 1) {
+        anim.done = true;
+        if (!anim.sink) {
+          anim.mesh.rotation.z = 0;
+          anim.mesh.rotation.x = 0;
+          this.#burst(anim.end.clone().setY(0.16), anim.color === 'b' ? 0x9bd4b7 : 0xf2d69a, 6);
+          this.#ripple(anim.end.clone(), anim.color);
+        }
+      }
     }
 
     for (const spawn of this.spawnAnims) {
       spawn.t += dt;
       if (spawn.t < 0) continue;
       const k = clamp(spawn.t / spawn.duration, 0, 1);
-      const e = easeOut(k);
+      const e = easeOutBack(k);
       spawn.group.position.y = spawn.target.y + (1 - e) * 1.8;
-      spawn.group.scale.setScalar(0.82 + e * 0.18);
+      spawn.group.scale.setScalar(clamp(0.82 + e * 0.18, 0.7, 1.08));
       if (k >= 1) {
         spawn.group.position.copy(spawn.target);
         spawn.group.scale.setScalar(1);
@@ -1232,6 +1395,19 @@ export class ChessScene {
       const phase = marker.userData.phase || 0;
       const pulse = 1 + Math.sin(this.time * 2.6 + phase) * 0.09;
       marker.scale.setScalar(pulse);
+    }
+    for (const child of this.selectionGroup.children) {
+      const pulse = 1 + Math.sin(this.time * 3.2) * 0.025;
+      child.scale.setScalar(pulse);
+    }
+    if (this.hoverRing) {
+      this.hoverRing.material.opacity = 0.42 + Math.sin(this.time * 3.4) * 0.12;
+    }
+    if (this.hintGroup.children.length) {
+      const glow = 0.65 + Math.sin(this.time * 4.4) * 0.35;
+      for (const child of this.hintGroup.children) {
+        child.material.opacity = (child.userData.baseOpacity || 0.6) * glow;
+      }
     }
     if (this.checkGroup.children[0]) {
       const ring = this.checkGroup.children[0];
@@ -1264,9 +1440,30 @@ export class ChessScene {
     const dead = this.particles.filter((p) => p.life >= p.maxLife);
     for (const p of dead) {
       this.scene.remove(p.mesh);
-      p.mesh.material.dispose();
+      p.asset.count -= 1;
     }
     this.particles = this.particles.filter((p) => p.life < p.maxLife);
+    for (const asset of [...this.burstAssets]) {
+      if (asset.count > 0) continue;
+      asset.geometry.dispose();
+      asset.material.dispose();
+      this.burstAssets = this.burstAssets.filter((item) => item !== asset);
+    }
+  }
+
+  #updateTrails(dt) {
+    if (!this.trails.length) return;
+    for (const trail of this.trails) {
+      trail.life += dt;
+      trail.line.material.opacity = clamp(0.55 * (1 - trail.life / trail.maxLife), 0, 1);
+    }
+    const dead = this.trails.filter((trail) => trail.life >= trail.maxLife);
+    for (const trail of dead) {
+      this.scene.remove(trail.line);
+      trail.line.geometry.dispose();
+      trail.line.material.dispose();
+    }
+    this.trails = this.trails.filter((trail) => trail.life < trail.maxLife);
   }
 
   dispose() {

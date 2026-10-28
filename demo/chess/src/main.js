@@ -1,10 +1,10 @@
-import { ChessScene } from './scene.js?v=20261028-7';
-import { StarkFlowClient } from './net.js?v=20261028-7';
-import { ChessSession, START_FEN } from './session.js?v=20261028-7';
-import { ChessAudio } from './audio.js?v=20261028-7';
-import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-7';
-import { pieceGlyph } from './pieces.js?v=20261028-7';
-import { LocalNet } from './offline.js?v=20261028-7';
+import { ChessScene } from './scene.js?v=20261028-9';
+import { StarkFlowClient } from './net.js?v=20261028-9';
+import { ChessSession, START_FEN } from './session.js?v=20261028-9';
+import { ChessAudio } from './audio.js?v=20261028-9';
+import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-9';
+import { pieceGlyph } from './pieces.js?v=20261028-9';
+import { LocalNet } from './offline.js?v=20261028-9';
 import {
   applyTranslations,
   getLocale,
@@ -12,7 +12,7 @@ import {
   pluralRu,
   setLocale,
   t,
-} from './i18n.js?v=20261028-7';
+} from './i18n.js?v=20261028-9';
 
 const CONFIG = {
   url: 'wss://starkflow.orkestr.run/ws',
@@ -156,6 +156,7 @@ class SalonApp {
     this.botThinking = false;
     this.botRequestId = 0;
     this.botTimer = null;
+    this.botWatchdog = null;
     this.botWorker = null;
     this.botWorkerBroken = false;
     this.offlineNet = null;
@@ -392,6 +393,11 @@ class SalonApp {
     $('copyBtn').addEventListener('click', () => this.copyInvite());
     $('inviteBtn').addEventListener('click', () => this.copyInvite());
     $('resetCameraBtn').addEventListener('click', () => this.scene.resetCamera());
+    $('orbitLeftBtn').addEventListener('click', () => this.scene.orbitBy(-0.24));
+    $('orbitRightBtn').addEventListener('click', () => this.scene.orbitBy(0.24));
+    $('zoomInBtn').addEventListener('click', () => this.scene.zoomBy(0.86));
+    $('zoomOutBtn').addEventListener('click', () => this.scene.zoomBy(1.14));
+    $('topViewBtn').addEventListener('click', () => this.scene.topView());
     $('flipBtn').addEventListener('click', () => this.scene.flipView());
     $('hintBtn').addEventListener('click', () => this.giveHint());
     $('drawBtn').addEventListener('click', () => this.askDraw());
@@ -839,7 +845,9 @@ class SalonApp {
 
   stopOfflineSession() {
     clearTimeout(this.botTimer);
+    clearTimeout(this.botWatchdog);
     this.botTimer = null;
+    this.botWatchdog = null;
     this.botThinking = false;
     this.botRequestId += 1;
     if (this.offlineSession) {
@@ -853,13 +861,19 @@ class SalonApp {
     $('copyBtn').hidden = false;
   }
 
+  clearBotWatchdog() {
+    clearTimeout(this.botWatchdog);
+    this.botWatchdog = null;
+  }
+
   ensureBotWorker() {
     if (this.botWorker || this.botWorkerBroken || typeof Worker === 'undefined') return;
     try {
-      this.botWorker = new Worker(new URL('./bot-worker.js?v=20261028-7', import.meta.url), { type: 'module' });
+      this.botWorker = new Worker(new URL('./bot-worker.js?v=20261028-8', import.meta.url), { type: 'module' });
       this.botWorker.onmessage = (event) => {
         const { id, move } = event.data || {};
         if (id !== this.botRequestId) return;
+        this.clearBotWatchdog();
         this.botThinking = false;
         if (!this.offline || !this.session?.isPlaying) return;
         if (move) this.applyBotMove(move);
@@ -868,7 +882,12 @@ class SalonApp {
       this.botWorker.onerror = () => {
         this.botWorkerBroken = true;
         this.botWorker = null;
-        if (this.botThinking) this.runBotFallback();
+        this.clearBotWatchdog();
+        this.botRequestId += 1;
+        if (this.botThinking) {
+          this.botThinking = false;
+          this.runBotFallback();
+        }
       };
     } catch {
       this.botWorkerBroken = true;
@@ -878,6 +897,11 @@ class SalonApp {
 
   maybeBotMove() {
     if (!this.offline || this.botThinking || !this.session?.isPlaying) return;
+    if (this.session.pending) {
+      clearTimeout(this.botTimer);
+      this.botTimer = setTimeout(() => this.maybeBotMove(), 180);
+      return;
+    }
     this.botColor = this.session.myColor === 'w' ? 'b' : 'w';
     if (!this.session.chess || this.session.chess.turn() !== this.botColor) return;
     this.botThinking = true;
@@ -895,6 +919,21 @@ class SalonApp {
     this.ensureBotWorker();
     if (this.botWorker) {
       this.botWorker.postMessage({ id, fen, level: this.offlineLevel });
+      this.clearBotWatchdog();
+      this.botWatchdog = setTimeout(() => {
+        if (id !== this.botRequestId || !this.botThinking) return;
+        this.botWorkerBroken = true;
+        try {
+          this.botWorker?.terminate();
+        } catch {
+          /* noop */
+        }
+        this.botWorker = null;
+        this.botThinking = false;
+        this.botRequestId += 1;
+        this.clearBotWatchdog();
+        this.runBotFallback();
+      }, 7000);
     } else {
       setTimeout(() => {
         if (id !== this.botRequestId || !this.offline) return;
@@ -902,7 +941,6 @@ class SalonApp {
           const move = chooseBotMove(fen, this.offlineLevel);
           this.botThinking = false;
           if (move) this.applyBotMove(move);
-          else this.botThinking = false;
         } catch {
           this.botThinking = false;
         }
@@ -911,6 +949,7 @@ class SalonApp {
   }
 
   runBotFallback() {
+    this.clearBotWatchdog();
     if (!this.offline || !this.session?.isPlaying) return;
     try {
       const move = chooseBotMove(this.session.chess.fen(), this.offlineLevel);
@@ -922,13 +961,15 @@ class SalonApp {
   }
 
   applyBotMove(move) {
-    if (!this.offline || !move) {
-      this.botThinking = false;
+    this.botThinking = false;
+    if (!this.offline || !move) return;
+    const result = this.session.tryColorMove(move.from, move.to, move.promotion || '', this.botColor);
+    if (result === 'pending') {
+      clearTimeout(this.botTimer);
+      this.botTimer = setTimeout(() => this.maybeBotMove(), 160);
       return;
     }
-    const result = this.session.tryColorMove(move.from, move.to, move.promotion || '', this.botColor);
     if (result !== 'ok') {
-      this.botThinking = false;
       const legal = this.session.chess?.moves({ verbose: true }) || [];
       const fallback = legal[Math.floor(Math.random() * legal.length)];
       if (fallback && this.session.chess.turn() === this.botColor) {
@@ -1171,7 +1212,7 @@ class SalonApp {
 
     if (game.status === 'playing') {
       phase.textContent = t('Game in progress');
-      const turnName = turn === 'w' ? t('White') : t('Black');
+      const turnLabel = t(turn === 'w' ? 'White to move' : 'Black to move');
       const opponent = turn === myColor ? null : this.playerName(turn === 'w' ? game.whiteId : game.blackId);
       if (myColor && turn === myColor) {
         title.textContent = this.session.inCheck ? t('Check — your move') : t('Your move');
@@ -1181,7 +1222,7 @@ class SalonApp {
       } else if (myColor) {
         title.textContent = t('{name} is thinking', { name: opponent || t('Opponent') });
         text.textContent = this.session.inCheck ? t('Opponent is in check. Watch their reply.') : t("Opponent's turn. Study the position or offer a draw.");
-        pill.textContent = t('{color} to move', { color: turnName });
+        pill.textContent = turnLabel;
         pill.className = 'turn-pill';
       } else {
         title.textContent = t('Game in progress');
@@ -1189,7 +1230,7 @@ class SalonApp {
           white: this.playerName(game.whiteId),
           black: this.playerName(game.blackId),
         });
-        pill.textContent = t('{color} to move', { color: turnName });
+        pill.textContent = turnLabel;
         pill.className = 'turn-pill';
       }
       return;
@@ -1333,7 +1374,7 @@ class SalonApp {
   onGlobalPointerUp(event) {
     const start = this.globalDown;
     this.globalDown = null;
-    if (!start || $('game').hidden || this.modalOpen) return;
+    if (!start || event.button !== 0 || $('game').hidden || this.modalOpen) return;
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) return;
     if (!this.net.room && !this.offline) return;
 
@@ -1503,6 +1544,8 @@ class SalonApp {
     if (this.session.game?.status === 'playing') return;
     if (this.session.newGame()) {
       this.closeResult();
+      this.lastViewColor = null;
+      this.scene.setViewSide(this.session.myColor || 'w');
       this.showToast(t('New game! The pieces are ready.'), 'ok');
     }
   }
@@ -1597,6 +1640,16 @@ class SalonApp {
     if (this.modalOpen) return;
     if (e.key === 'r' || e.key === 'R') this.scene.resetCamera();
     if (e.key === 'f' || e.key === 'F') this.scene.flipView();
+    if (e.key === 't' || e.key === 'T') this.scene.topView();
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (e.key === 'ArrowLeft') this.scene.orbitBy(-0.16);
+      if (e.key === 'ArrowRight') this.scene.orbitBy(0.16);
+      if (e.key === 'ArrowUp') this.scene.orbitBy(0, -0.09);
+      if (e.key === 'ArrowDown') this.scene.orbitBy(0, 0.09);
+    }
+    if (e.key === '+' || e.key === '=') this.scene.zoomBy(0.9);
+    if (e.key === '-' || e.key === '_') this.scene.zoomBy(1.1);
     if (e.key === 'm' || e.key === 'M') {
       const on = this.audio.toggle();
       this.refreshSoundButton();
@@ -1681,7 +1734,7 @@ class SalonApp {
       <p>${t('Choose a table in the lounge or open your own. The first guest plays White, the second plays Black, everyone else watches.')}</p>
       <div class="help-grid">
         <div class="help-item"><span class="help-item__icon">♟</span><div><strong>${t('Move')}</strong><p>${t('Click your piece, then a highlighted square. Dots are empty squares, rings are captures.')}</p></div></div>
-        <div class="help-item"><span class="help-item__icon">♜</span><div><strong>${t('Camera')}</strong><p>${t('Rotate the board with the mouse and zoom with the wheel. “Flip” changes sides, “Camera” returns to the ceremonial view.')}</p></div></div>
+        <div class="help-item"><span class="help-item__icon">♜</span><div><strong>${t('Camera')}</strong><p>${t('Drag anywhere on the board to spin the view, scroll to zoom, and press <b>T</b> for a clean top-down angle. “Flip” changes sides, “Camera” returns to the ceremonial view.')}</p></div></div>
         <div class="help-item"><span class="help-item__icon">♞</span><div><strong>${t('Opponent')}</strong><p>${t('Send a friend the table link. They will land straight in the game. For two players on one computer, a private window or a second browser profile is best.')}</p></div></div>
         <div class="help-item"><span class="help-item__icon">♛</span><div><strong>${t('Fair play')}</strong><p>${t('The server relays the position and moves, while the rules are checked on the client. This is a friendly salon, not an anti-cheat tournament.')}</p></div></div>
         <div class="help-item"><span class="help-item__icon">✦</span><div><strong>${t('Keys')}</strong><p>${t('<b>R</b> — camera, <b>F</b> — flip, <b>M</b> — sound, <b>Esc</b> — close a window.')}</p></div></div>

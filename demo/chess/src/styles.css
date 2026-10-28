@@ -1696,6 +1696,10 @@ svg {
   grid-column: 1 / -1;
 }
 
+.game.offline #resignBtn {
+  grid-column: 1 / -1;
+}
+
 .board-controls {
   position: absolute;
   bottom: 24px;
@@ -1731,6 +1735,26 @@ svg {
 .pill-btn svg {
   width: 13px;
   height: 13px;
+}
+
+.pill-btn--icon {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.board-controls__divider {
+  align-self: center;
+  width: 1px;
+  height: 17px;
+  margin: 0 2px;
+  background: var(--line);
 }
 
 .pill-btn:hover {

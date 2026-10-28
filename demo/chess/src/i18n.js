@@ -107,6 +107,11 @@ const ru = {
   'Copy table link': 'Скопировать ссылку на стол',
   'Invite a friend': 'Пригласить друга',
   'Reset camera': 'Сбросить камеру',
+  'Top view': 'Вид сверху',
+  'Rotate camera left': 'Повернуть камеру влево',
+  'Rotate camera right': 'Повернуть камеру вправо',
+  'Zoom in': 'Приблизить',
+  'Zoom out': 'Отдалить',
   'Black': 'Чёрные',
   'White': 'Белые',
   'Waiting for opponent': 'Ждём соперника',
@@ -264,8 +269,8 @@ const ru = {
   'Click your piece, then a highlighted square. Dots are empty squares, rings are captures.':
     'Нажмите на свою фигуру, затем на подсвеченное поле. Точки — свободные поля, кольца — взятия.',
   'Camera': 'Камера',
-  'Rotate the board with the mouse and zoom with the wheel. “Flip” changes sides, “Camera” returns to the ceremonial view.':
-    'Вращайте доску мышью, приближайте колесом. «Перевернуть» меняет сторону, «Камера» возвращает парадный вид.',
+  'Drag anywhere on the board to spin the view, scroll to zoom, and press <b>T</b> for a clean top-down angle. “Flip” changes sides, “Camera” returns to the ceremonial view.':
+    'Тяните доску мышью, чтобы крутить обзор, колесо — зум, а <b>T</b> даёт ровный вид сверху. «Перевернуть» меняет сторону, «Камера» возвращает парадный вид.',
   'Opponent': 'Соперник',
   'Send a friend the table link. They will land straight in the game. For two players on one computer, a private window or a second browser profile is best.':
     'Пришлите другу ссылку на стол. Он попадёт сразу в партию. Для двух игроков на одном компьютере удобнее приватное окно или второй профиль браузера.',
@@ -274,7 +279,7 @@ const ru = {
     'Сервер передаёт позицию и ходы, а проверка правил идёт на клиенте. Это дружеский салон, а не турнир с античитом.',
   'Keys': 'Клавиши',
   '<b>R</b> — camera, <b>F</b> — flip, <b>M</b> — sound, <b>Esc</b> — close a window.':
-    '<b>R</b> — камера, <b>F</b> — переворот, <b>M</b> — звук, <b>Esc</b> — закрыть окно.',
+    '<b>R</b> — камера, <b>F</b> — переворот, <b>T</b> — вид сверху, <b>стрелки</b> — поворот, <b>+ / −</b> — зум, <b>M</b> — звук, <b>Esc</b> — закрыть окно.',
   'Got it': 'Понятно',
   'StarkFlow WebSocket · Three.js · no sign-up or installation': 'StarkFlow WebSocket · Three.js · без регистрации и установки',
 

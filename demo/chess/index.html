@@ -13,7 +13,7 @@
     />
     <title>Ornate · 3D Chess Salon</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src/styles.css?v=20261028-7" />
+    <link rel="stylesheet" href="./src/styles.css?v=20261028-9" />
     <script type="importmap">
       {
         "imports": {
@@ -316,6 +316,12 @@
               <span data-i18n="Hint">Hint</span>
               <svg><use href="#i-spark"></use></svg>
             </button>
+            <span class="board-controls__divider"></span>
+            <button class="pill-btn pill-btn--icon" id="orbitLeftBtn" type="button" aria-label="Rotate camera left" data-i18n-aria="Rotate camera left" title="Rotate camera left" data-i18n-title="Rotate camera left">↺</button>
+            <button class="pill-btn pill-btn--icon" id="orbitRightBtn" type="button" aria-label="Rotate camera right" data-i18n-aria="Rotate camera right" title="Rotate camera right" data-i18n-title="Rotate camera right">↻</button>
+            <button class="pill-btn pill-btn--icon" id="zoomInBtn" type="button" aria-label="Zoom in" data-i18n-aria="Zoom in" title="Zoom in" data-i18n-title="Zoom in">+</button>
+            <button class="pill-btn pill-btn--icon" id="zoomOutBtn" type="button" aria-label="Zoom out" data-i18n-aria="Zoom out" title="Zoom out" data-i18n-title="Zoom out">−</button>
+            <button class="pill-btn pill-btn--icon" id="topViewBtn" type="button" aria-label="Top view" data-i18n-aria="Top view" title="Top view" data-i18n-title="Top view">▾</button>
           </div>
 
           <div class="turn-toast" id="turnToast" aria-live="polite">
@@ -358,6 +364,6 @@
       <div class="modal-root" id="modalRoot"></div>
     </div>
 
-    <script type="module" src="./src/main.js?v=20261028-7"></script>
+    <script type="module" src="./src/main.js?v=20261028-9"></script>
   </body>
 </html>

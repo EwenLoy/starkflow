@@ -134,46 +134,46 @@ export function findHint(chess, depth = 3) {
   return best ? { from: best.from, to: best.to, promotion: best.promotion || '', san: best.san } : null;
 }
 
-export function openingName(moves) {
-  if (!moves.length) return 'Дебют впереди';
+export function openingName(moves, locale = 'en') {
+  if (!moves.length) return locale === 'ru' ? 'Дебют впереди' : 'Opening ahead';
   const line = moves.slice(0, 8).join(' ');
   const known = [
-    ['e4 e5 Nf3 Nc6 Bb5', 'Испанская партия'],
-    ['e4 e5 Nf3 Nc6 Bc4', 'Итальянская партия'],
-    ['e4 e5 Nf3 Nc6 d4', 'Шотландская партия'],
-    ['e4 e5 Nf3 Nf6', 'Русская партия'],
-    ['e4 e5 Nf3 d6', 'Защита Филидора'],
-    ['e4 e5 f4', 'Королевский гамбит'],
-    ['e4 e5 Nc3', 'Венская партия'],
-    ['e4 e5 Bc4', 'Слоновый дебют'],
-    ['e4 e5', 'Открытый дебют'],
-    ['e4 c5 Nf3 d6', 'Сицилианская защита'],
-    ['e4 c5', 'Сицилианская защита'],
-    ['e4 c6', 'Защита Каро-Канн'],
-    ['e4 e6', 'Французская защита'],
-    ['e4 d5', 'Скандинавская защита'],
-    ['e4 Nf6', 'Защита Алехина'],
-    ['e4 d6', 'Защита Пирца-Уфимцева'],
-    ['d4 d5 c4 e6', 'Ферзевый гамбит'],
-    ['d4 d5 c4 c6', 'Славянская защита'],
-    ['d4 d5 c4 dxc4', 'Принятый ферзевый гамбит'],
-    ['d4 d5 c4', 'Ферзевый гамбит'],
-    ['d4 Nf6 c4 e6', 'Индийская защита'],
-    ['d4 Nf6 c4 g6', 'Староиндийская защита'],
-    ['d4 Nf6 c4 e6 Nc3 Bb4', 'Нимцович'],
-    ['d4 Nf6 c4 g6 Nc3 d5', 'Грюнфельд'],
-    ['d4 Nf6', 'Индийская защита'],
-    ['d4 f5', 'Голландская защита'],
-    ['d4 d5', 'Закрытый дебют'],
-    ['Nf3 d5', 'Дебют Рети'],
-    ['Nf3 Nf6', 'Дебют Рети'],
-    ['c4', 'Английское начало'],
-    ['c4 e5', 'Английское начало'],
-    ['d4', 'Дебют ферзевой пешки'],
-    ['e4', 'Дебют королевской пешки'],
+    ['e4 e5 Nf3 Nc6 Bb5', 'Spanish Game', 'Испанская партия'],
+    ['e4 e5 Nf3 Nc6 Bc4', 'Italian Game', 'Итальянская партия'],
+    ['e4 e5 Nf3 Nc6 d4', 'Scotch Game', 'Шотландская партия'],
+    ['e4 e5 Nf3 Nf6', 'Petrov Defence', 'Русская партия'],
+    ['e4 e5 Nf3 d6', 'Philidor Defence', 'Защита Филидора'],
+    ['e4 e5 f4', "King's Gambit", 'Королевский гамбит'],
+    ['e4 e5 Nc3', 'Vienna Game', 'Венская партия'],
+    ['e4 e5 Bc4', "Bishop's Opening", 'Слоновый дебют'],
+    ['e4 e5', 'Open Game', 'Открытый дебют'],
+    ['e4 c5 Nf3 d6', 'Sicilian Defence', 'Сицилианская защита'],
+    ['e4 c5', 'Sicilian Defence', 'Сицилианская защита'],
+    ['e4 c6', 'Caro-Kann Defence', 'Защита Каро-Канн'],
+    ['e4 e6', 'French Defence', 'Французская защита'],
+    ['e4 d5', 'Scandinavian Defence', 'Скандинавская защита'],
+    ['e4 Nf6', 'Alekhine Defence', 'Защита Алехина'],
+    ['e4 d6', 'Pirc Defence', 'Защита Пирца-Уфимцева'],
+    ['d4 d5 c4 e6', "Queen's Gambit", 'Ферзевый гамбит'],
+    ['d4 d5 c4 c6', 'Slav Defence', 'Славянская защита'],
+    ['d4 d5 c4 dxc4', "Queen's Gambit Accepted", 'Принятый ферзевый гамбит'],
+    ['d4 d5 c4', "Queen's Gambit", 'Ферзевый гамбит'],
+    ['d4 Nf6 c4 e6', 'Indian Defence', 'Индийская защита'],
+    ['d4 Nf6 c4 g6', "King's Indian Defence", 'Староиндийская защита'],
+    ['d4 Nf6 c4 e6 Nc3 Bb4', 'Nimzo-Indian Defence', 'Нимцович'],
+    ['d4 Nf6 c4 g6 Nc3 d5', 'Grünfeld Defence', 'Грюнфельд'],
+    ['d4 Nf6', 'Indian Defence', 'Индийская защита'],
+    ['d4 f5', 'Dutch Defence', 'Голландская защита'],
+    ['d4 d5', 'Closed Game', 'Закрытый дебют'],
+    ['Nf3 d5', 'Réti Opening', 'Дебют Рети'],
+    ['Nf3 Nf6', 'Réti Opening', 'Дебют Рети'],
+    ['c4', 'English Opening', 'Английское начало'],
+    ['c4 e5', 'English Opening', 'Английское начало'],
+    ['d4', "Queen's Pawn Opening", 'Дебют ферзевой пешки'],
+    ['e4', "King's Pawn Opening", 'Дебют королевской пешки'],
   ];
-  for (const [pattern, name] of known) {
-    if (line === pattern || line.startsWith(pattern + ' ')) return name;
+  for (const [pattern, en, ruName] of known) {
+    if (line === pattern || line.startsWith(pattern + ' ')) return locale === 'ru' ? ruName : en;
   }
-  return 'Нестандартное начало';
+  return locale === 'ru' ? 'Нестандартное начало' : 'Irregular Opening';
 }

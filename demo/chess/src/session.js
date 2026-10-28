@@ -1,4 +1,5 @@
 import { Chess, validateFen } from '../vendor/chess.js/chess.js';
+import { t } from './i18n.js';
 
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const MAX_STORED_MOVES = 360;
@@ -442,7 +443,7 @@ export class ChessSession {
       if (!this.pending) return;
       this.pending = false;
       this.emit('change', this.snapshot());
-      this.emit('toast', { text: 'Сервер не подтвердил ход. Проверьте соединение.', type: 'error' });
+      this.emit('toast', { text: t('The server did not confirm the move. Check your connection.'), type: 'error' });
     }, 4500);
 
     const sent = this.net.setState('game', JSON.stringify(next));
@@ -471,7 +472,7 @@ export class ChessSession {
   offerDraw() {
     if (!this.isPlaying || this.game.drawOffer) return false;
     this.#write({ ...this.game, drawOffer: this.you, updatedAt: Date.now() });
-    this.emit('toast', { text: 'Предложение ничьей отправлено.', type: 'ok' });
+    this.emit('toast', { text: t('Draw offer sent.'), type: 'ok' });
     return true;
   }
 
@@ -525,7 +526,7 @@ export class ChessSession {
   }
 
   colorName(color = this.myColor) {
-    return color === 'w' ? 'белые' : color === 'b' ? 'чёрные' : 'зритель';
+    return color === 'w' ? t('White') : color === 'b' ? t('Black') : t('Spectator');
   }
 
   opponent() {
@@ -537,7 +538,7 @@ export class ChessSession {
   playerFor(color) {
     if (!this.game) return null;
     const id = color === 'w' ? this.game.whiteId : this.game.blackId;
-    return id ? this.net.players.get(id) || { id, name: 'Отключился', status: 'gone' } : null;
+    return id ? this.net.players.get(id) || { id, name: t('Disconnected'), status: 'gone' } : null;
   }
 
   material() {

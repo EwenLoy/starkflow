@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#07110e" />
     <meta
       name="description"
-      content="Ornate Chess Salon — кинематографичные 3D-шахматы онлайн со списком столов. StarkFlow WebSocket, Three.js."
+      content="Ornate Chess Salon — cinematic 3D online chess with a room list. StarkFlow WebSocket, Three.js."
     />
     <title>Ornate · 3D Chess Salon</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
@@ -86,16 +86,16 @@
       <div class="boot__brand">ORNATE</div>
       <div class="boot__sub">CHESS SALON</div>
       <div class="boot__track"><i id="bootBar"></i></div>
-      <p class="boot__label" id="bootLabel">Полируем фигуры и зажигаем свечи…</p>
+      <p class="boot__label" id="bootLabel" data-i18n="Polishing pieces and lighting candles…">Polishing pieces and lighting candles…</p>
     </div>
 
     <div class="app" id="app" aria-hidden="true">
-      <canvas id="scene" aria-label="Трёхмерная шахматная доска"></canvas>
+      <canvas id="scene" aria-label="Three-dimensional chess board" data-i18n-aria="Three-dimensional chess board"></canvas>
       <div class="atmosphere" aria-hidden="true"></div>
       <div class="grain" aria-hidden="true"></div>
 
       <header class="topbar">
-        <button class="brand" id="brandBtn" type="button" aria-label="Вернуться в лобби">
+        <button class="brand" id="brandBtn" type="button" aria-label="Back to lobby" data-i18n-aria="Back to lobby">
           <span class="brand__mark">♞</span>
           <span class="brand__text">
             <strong>ORNATE</strong>
@@ -104,18 +104,21 @@
         </button>
 
         <div class="topbar__tools">
-          <div class="net-pill is-connecting" id="netPill" title="Состояние соединения">
+          <div class="net-pill is-connecting" id="netPill" title="Connection status" data-i18n-title="Connection status">
             <i class="net-pill__dot"></i>
-            <span id="netText">Соединение…</span>
+            <span id="netText" data-i18n="Connecting…">Connecting…</span>
             <span class="net-pill__ping" id="pingText"></span>
           </div>
-          <button class="icon-btn" id="soundBtn" type="button" aria-label="Выключить звук" title="Звук">
+          <button class="lang-btn" id="langBtn" type="button" aria-label="Switch to Russian" data-i18n-aria="Switch to Russian" title="Switch to Russian" data-i18n-title="Switch to Russian">
+            <span id="langLabel">RU</span>
+          </button>
+          <button class="icon-btn" id="soundBtn" type="button" aria-label="Mute sound" data-i18n-aria="Mute sound" title="Sound" data-i18n-title="Sound">
             <svg><use href="#i-sound"></use></svg>
           </button>
-          <button class="icon-btn" id="helpBtn" type="button" aria-label="Правила и подсказки" title="Помощь">
+          <button class="icon-btn" id="helpBtn" type="button" aria-label="Rules and tips" data-i18n-aria="Rules and tips" title="Help" data-i18n-title="Help">
             <svg><use href="#i-help"></use></svg>
           </button>
-          <button class="icon-btn" id="fullscreenBtn" type="button" aria-label="Полный экран" title="Полный экран">
+          <button class="icon-btn" id="fullscreenBtn" type="button" aria-label="Fullscreen" data-i18n-aria="Fullscreen" title="Fullscreen" data-i18n-title="Fullscreen">
             <svg><use href="#i-expand"></use></svg>
           </button>
         </div>
@@ -125,39 +128,38 @@
         <section class="screen lobby is-active" id="lobby" aria-labelledby="lobbyTitle">
           <div class="lobby__content">
             <div class="lobby__hero">
-              <p class="eyebrow"><span class="eyebrow__line"></span>Онлайн-салон · StarkFlow</p>
-              <h1 id="lobbyTitle">Королевский<br /><em>салон</em></h1>
-              <p class="lobby__lead">
-                Шахматы, в которых хочется задержаться. Живой стол из тёмного камня и латуни,
-                скульптурные фигуры и соперник по ту сторону сети.
+              <p class="eyebrow"><span class="eyebrow__line"></span><span data-i18n="Online salon · StarkFlow">Online salon · StarkFlow</span></p>
+              <h1 id="lobbyTitle" data-i18n-html="Royal<br /><em>salon</em>">Royal<br /><em>salon</em></h1>
+              <p class="lobby__lead" data-i18n="Chess that makes you want to stay. A living table of dark stone and brass, sculptural pieces, and an opponent on the other side of the network.">
+                Chess that makes you want to stay. A living table of dark stone and brass, sculptural pieces, and an opponent on the other side of the network.
               </p>
 
               <div class="lobby__actions">
                 <button class="btn btn--gold" id="quickBtn" type="button">
-                  <span>Быстрая партия</span>
+                  <span data-i18n="Quick game">Quick game</span>
                   <svg><use href="#i-arrow"></use></svg>
                 </button>
-                <button class="btn btn--ghost" id="howBtn" type="button">Как играть</button>
+                <button class="btn btn--ghost" id="howBtn" type="button" data-i18n="How to play">How to play</button>
               </div>
 
               <div class="lobby__stats">
                 <div class="stat">
                   <strong id="onlineCount">—</strong>
-                  <span>гостей в зале</span>
+                  <span data-i18n="guests in the salon">guests in the salon</span>
                 </div>
                 <div class="stat">
                   <strong id="tableCount">—</strong>
-                  <span>столов открыто</span>
+                  <span data-i18n="tables open">tables open</span>
                 </div>
                 <div class="stat">
                   <strong id="latencyStat">—</strong>
-                  <span>задержка сети</span>
+                  <span data-i18n="network latency">network latency</span>
                 </div>
               </div>
 
               <p class="lobby__fineprint">
                 <span class="fineprint-dot"></span>
-                Партия на двоих · зрители могут занять место за столом
+                <span data-i18n="Two-player game · spectators can take a seat">Two-player game · spectators can take a seat</span>
               </p>
             </div>
 
@@ -165,19 +167,19 @@
               <div class="lobby__panel-glow" aria-hidden="true"></div>
               <div class="panel-head">
                 <div>
-                  <p class="panel-kicker">Гостиная</p>
-                  <h2 id="tablesTitle">Открытые столы</h2>
+                  <p class="panel-kicker" data-i18n="Lounge">Lounge</p>
+                  <h2 id="tablesTitle" data-i18n="Open tables">Open tables</h2>
                 </div>
-                <button class="icon-btn icon-btn--small" id="refreshBtn" type="button" aria-label="Обновить список столов" title="Обновить">
+                <button class="icon-btn icon-btn--small" id="refreshBtn" type="button" aria-label="Refresh tables" data-i18n-aria="Refresh tables" title="Refresh" data-i18n-title="Refresh">
                   <svg><use href="#i-refresh"></use></svg>
                 </button>
               </div>
 
               <div class="identity">
-                <label class="field-label" for="nameInput">Ваше имя</label>
+                <label class="field-label" for="nameInput" data-i18n="Your name">Your name</label>
                 <div class="identity__row">
                   <input class="text-input" id="nameInput" maxlength="20" autocomplete="nickname" spellcheck="false" />
-                  <span class="identity__seal" id="playerInitial">Г</span>
+                  <span class="identity__seal" id="playerInitial">G</span>
                 </div>
               </div>
 
@@ -188,17 +190,17 @@
               </div>
 
               <div class="create-box">
-                <label class="field-label" for="roomNameInput">Новый стол</label>
+                <label class="field-label" for="roomNameInput" data-i18n="New table">New table</label>
                 <div class="create-box__row">
                   <input class="text-input" id="roomNameInput" maxlength="32" autocomplete="off" spellcheck="false" />
                   <button class="btn btn--gold btn--compact" id="createBtn" type="button">
-                    <span>Создать</span>
+                    <span data-i18n="Create">Create</span>
                   </button>
                 </div>
               </div>
 
-              <p class="lobby__panel-foot">
-                Скопируйте ссылку на стол и отправьте другу — он попадёт сразу в партию.
+              <p class="lobby__panel-foot" data-i18n="Copy the table link and send it to a friend — they will land straight in the game.">
+                Copy the table link and send it to a friend — they will land straight in the game.
               </p>
             </aside>
           </div>
@@ -208,103 +210,103 @@
           <div class="game__topline">
             <button class="text-btn" id="leaveBtn" type="button">
               <svg class="text-btn__arrow"><use href="#i-arrow"></use></svg>
-              <span>В лобби</span>
+              <span data-i18n="Back to lobby">Back to lobby</span>
             </button>
             <div class="match-title">
-              <p class="panel-kicker" id="roomKicker">Стол</p>
-              <h2 id="roomTitle">Шахматный салон</h2>
+              <p class="panel-kicker" id="roomKicker" data-i18n="Table">Table</p>
+              <h2 id="roomTitle" data-i18n="Chess salon">Chess salon</h2>
             </div>
             <div class="match-tools">
-              <button class="icon-btn icon-btn--small" id="copyBtn" type="button" aria-label="Скопировать ссылку на стол" title="Пригласить друга">
+              <button class="icon-btn icon-btn--small" id="copyBtn" type="button" aria-label="Copy table link" data-i18n-aria="Copy table link" title="Invite a friend" data-i18n-title="Invite a friend">
                 <svg><use href="#i-link"></use></svg>
               </button>
-              <button class="icon-btn icon-btn--small" id="resetCameraBtn" type="button" aria-label="Сбросить камеру" title="Сбросить камеру">
+              <button class="icon-btn icon-btn--small" id="resetCameraBtn" type="button" aria-label="Reset camera" data-i18n-aria="Reset camera" title="Reset camera" data-i18n-title="Reset camera">
                 <svg><use href="#i-camera"></use></svg>
               </button>
             </div>
           </div>
 
-          <aside class="player-card player-card--black" id="blackCard" aria-label="Чёрные">
+          <aside class="player-card player-card--black" id="blackCard" aria-label="Black" data-i18n-aria="Black">
             <div class="player-card__avatar" id="blackAvatar">♚</div>
             <div class="player-card__body">
-              <span class="player-card__role">Чёрные</span>
-              <strong class="player-card__name" id="blackName">Ждём соперника</strong>
-              <span class="player-card__meta" id="blackMeta">место свободно</span>
+              <span class="player-card__role" data-i18n="Black">Black</span>
+              <strong class="player-card__name" id="blackName" data-i18n="Waiting for opponent">Waiting for opponent</strong>
+              <span class="player-card__meta" id="blackMeta" data-i18n="seat available">seat available</span>
             </div>
-            <span class="player-card__turn" id="blackTurn">ход</span>
+            <span class="player-card__turn" id="blackTurn" data-i18n="move">move</span>
           </aside>
 
-          <aside class="player-card player-card--white" id="whiteCard" aria-label="Белые">
+          <aside class="player-card player-card--white" id="whiteCard" aria-label="White" data-i18n-aria="White">
             <div class="player-card__avatar" id="whiteAvatar">♔</div>
             <div class="player-card__body">
-              <span class="player-card__role">Белые</span>
-              <strong class="player-card__name" id="whiteName">Хозяин стола</strong>
-              <span class="player-card__meta" id="whiteMeta">создаёт партию</span>
+              <span class="player-card__role" data-i18n="White">White</span>
+              <strong class="player-card__name" id="whiteName" data-i18n="Table host">Table host</strong>
+              <span class="player-card__meta" id="whiteMeta" data-i18n="opening the game">opening the game</span>
             </div>
-            <span class="player-card__turn" id="whiteTurn">ход</span>
+            <span class="player-card__turn" id="whiteTurn" data-i18n="move">move</span>
           </aside>
 
-          <aside class="game-panel glass" aria-label="Ход партии">
+          <aside class="game-panel glass" aria-label="Game moves" data-i18n-aria="Game moves">
             <div class="game-panel__status">
               <div class="status-head">
-                <p class="panel-kicker" id="phaseLabel">Партия</p>
+                <p class="panel-kicker" id="phaseLabel" data-i18n="Match">Match</p>
                 <span class="turn-pill" id="turnPill">—</span>
               </div>
-              <h3 id="statusTitle">Ожидание соперника</h3>
-              <p id="statusText">Стол создан. Пригласите друга по ссылке.</p>
+              <h3 id="statusTitle" data-i18n="Waiting for opponent">Waiting for opponent</h3>
+              <p id="statusText" data-i18n="The table is ready. Invite a friend by link.">The table is ready. Invite a friend by link.</p>
               <div class="status-meta">
-                <span id="moveCount">0 ходов</span>
+                <span id="moveCount" data-i18n="0 moves">0 moves</span>
                 <i></i>
                 <span id="gameClock">00:00</span>
                 <i></i>
-                <span id="openingName">Дебют впереди</span>
+                <span id="openingName" data-i18n="Opening ahead">Opening ahead</span>
               </div>
             </div>
 
             <div class="invite-strip" id="inviteStrip">
               <div>
-                <span>Код стола</span>
+                <span data-i18n="Table code">Table code</span>
                 <strong id="inviteCode">————</strong>
               </div>
               <button class="mini-btn" id="inviteBtn" type="button">
                 <svg><use href="#i-copy"></use></svg>
-                <span>Копировать</span>
+                <span data-i18n="Copy">Copy</span>
               </button>
             </div>
 
             <div class="move-log">
               <div class="move-log__head">
-                <span>Ходы</span>
-                <span id="spectatorBadge" class="spectator-badge" hidden>вы наблюдаете</span>
+                <span data-i18n="Moves">Moves</span>
+                <span id="spectatorBadge" class="spectator-badge" hidden data-i18n="you are watching">you are watching</span>
               </div>
               <ol class="move-list" id="moveList" aria-live="polite">
-                <li class="move-list__empty">Первый ход ещё впереди.</li>
+                <li class="move-list__empty" data-i18n="The first move is still ahead.">The first move is still ahead.</li>
               </ol>
             </div>
 
             <div class="game-panel__actions">
               <button class="action-btn" id="drawBtn" type="button">
                 <svg><use href="#i-handshake"></use></svg>
-                <span>Ничья</span>
+                <span data-i18n="Draw">Draw</span>
               </button>
               <button class="action-btn action-btn--danger" id="resignBtn" type="button">
                 <svg><use href="#i-flag"></use></svg>
-                <span>Сдаться</span>
+                <span data-i18n="Resign">Resign</span>
               </button>
               <button class="action-btn action-btn--wide" id="rematchBtn" type="button" hidden>
                 <svg><use href="#i-spark"></use></svg>
-                <span>Новая партия</span>
+                <span data-i18n="New game">New game</span>
               </button>
             </div>
           </aside>
 
           <div class="board-controls">
             <button class="pill-btn" id="flipBtn" type="button">
-              <span>Перевернуть</span>
+              <span data-i18n="Flip">Flip</span>
               <svg><use href="#i-refresh"></use></svg>
             </button>
             <button class="pill-btn" id="hintBtn" type="button">
-              <span>Подсказка</span>
+              <span data-i18n="Hint">Hint</span>
               <svg><use href="#i-spark"></use></svg>
             </button>
           </div>
@@ -315,34 +317,34 @@
           </div>
 
           <div class="draw-offer" id="drawOfferBar" hidden>
-            <span id="drawOfferText">Соперник предлагает ничью.</span>
+            <span id="drawOfferText" data-i18n="Opponent offers a draw.">Opponent offers a draw.</span>
             <div class="draw-offer__actions">
-              <button class="mini-btn mini-btn--gold" id="acceptDrawBtn" type="button">Принять</button>
-              <button class="mini-btn" id="declineDrawBtn" type="button">Отклонить</button>
+              <button class="mini-btn mini-btn--gold" id="acceptDrawBtn" type="button" data-i18n="Accept">Accept</button>
+              <button class="mini-btn" id="declineDrawBtn" type="button" data-i18n="Decline">Decline</button>
             </div>
           </div>
 
           <div class="result-card glass" id="resultCard" hidden>
             <div class="result-card__sigil" id="resultSigil">♛</div>
-            <p class="panel-kicker" id="resultKicker">Партия завершена</p>
-            <h2 id="resultTitle">Мат</h2>
-            <p id="resultText">Белые выиграли партию.</p>
+            <p class="panel-kicker" id="resultKicker" data-i18n="Game over">Game over</p>
+            <h2 id="resultTitle" data-i18n="Checkmate">Checkmate</h2>
+            <p id="resultText" data-i18n="White wins the game.">White wins the game.</p>
             <div class="result-card__actions">
-              <button class="btn btn--gold btn--compact" id="resultRematchBtn" type="button">Реванш</button>
-              <button class="btn btn--ghost btn--compact" id="resultLobbyBtn" type="button">К столам</button>
+              <button class="btn btn--gold btn--compact" id="resultRematchBtn" type="button" data-i18n="Rematch">Rematch</button>
+              <button class="btn btn--ghost btn--compact" id="resultLobbyBtn" type="button" data-i18n="Back to tables">Back to tables</button>
             </div>
           </div>
 
           <div class="spectator-hint" id="spectatorHint" hidden>
             <svg><use href="#i-users"></use></svg>
-            <span>Вы в зале как зритель. Место освободится — и вы сможете сесть за стол.</span>
+            <span data-i18n="You are watching. A seat will open up — and you can take it.">You are watching. A seat will open up — and you can take it.</span>
           </div>
         </section>
       </main>
 
       <footer class="footer">
         <span>StarkFlow · WebSocket <i>wss://starkflow.orkestr.run/ws</i></span>
-        <span class="footer__right">Three.js · с любовью к игре</span>
+        <span class="footer__right">Three.js · <span data-i18n="made with love for the game">made with love for the game</span></span>
       </footer>
 
       <div class="toasts" id="toasts" aria-live="polite"></div>

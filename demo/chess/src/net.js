@@ -6,7 +6,7 @@ const TOKEN_PREFIX = 'ornate-chess:token:';
  * ping, token resume and automatic reconnection.
  */
 export class StarkFlowClient {
-  constructor({ url, app, lobby = 'salon', name = 'Гость' }) {
+  constructor({ url, app, lobby = 'salon', name = 'Guest' }) {
     this.url = url;
     this.app = app;
     this.lobby = lobby;
@@ -88,7 +88,7 @@ export class StarkFlowClient {
 
   /* ----------------------------------------------------------- connection */
   connect(name = this.name) {
-    this.name = (name || 'Гость').trim().slice(0, 20) || 'Гость';
+    this.name = (name || 'Guest').trim().slice(0, 20) || 'Guest';
     this.active = true;
     this.intentionalClose = false;
     this.retry = 0;
@@ -238,7 +238,7 @@ export class StarkFlowClient {
   }
 
   async rename(name) {
-    const next = (name || '').trim().slice(0, 20) || 'Гость';
+    const next = (name || '').trim().slice(0, 20) || 'Guest';
     this.name = next;
     if (this.room) return; // identity is fixed while seated
     if (this.connected && this.welcomeInfo?.name === next) return;
@@ -389,7 +389,7 @@ export class StarkFlowClient {
       case 'room.joined': {
         this.room = {
           id: m.roomId || '',
-          name: m.room || 'Стол',
+          name: m.room || 'Table',
           created: !!m.created,
           resumed: !!m.resumed,
           maxPlayers: m.maxPlayers || 8,

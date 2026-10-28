@@ -165,7 +165,8 @@ async function testRulesEngine() {
   const { Chess } = await import('../vendor/chess.js/chess.js');
   const c = new Chess();
   ok(findHint(c, 2)?.san, 'hint returns a move');
-  ok(openingName(['e4', 'e5', 'Nf3', 'Nc6', 'Bc4']) === 'Итальянская партия', 'opening detection');
+  ok(openingName(['e4', 'e5', 'Nf3', 'Nc6', 'Bc4']) === 'Italian Game', 'English opening detection');
+  ok(openingName(['e4', 'e5', 'Nf3', 'Nc6', 'Bc4'], 'ru') === 'Итальянская партия', 'Russian opening detection');
 }
 
 await testInitializationAndSeats();

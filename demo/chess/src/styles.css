@@ -593,6 +593,33 @@ svg {
   height: 15px;
 }
 
+.lang-btn {
+  display: inline-grid;
+  place-items: center;
+  min-width: 42px;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: rgba(5, 14, 11, 0.42);
+  color: var(--gold-bright);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  transition: border-color 0.25s, background 0.25s, color 0.25s;
+}
+
+.lang-btn:hover {
+  border-color: var(--line-strong);
+  background: rgba(201, 161, 93, 0.1);
+}
+
+.lang-btn:active {
+  transform: scale(0.96);
+}
+
 .icon-btn.is-muted {
   color: var(--danger);
 }
@@ -1280,7 +1307,7 @@ svg {
 }
 
 .player-card.is-you .player-card__name::after {
-  content: ' · вы';
+  content: ' · ' attr(data-you-label);
   color: var(--gold);
   font-family: var(--font-ui);
   font-size: 8px;

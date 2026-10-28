@@ -4,6 +4,14 @@ import { ChessSession, START_FEN } from './session.js';
 import { ChessAudio } from './audio.js';
 import { findHint, openingName } from './engine.js';
 import { pieceGlyph } from './pieces.js';
+import {
+  applyTranslations,
+  getLocale,
+  isRussian,
+  pluralRu,
+  setLocale,
+  t,
+} from './i18n.js';
 
 const CONFIG = {
   url: 'wss://starkflow.orkestr.run/ws',
@@ -11,19 +19,23 @@ const CONFIG = {
   lobby: 'salon',
 };
 
+const EN_ADJECTIVES = ['Emerald', 'Midnight', 'Golden', 'Quiet', 'Royal', 'Azure', 'Copper', 'Northern', 'Amethyst', 'Silver'];
+const EN_NOUNS = ['Gambit', 'Salon', 'Study', 'Queen', 'Manoeuvre', 'Endgame', 'Opening', 'Caprice', 'Vernissage', 'Tournament'];
+const RU_ADJECTIVES = ['Изумрудный', 'Полночный', 'Золотой', 'Тихий', 'Королевский', 'Лазурный', 'Медный', 'Северный', 'Аметистовый', 'Серебряный'];
+const RU_NOUNS = ['гамбит', 'салон', 'этюд', 'ферзь', 'манёвр', 'эндшпиль', 'дебют', 'каприс', 'вернисаж', 'турнир'];
+
 const $ = (id) => document.getElementById(id);
-const ADJECTIVES = ['Изумрудный', 'Полночный', 'Золотой', 'Тихий', 'Королевский', 'Лазурный', 'Медный', 'Северный', 'Аметистовый', 'Серебряный'];
-const NOUNS = ['гамбит', 'салон', 'этюд', 'ферзь', 'манёвр', 'эндшпиль', 'дебют', 'каприс', 'вернисаж', 'турнир'];
 const PIECE_ORDER = ['q', 'r', 'b', 'n', 'p'];
 
 function randomRoomName() {
-  const a = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
-  const n = NOUNS[Math.floor(Math.random() * NOUNS.length)];
-  return `${a} ${n}`;
+  const ru = isRussian();
+  const adjectives = ru ? RU_ADJECTIVES : EN_ADJECTIVES;
+  const nouns = ru ? RU_NOUNS : EN_NOUNS;
+  return `${adjectives[Math.floor(Math.random() * adjectives.length)]} ${nouns[Math.floor(Math.random() * nouns.length)]}`;
 }
 
 function randomGuestName() {
-  return `Гость-${Math.floor(100 + Math.random() * 900)}`;
+  return t('Guest-{n}', { n: Math.floor(100 + Math.random() * 900) });
 }
 
 function loadStored(key, fallback) {
@@ -88,13 +100,22 @@ async function copyText(text) {
 
 class SalonApp {
   constructor() {
+    applyTranslations();
+    document.title = t('Ornate · 3D Chess Salon');
+    const description = document.querySelector('meta[name="description"]');
+    if (description) {
+      description.setAttribute('content', t('Ornate Chess Salon — cinematic 3D online chess with a room list. StarkFlow WebSocket, Three.js.'));
+    }
+
     this.name = cleanName(loadStored('ornate-chess:name', randomGuestName()));
     store('ornate-chess:name', this.name);
     this.nameInput = $('nameInput');
     this.roomInput = $('roomNameInput');
     this.nameInput.value = this.name;
     this.roomInput.value = randomRoomName();
+    this.roomAuto = true;
     this.updateSeal();
+    this.updateLangButton();
 
     this.audio = new ChessAudio();
     this.net = new StarkFlowClient({ ...CONFIG, name: this.name });
@@ -117,7 +138,6 @@ class SalonApp {
     this.joining = false;
     this.turnTimer = null;
     this.clockTimer = null;
-    this.toastSeq = 0;
     this.offlineNotified = false;
     this.resultKey = '';
     this.suppressTurnToast = true;
@@ -125,6 +145,7 @@ class SalonApp {
     this.lastFocus = null;
     this.hintBusy = false;
     this.latency = null;
+    this.lastNetStatus = { state: 'connecting' };
 
     this.bindUi();
     this.bindNet();
@@ -136,10 +157,10 @@ class SalonApp {
   start() {
     this.refreshSoundButton();
     this.renderRooms();
-    this.bumpBoot(18, 'Зажигаем свечи…');
-    setTimeout(() => this.bumpBoot(38, 'Расставляем фигуры…'), 260);
-    setTimeout(() => this.bumpBoot(58, 'Открываем двери салона…'), 520);
-    setTimeout(() => this.bumpBoot(78, 'Ищем гостей за столами…'), 800);
+    this.bumpBoot(18, t('Lighting the candles…'));
+    setTimeout(() => this.bumpBoot(38, t('Setting the pieces…')), 260);
+    setTimeout(() => this.bumpBoot(58, t('Opening the salon doors…')), 520);
+    setTimeout(() => this.bumpBoot(78, t('Looking for guests at the tables…')), 800);
 
     this.clockTimer = setInterval(() => this.updateClock(), 1000);
     this.listTimer = setInterval(() => {
@@ -153,7 +174,7 @@ class SalonApp {
     });
 
     this.net.connect(this.name).catch(() => {
-      this.showToast('Сервер не ответил. Можно попробовать ещё раз.', 'error');
+      this.showToast(t('Server did not respond. Try again.'), 'error');
     });
 
     setTimeout(() => this.finishBoot(), 1550);
@@ -169,7 +190,7 @@ class SalonApp {
   finishBoot() {
     if (this.booted) return;
     this.booted = true;
-    this.bumpBoot(100, 'Добро пожаловать');
+    this.bumpBoot(100, t('Welcome'));
     const boot = $('boot');
     const app = $('app');
     app.classList.add('is-ready');
@@ -196,8 +217,8 @@ class SalonApp {
     });
     this.net.on('latency', (ms) => {
       this.latency = ms;
-      $('pingText').textContent = `${ms} мс`;
-      $('latencyStat').textContent = `${ms} мс`;
+      $('pingText').textContent = `${ms} ${isRussian() ? 'мс' : 'ms'}`;
+      $('latencyStat').textContent = `${ms} ${isRussian() ? 'мс' : 'ms'}`;
     });
     this.net.on('room.joined', (detail) => {
       this.joining = false;
@@ -212,27 +233,27 @@ class SalonApp {
     this.net.on('room.missing', () => {
       this.clearRoomQuery();
       this.enterLobby();
-      this.showToast('Этот стол уже закрылся. Выберите другой.', 'error');
+      this.showToast(t('This table has already closed. Choose another.'), 'error');
     });
     this.net.on('room.full', () => {
       this.joining = false;
-      this.showToast('За этим столом больше нет мест.', 'error');
+      this.showToast(t('There are no seats left at this table.'), 'error');
     });
     this.net.on('players.changed', (change) => {
       this.renderGame();
       if (change.joined && change.joined !== this.net.you) {
         const p = this.net.players.get(change.joined);
-        this.showToast(`${p?.name || 'Гость'} подошёл к столу.`, 'ok');
+        this.showToast(t('{name} joined the table.', { name: p?.name || t('Guest') }), 'ok');
       }
       if (change.left) {
         const p = change.player;
-        if (p && p.id !== this.net.you) this.showToast(`${p.name || 'Игрок'} покинул стол.`);
+        if (p && p.id !== this.net.you) this.showToast(t('{name} left the table.', { name: p.name || t('Guest') }));
       }
       if (change.suspended && change.suspended !== this.net.you) {
-        this.showToast('У соперника пропала связь — место сохранено на 30 секунд.');
+        this.showToast(t('Opponent lost connection — the seat is held for 30 seconds.'));
       }
       if (change.resumed && change.resumed !== this.net.you) {
-        this.showToast('Соперник вернулся за стол.', 'ok');
+        this.showToast(t('Opponent is back at the table.'), 'ok');
       }
     });
     this.net.on('host.changed', () => {
@@ -268,30 +289,31 @@ class SalonApp {
     });
     this.session.on('turn', (turn) => {
       if (turn.inCheck) {
-        this.showTurnToast(turn.mine ? 'Шах! Ваш ход' : 'Шах сопернику');
+        this.showTurnToast(turn.mine ? t('Check! Your move') : t('Check on the opponent'));
       } else if (turn.mine) {
-        this.showTurnToast('Ваш ход');
+        this.showTurnToast(t('Your move'));
       } else {
-        this.showTurnToast(`Ход ${turn.color === 'w' ? 'белых' : 'чёрных'}`);
+        this.showTurnToast(t(turn.color === 'w' ? 'White to move' : 'Black to move'));
       }
       if (!this.suppressTurnToast) this.audio.turn();
       this.suppressTurnToast = false;
     });
     this.session.on('pending', () => {
       this.syncInteraction();
-      this.showTurnToast('Ход отправлен…');
+      this.showTurnToast(t('Move sent…'));
     });
     this.session.on('result', (snapshot) => {
       this.onResult(snapshot);
     });
     this.session.on('toast', ({ text, type }) => this.showToast(text, type));
-    this.session.on('invalid-state', () => this.showToast('Состояние стола пришло повреждённым. Ждём обновления.', 'error'));
+    this.session.on('invalid-state', () => this.showToast(t('The table state arrived corrupted. Waiting for an update.'), 'error'));
   }
 
   bindUi() {
     $('createBtn').addEventListener('click', () => this.createRoom());
     $('quickBtn').addEventListener('click', () => this.quickGame());
     $('refreshBtn').addEventListener('click', () => this.refreshRooms());
+    $('langBtn').addEventListener('click', () => this.switchLanguage());
     $('nameInput').addEventListener('change', () => this.applyName());
     $('nameInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -300,6 +322,9 @@ class SalonApp {
       }
     });
     this.nameInput.addEventListener('input', () => this.updateSeal());
+    this.roomInput.addEventListener('input', () => {
+      this.roomAuto = false;
+    });
     this.roomInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -309,7 +334,7 @@ class SalonApp {
     $('soundBtn').addEventListener('click', () => {
       const on = this.audio.toggle();
       this.refreshSoundButton();
-      this.showToast(on ? 'Звук включён' : 'Звук выключен');
+      this.showToast(t(on ? 'Sound on' : 'Sound off'));
     });
     $('helpBtn').addEventListener('click', () => this.openHelp());
     $('howBtn').addEventListener('click', () => this.openHelp());
@@ -330,11 +355,11 @@ class SalonApp {
     $('resignBtn').addEventListener('click', () => this.confirmResign());
     $('acceptDrawBtn').addEventListener('click', () => {
       this.session.acceptDraw();
-      this.showToast('Ничья принята.', 'ok');
+      this.showToast(t('Draw accepted.'), 'ok');
     });
     $('declineDrawBtn').addEventListener('click', () => {
       this.session.declineDraw();
-      this.showToast('Ничья отклонена.');
+      this.showToast(t('Draw declined.'));
     });
     $('rematchBtn').addEventListener('click', () => this.rematch());
     $('resultRematchBtn').addEventListener('click', () => this.rematch());
@@ -353,79 +378,104 @@ class SalonApp {
 
   /* --------------------------------------------------------- connection */
   updateStatus(status) {
+    this.lastNetStatus = status;
     const pill = $('netPill');
     const text = $('netText');
     pill.classList.remove('is-online', 'is-connecting', 'is-offline');
     if (status.state === 'online') {
       pill.classList.add('is-online');
-      text.textContent = 'В сети';
+      text.textContent = t('Online');
       this.offlineNotified = false;
     } else if (status.state === 'retrying') {
       pill.classList.add('is-connecting');
-      text.textContent = `Переподключение ${status.retry}`;
+      text.textContent = t('Reconnecting {n}', { n: status.retry });
     } else if (status.state === 'exhausted') {
       pill.classList.add('is-offline');
-      text.textContent = 'Нет связи';
-      this.showToast('Не удалось переподключиться. Нажмите на индикатор сети.', 'error');
+      text.textContent = t('No connection');
+      this.showToast(t('Could not reconnect. Tap the network indicator.'), 'error');
     } else if (status.state === 'offline' || status.state === 'error') {
       pill.classList.add('is-offline');
-      text.textContent = 'Нет связи';
+      text.textContent = t('No connection');
       if (!this.offlineNotified) {
         this.offlineNotified = true;
-        if (this.net.room) this.showToast('Связь потеряна. Возвращаемся за стол автоматически…');
+        if (this.net.room) this.showToast(t('Connection lost. Rejoining the table automatically…'));
       }
     } else if (status.state === 'reauth') {
       pill.classList.add('is-connecting');
-      text.textContent = 'Обновляем вход';
+      text.textContent = t('Refreshing session');
     } else {
       pill.classList.add('is-connecting');
-      text.textContent = status.state === 'hello' ? 'Входим…' : 'Соединение…';
+      text.textContent = t(status.state === 'hello' ? 'Signing in…' : 'Connecting…');
     }
-    $('pingText').textContent = this.net.latency != null ? `${this.net.latency} мс` : '';
+    $('pingText').textContent = this.net.latency != null ? `${this.net.latency} ${isRussian() ? 'мс' : 'ms'}` : '';
     this.syncInteraction();
     if (status.state === 'online') this.renderRooms();
   }
 
   onNetError({ code, msg }) {
     const messages = {
-      100: 'Несовместимая версия протокола.',
-      101: 'Сервер не понял сообщение.',
-      102: 'Сначала нужно войти в сеть.',
-      200: 'Сессия устарела — входим заново.',
-      300: 'Стол не найден.',
-      301: 'За столом нет свободных мест.',
-      302: 'Этот стол уже закрыт.',
-      303: 'Вы уже сидите за столом.',
-      305: 'Вы не за столом.',
-      306: 'Слишком короткое или странное имя стола.',
-      307: 'Неверный пароль стола.',
-      308: 'Стол с таким именем уже существует.',
-      400: 'Неизвестный ключ состояния.',
-      401: 'Конфликт типов в состоянии стола.',
-      500: 'Слишком много сообщений. Попробуйте ещё раз.',
-      501: 'Сообщение слишком большое.',
-      502: 'Сервер занят.',
+      100: 'Incompatible protocol version.',
+      101: 'The server did not understand the message.',
+      102: 'Sign in first.',
+      200: 'The session expired — signing in again.',
+      300: 'Table not found.',
+      301: 'No seats left at the table.',
+      302: 'This table is closed.',
+      303: 'You are already at a table.',
+      305: 'You are not at a table.',
+      306: 'The table name is too short or invalid.',
+      307: 'Wrong table password.',
+      308: 'A table with that name already exists.',
+      400: 'Unknown state key.',
+      401: 'Type conflict in the table state.',
+      500: 'Too many messages. Try again.',
+      501: 'The message is too large.',
+      502: 'The server is busy.',
     };
     if (code === 308 && this.pendingCreate && this.pendingCreateTries < 2) {
       this.pendingCreateTries += 1;
       const next = randomRoomName();
       this.roomInput.value = next;
+      this.roomAuto = true;
       this.pendingCreate = next;
       this.net.createRoom(next, { maxPlayers: 8, emptyTTL: 300 });
-      this.showToast('Имя занято — открываем соседний стол.', 'ok');
+      this.showToast(t('Name already taken — opening a neighbouring table.'), 'ok');
       return;
     }
     if (code === 303) return;
     this.joining = false;
     $('createBtn').disabled = false;
-    this.showToast(messages[code] || `Ошибка сервера ${code}: ${msg || ''}`.trim(), 'error');
-    if (code === 500) this.showToast('Лимит отправки: подождите секунду.', 'error');
+    this.showToast(messages[code] ? t(messages[code]) : t('Server error {code}: {msg}', { code, msg: msg || '' }).trim(), 'error');
+    if (code === 500) this.showToast(t('Rate limit: wait a second.'), 'error');
   }
 
   /* ------------------------------------------------------------- identity */
   updateSeal() {
-    const raw = this.nameInput.value.trim() || 'Г';
-    $('playerInitial').textContent = [...raw][0]?.toUpperCase() || 'Г';
+    const fallback = isRussian() ? 'Г' : 'G';
+    const raw = this.nameInput.value.trim() || fallback;
+    $('playerInitial').textContent = [...raw][0]?.toUpperCase() || fallback;
+  }
+
+  updateLangButton() {
+    const next = isRussian() ? 'EN' : 'RU';
+    const key = isRussian() ? 'Switch to English' : 'Switch to Russian';
+    $('langLabel').textContent = next;
+    $('langBtn').setAttribute('aria-label', t(key));
+    $('langBtn').setAttribute('title', t(key));
+  }
+
+  switchLanguage() {
+    if (this.modalOpen) this.closeModal(true);
+    const next = isRussian() ? 'en' : 'ru';
+    setLocale(next);
+    this.updateLangButton();
+    this.updateSeal();
+    if (this.roomAuto) this.roomInput.value = randomRoomName();
+    this.refreshSoundButton();
+    this.renderRooms();
+    this.renderGame();
+    this.updateStatus(this.lastNetStatus || { state: 'connecting' });
+    this.showToast(t(next === 'ru' ? 'Language switched to Russian' : 'Language switched to English'), 'ok');
   }
 
   async applyName() {
@@ -442,9 +492,9 @@ class SalonApp {
     if (this.net.welcomeInfo?.name === value) return;
     try {
       await this.net.rename(value);
-      this.showToast('Имя обновлено.', 'ok');
+      this.showToast(t('Name updated.'), 'ok');
     } catch {
-      this.showToast('Не удалось обновить имя.', 'error');
+      this.showToast(t('Could not update the name.'), 'error');
     }
   }
 
@@ -462,13 +512,23 @@ class SalonApp {
   }
 
   /* --------------------------------------------------------------- lobby */
+  tableCountLabel(n) {
+    if (isRussian()) return `${n} ${pluralRu(n, 'стол', 'стола', 'столов')}`;
+    return `${n} ${n === 1 ? 'table' : 'tables'}`;
+  }
+
+  playerCountLabel(n) {
+    if (isRussian()) return `${n} ${pluralRu(n, 'игрок', 'игрока', 'игроков')}`;
+    return `${n} ${n === 1 ? 'player' : 'players'}`;
+  }
+
   renderRooms() {
     const list = $('roomList');
     const rooms = this.roomList;
     $('tableCount').textContent = String(rooms.length);
     const players = rooms.reduce((sum, room) => sum + (Number(room.players) || 0), 0);
     $('onlineCount').textContent = String(players);
-    $('latencyStat').textContent = this.latency != null ? `${this.latency} мс` : '—';
+    $('latencyStat').textContent = this.latency != null ? `${this.latency} ${isRussian() ? 'мс' : 'ms'}` : '—';
 
     list.innerHTML = '';
     if (!rooms.length) {
@@ -476,8 +536,8 @@ class SalonApp {
       empty.className = 'room-empty';
       empty.innerHTML = `
         <span class="room-empty__sigil">♞</span>
-        <strong>Пока тихо</strong>
-        <span>Откройте первый стол — и он появится здесь. Ссылку можно сразу отправить другу.</span>
+        <strong>${t('No tables yet')}</strong>
+        <span>${t('Open the first table — it will appear here. You can send the link to a friend right away.')}</span>
       `;
       list.appendChild(empty);
       return;
@@ -485,7 +545,7 @@ class SalonApp {
 
     const label = document.createElement('div');
     label.className = 'room-list__label';
-    label.innerHTML = `<span>${rooms.length} ${rooms.length === 1 ? 'стол' : rooms.length < 5 ? 'стола' : 'столов'}</span><span>нажмите, чтобы войти</span>`;
+    label.innerHTML = `<span>${this.tableCountLabel(rooms.length)}</span><span>${t('tap to join')}</span>`;
     list.appendChild(label);
 
     for (const room of rooms) {
@@ -496,12 +556,12 @@ class SalonApp {
       const max = Number(room.maxPlayers) || 8;
       const full = count >= max;
       const badgeClass = full ? 'room-card__badge room-card__badge--full' : count === 1 ? 'room-card__badge room-card__badge--live' : 'room-card__badge';
-      const badgeText = full ? 'полон' : count === 1 ? 'ждёт гостя' : `${count} игрока`;
+      const badgeText = full ? t('full') : count === 1 ? t('waiting for guest') : this.playerCountLabel(count);
       card.innerHTML = `
         <span class="room-card__sigil">${count === 1 ? '♛' : count >= 3 ? '♜' : '♞'}</span>
         <span class="room-card__text">
-          <strong class="room-card__name">${escapeHtml(room.room || 'Без имени')}</strong>
-          <span class="room-card__meta"><span>#${escapeHtml(String(room.id || '').slice(0, 6))}</span><i></i><span>${count} / ${max}</span>${room.locked ? '<i></i><span>закрыт</span>' : ''}</span>
+          <strong class="room-card__name">${escapeHtml(room.room || t('No name'))}</strong>
+          <span class="room-card__meta"><span>#${escapeHtml(String(room.id || '').slice(0, 6))}</span><i></i><span>${count} / ${max}</span>${room.locked ? `<i></i><span>${t('locked')}</span>` : ''}</span>
         </span>
         <span class="${badgeClass}">${badgeText}</span>
       `;
@@ -526,7 +586,7 @@ class SalonApp {
     if (this.joining) return;
     const room = (customName || this.roomInput.value || randomRoomName()).trim().slice(0, 32) || randomRoomName();
     if (room.length < 2) {
-      this.showToast('Дайте столу имя подлиннее.', 'error');
+      this.showToast(t('Give the table a longer name.'), 'error');
       return;
     }
     this.joining = true;
@@ -543,7 +603,7 @@ class SalonApp {
       this.pendingCreate = null;
       $('createBtn').disabled = false;
       $('quickBtn').disabled = false;
-      this.showToast('Не удалось связаться с сервером.', 'error');
+      this.showToast(t('Could not reach the server.'), 'error');
     }
   }
 
@@ -563,6 +623,7 @@ class SalonApp {
       return;
     }
     this.roomInput.value = randomRoomName();
+    this.roomAuto = true;
     this.createRoom(this.roomInput.value);
   }
 
@@ -576,7 +637,7 @@ class SalonApp {
     } catch {
       this.joining = false;
       this.renderRooms();
-      this.showToast('Не удалось связаться с сервером.', 'error');
+      this.showToast(t('Could not reach the server.'), 'error');
     }
   }
 
@@ -593,7 +654,7 @@ class SalonApp {
     document.body.classList.add('in-game');
     const room = detail.room;
     $('roomTitle').textContent = room.name;
-    $('roomKicker').textContent = `Стол #${room.id}`;
+    $('roomKicker').textContent = `${t('Table')} #${room.id}`;
     $('inviteCode').textContent = room.id || '————————';
     this.scene.setMode('game');
     this.scene.clearSelection();
@@ -602,9 +663,9 @@ class SalonApp {
     history.replaceState(null, '', url);
     this.renderGame();
     if (this.session.game) this.syncBoardFromSnapshot(this.session.snapshot());
-    if (detail.resumed) this.showToast('Вы вернулись за свой стол.', 'ok');
-    else if (detail.created) this.showToast('Стол открыт. Пригласите друга по ссылке.', 'ok');
-    else this.showToast('Вы за столом.', 'ok');
+    if (detail.resumed) this.showToast(t('You are back at your table.'), 'ok');
+    else if (detail.created) this.showToast(t('Table is open. Invite a friend by link.'), 'ok');
+    else this.showToast(t('You are at the table.'), 'ok');
   }
 
   enterLobby() {
@@ -678,6 +739,11 @@ class SalonApp {
     }
   }
 
+  moveCountLabel(n) {
+    if (isRussian()) return `${n} ${pluralRu(n, 'ход', 'хода', 'ходов')}`;
+    return `${n} ${n === 1 ? 'move' : 'moves'}`;
+  }
+
   renderGame() {
     if ($('game').hidden) return;
     const game = this.session.game;
@@ -685,9 +751,9 @@ class SalonApp {
     if (!room) return;
 
     if (!game) {
-      $('statusTitle').textContent = 'Хозяин готовит стол';
-      $('statusText').textContent = 'Через мгновение здесь появится партия.';
-      $('phaseLabel').textContent = 'Стол';
+      $('statusTitle').textContent = t('The host is preparing the table');
+      $('statusText').textContent = t('The game will appear here in a moment.');
+      $('phaseLabel').textContent = t('Table');
       $('turnPill').textContent = '—';
       $('turnPill').className = 'turn-pill';
       this.syncInteraction();
@@ -711,8 +777,8 @@ class SalonApp {
     $('inviteStrip').hidden = !!game.blackId && game.status === 'playing';
     $('spectatorBadge').hidden = !this.session.isSpectator;
     $('spectatorHint').hidden = !(this.session.isSpectator && game.blackId && game.whiteId);
-    $('moveCount').textContent = `${Math.ceil(game.moves.length / 2)} ${plural(Math.ceil(game.moves.length / 2), 'ход', 'хода', 'ходов')}`;
-    $('openingName').textContent = openingName(game.moves);
+    $('moveCount').textContent = this.moveCountLabel(Math.ceil(game.moves.length / 2));
+    $('openingName').textContent = openingName(game.moves, getLocale());
     this.updateClock();
 
     $('drawBtn').disabled = !this.session.isPlaying || !!game.drawOffer || this.session.pending;
@@ -721,8 +787,8 @@ class SalonApp {
     $('rematchBtn').hidden = game.status === 'playing' || game.status === 'waiting';
     $('rematchBtn').disabled = !this.session.isHost;
     $('resultRematchBtn').disabled = !this.session.isHost;
-    $('resultRematchBtn').textContent = this.session.isHost ? 'Реванш' : 'Реванш у хоста';
-    $('resultRematchBtn').title = this.session.isHost ? 'Начать новую партию' : 'Новую партию начинает хозяин стола';
+    $('resultRematchBtn').textContent = this.session.isHost ? t('Rematch') : t('Host rematch');
+    $('resultRematchBtn').title = this.session.isHost ? t('Start a new game') : t('The host starts the next game');
 
     this.syncInteraction();
   }
@@ -737,20 +803,22 @@ class SalonApp {
     const isMe = player && player.id === this.net.you;
     const active = player && player.status !== 'suspended' && player.status !== 'gone';
     card.classList.toggle('is-you', !!isMe);
+    if (isMe) card.dataset.youLabel = t('you');
+    else delete card.dataset.youLabel;
     card.classList.toggle('is-turn', turn === color);
-    turnPill.textContent = turn === color ? 'ход' : '';
+    turnPill.textContent = turn === color ? t('move') : '';
     avatar.textContent = color === 'w' ? '♔' : '♚';
     if (!player) {
-      name.textContent = 'Свободное место';
-      meta.textContent = color === 'b' ? 'ждём гостя · можно позвать' : 'место хозяина';
+      name.textContent = t('Free seat');
+      meta.textContent = color === 'b' ? t('waiting for a guest · feel free to invite') : t("host's seat");
       card.classList.remove('is-you');
       this.fillCaptures(side, []);
       return;
     }
-    name.textContent = player.name || `Игрок #${player.id}`;
-    if (!active) meta.textContent = 'отключился · место сохранено';
-    else if (player.id === this.net.hostId) meta.textContent = `хозяин стола · #${player.id}`;
-    else meta.textContent = `гость · #${player.id}`;
+    name.textContent = player.name || t('Player #{id}', { id: player.id });
+    if (!active) meta.textContent = t('disconnected · seat held');
+    else if (player.id === this.net.hostId) meta.textContent = t('table host · #{id}', { id: player.id });
+    else meta.textContent = t('guest · #{id}', { id: player.id });
     const captures = this.session.capturedBy(color);
     this.fillCaptures(side, captures);
     const diff = this.session.material().diff;
@@ -780,7 +848,7 @@ class SalonApp {
     const list = $('moveList');
     const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 45;
     if (!game.moves.length) {
-      list.innerHTML = '<li class="move-list__empty">Первый ход ещё впереди.</li>';
+      list.innerHTML = `<li class="move-list__empty">${t('The first move is still ahead.')}</li>`;
       return;
     }
     const fragment = document.createDocumentFragment();
@@ -814,73 +882,83 @@ class SalonApp {
     const text = $('statusText');
     const phase = $('phaseLabel');
     const pill = $('turnPill');
-    const me = this.playerName(this.net.you);
 
     if (game.status === 'waiting' || !game.blackId) {
-      phase.textContent = 'Стол открыт';
-      title.textContent = 'Ожидание соперника';
-      text.textContent = 'Ссылка на стол уже готова. Отправьте её другу — и партия начнётся.';
-      pill.textContent = 'ожидание';
+      phase.textContent = t('Table open');
+      title.textContent = t('Waiting for opponent');
+      text.textContent = t('The link is ready. Send it to a friend and the game will begin.');
+      pill.textContent = t('waiting');
       pill.className = 'turn-pill';
       return;
     }
 
     if (game.status === 'playing') {
-      phase.textContent = 'Партия идёт';
-      const turnName = turn === 'w' ? 'белых' : 'чёрных';
+      phase.textContent = t('Game in progress');
+      const turnName = turn === 'w' ? t('White') : t('Black');
       const opponent = turn === myColor ? null : this.playerName(turn === 'w' ? game.whiteId : game.blackId);
       if (myColor && turn === myColor) {
-        title.textContent = this.session.inCheck ? 'Шах — ваш ход' : 'Ваш ход';
-        text.textContent = 'Выберите фигуру на доске, затем поле. Подсвеченные точки — допустимые ходы.';
-        pill.textContent = 'ваш ход';
+        title.textContent = this.session.inCheck ? t('Check — your move') : t('Your move');
+        text.textContent = t('Choose a piece on the board, then a square. Highlighted dots are legal moves.');
+        pill.textContent = t('your move');
         pill.className = 'turn-pill is-mine';
       } else if (myColor) {
-        title.textContent = `${opponent || 'Соперник'} думает`;
-        text.textContent = this.session.inCheck ? 'Соперник под шахом. Следите за ответом.' : 'Ход за соперником. Можно изучить позицию или предложить ничью.';
-        pill.textContent = `ход ${turnName}`;
+        title.textContent = t('{name} is thinking', { name: opponent || t('Opponent') });
+        text.textContent = this.session.inCheck ? t('Opponent is in check. Watch their reply.') : t("Opponent's turn. Study the position or offer a draw.");
+        pill.textContent = t('{color} to move', { color: turnName });
         pill.className = 'turn-pill';
       } else {
-        title.textContent = 'Партия идёт';
-        text.textContent = `${this.playerName(game.whiteId)} против ${this.playerName(game.blackId)}. Вы наблюдаете за столом.`;
-        pill.textContent = `ход ${turnName}`;
+        title.textContent = t('Game in progress');
+        text.textContent = t('{white} vs {black}. You are watching the table.', {
+          white: this.playerName(game.whiteId),
+          black: this.playerName(game.blackId),
+        });
+        pill.textContent = t('{color} to move', { color: turnName });
         pill.className = 'turn-pill';
       }
       return;
     }
 
-    phase.textContent = 'Партия завершена';
-    pill.textContent = 'итог';
+    phase.textContent = t('Game over');
+    pill.textContent = t('result');
     pill.className = 'turn-pill';
     title.textContent = this.resultTitle(game);
     text.textContent = this.resultDescription(game, white, black);
-    if (myColor && game.winner === myColor) text.textContent += ' Поздравляем — это ваша победа.';
+    if (myColor && game.winner === myColor) text.textContent += ` ${t('Congratulations — that is your win.')}`;
   }
 
   resultTitle(game) {
     switch (game.status) {
-      case 'checkmate': return 'Мат';
-      case 'resigned': return 'Сдача';
-      case 'abandoned': return 'Стол опустел';
-      case 'stalemate': return 'Пат';
-      case 'draw': return 'Ничья';
-      default: return 'Партия завершена';
+      case 'checkmate': return t('Checkmate');
+      case 'resigned': return t('Resignation');
+      case 'abandoned': return t('Table abandoned');
+      case 'stalemate': return t('Stalemate');
+      case 'draw': return t('Draw');
+      default: return t('Game over');
     }
   }
 
   resultDescription(game, white, black) {
     const winnerName = game.winner ? this.playerName(game.winner === 'w' ? game.whiteId : game.blackId) : null;
-    if (game.status === 'checkmate') return `Мат. ${winnerName || (game.winner === 'w' ? 'Белые' : 'Чёрные')} забирают партию.`;
-    if (game.status === 'resigned') return `${winnerName || 'Соперник'} победил сдачей противника.`;
-    if (game.status === 'abandoned') return `${winnerName || 'Соперник'} остался за столом и забирает партию.`;
-    if (game.status === 'stalemate') return 'Король не под шахом, но допустимых ходов нет. Пат.';
+    if (game.status === 'checkmate') {
+      return t('Checkmate. {winner} takes the game.', {
+        winner: winnerName || t(game.winner === 'w' ? 'White' : 'Black'),
+      });
+    }
+    if (game.status === 'resigned') {
+      return t('{winner} wins by resignation.', { winner: winnerName || t('Opponent') });
+    }
+    if (game.status === 'abandoned') {
+      return t('{winner} remains at the table and takes the game.', { winner: winnerName || t('Opponent') });
+    }
+    if (game.status === 'stalemate') return t('The king is not in check, but there are no legal moves. Stalemate.');
     const reasons = {
-      agreement: 'Соперники согласились на ничью.',
-      material: 'На доске недостаточно материала для мата.',
-      repetition: 'Позиция повторилась трижды.',
-      fifty: 'Правило пятидесяти ходов.',
-      draw: 'Партия завершилась вничью.',
+      agreement: 'The opponents agreed to a draw.',
+      material: 'There is not enough material on the board for checkmate.',
+      repetition: 'The position repeated three times.',
+      fifty: 'The fifty-move rule.',
+      draw: 'The game ended in a draw.',
     };
-    return reasons[game.reason] || 'Партия завершилась вничью.';
+    return reasons[game.reason] ? t(reasons[game.reason]) : t('The game ended in a draw.');
   }
 
   resultKeyFor(game) {
@@ -900,7 +978,7 @@ class SalonApp {
     card.hidden = false;
     const winner = game.winner;
     $('resultSigil').textContent = winner ? (winner === 'w' ? '♔' : '♚') : '½';
-    $('resultKicker').textContent = game.status === 'draw' || game.status === 'stalemate' ? 'Ничья' : 'Партия завершена';
+    $('resultKicker').textContent = game.status === 'draw' || game.status === 'stalemate' ? t('Draw') : t('Game over');
     $('resultTitle').textContent = this.resultTitle(game);
     $('resultText').textContent = this.resultDescription(game, white, black);
     if (fresh && !card.classList.contains('is-visible')) {
@@ -919,7 +997,7 @@ class SalonApp {
     const fromOpponent = this.session.drawOfferFromOpponent();
     bar.hidden = !fromOpponent;
     if (fromOpponent) {
-      $('drawOfferText').textContent = `${this.playerName(game.drawOffer)} предлагает ничью.`;
+      $('drawOfferText').textContent = t('{name} offers a draw.', { name: this.playerName(game.drawOffer) });
     }
   }
 
@@ -935,10 +1013,10 @@ class SalonApp {
   }
 
   playerName(id) {
-    if (!id) return 'Соперник';
+    if (!id) return t('Opponent');
     if (id === this.net.you) return this.net.welcomeInfo?.name || this.name;
     const player = this.net.players.get(id);
-    return player?.name || `Игрок #${id}`;
+    return player?.name || t('Player #{id}', { id });
   }
 
   showTurnToast(text) {
@@ -1024,11 +1102,11 @@ class SalonApp {
     this.selected = null;
     this.legal = [];
     this.scene.clearSelection();
-    if (result === 'not-your-turn') this.showToast('Сейчас не ваш ход.', 'error');
-    else if (result === 'pending') this.showToast('Предыдущий ход ещё подтверждается.');
-    else if (result === 'not-playing') this.showToast('Партия сейчас не идёт.', 'error');
-    else if (result === 'illegal') this.showToast('Так ходить нельзя.', 'error');
-    else if (result === 'promotion') this.showToast('Выберите фигуру для превращения.');
+    if (result === 'not-your-turn') this.showToast(t('It is not your turn.'), 'error');
+    else if (result === 'pending') this.showToast(t('The previous move is still being confirmed.'));
+    else if (result === 'not-playing') this.showToast(t('The game is not running.'), 'error');
+    else if (result === 'illegal') this.showToast(t('That move is not legal.'), 'error');
+    else if (result === 'promotion') this.showToast(t('Choose a promotion piece.'));
     this.syncInteraction();
   }
 
@@ -1040,18 +1118,19 @@ class SalonApp {
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-modal', 'true');
     modal.innerHTML = `
-      <button class="icon-btn icon-btn--small modal__close" id="promoClose" aria-label="Закрыть"><svg><use href="#i-close"></use></svg></button>
-      <p class="panel-kicker">Превращение</p>
-      <h2>Выберите фигуру</h2>
-      <p>Пешка дошла до последней горизонтали. Кем она станет?</p>
+      <button class="icon-btn icon-btn--small modal__close" id="promoClose" aria-label="${t('Close')}"><svg><use href="#i-close"></use></svg></button>
+      <p class="panel-kicker">${t('Promotion')}</p>
+      <h2>${t('Choose a piece')}</h2>
+      <p>${t('The pawn reached the last rank. What will it become?')}</p>
       <div class="promo-grid" id="promoGrid"></div>
     `;
     const grid = modal.querySelector('#promoGrid');
+    const labels = { q: 'Queen', r: 'Rook', b: 'Bishop', n: 'Knight' };
     for (const type of options) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'promo-btn';
-      btn.innerHTML = `<span>${pieceGlyph(type, color)}</span><small>${{ q: 'Ферзь', r: 'Ладья', b: 'Слон', n: 'Конь' }[type]}</small>`;
+      btn.innerHTML = `<span>${pieceGlyph(type, color)}</span><small>${t(labels[type])}</small>`;
       btn.addEventListener('click', () => {
         this.closeModal();
         this.commitMove(from, to, type);
@@ -1065,7 +1144,7 @@ class SalonApp {
   askDraw() {
     if (!this.session.isPlaying) return;
     if (this.session.game?.drawOffer === this.net.you) {
-      this.showToast('Предложение уже отправлено.');
+      this.showToast(t('Draw offer already sent.'));
       return;
     }
     if (this.session.game?.drawOffer) {
@@ -1078,10 +1157,10 @@ class SalonApp {
   confirmResign() {
     if (!this.session.isPlaying) return;
     this.confirm({
-      kicker: 'Сдаться',
-      title: 'Сложить оружие?',
-      text: 'Партия сразу завершится победой соперника. Ваш рейтинг в салоне не пострадает — здесь играют за удовольствие.',
-      confirm: 'Сдаться',
+      kicker: t('Resign'),
+      title: t('Resign the game?'),
+      text: t('The game ends immediately with a win for your opponent. Your salon rating is not affected — people play here for pleasure.'),
+      confirm: t('Resign'),
       danger: true,
       onConfirm: () => {
         this.session.resign();
@@ -1092,13 +1171,13 @@ class SalonApp {
 
   rematch() {
     if (!this.session.isHost) {
-      this.showToast('Новую партию начинает хозяин стола.', 'error');
+      this.showToast(t('Only the host can start a new game.'), 'error');
       return;
     }
     if (this.session.game?.status === 'playing') return;
     if (this.session.newGame()) {
       this.closeResult();
-      this.showToast('Новая партия! Фигуры уже расставлены.', 'ok');
+      this.showToast(t('New game! The pieces are ready.'), 'ok');
     }
   }
 
@@ -1106,10 +1185,10 @@ class SalonApp {
     if (!this.net.room) return;
     if (this.session.isPlaying) {
       this.confirm({
-        kicker: 'Покинуть стол',
-        title: 'Оставить партию?',
-        text: 'Вы выйдете в лобби, а соперник получит победу по оставленному столу. Вернуться можно будет по ссылке, но партия уже завершится.',
-        confirm: 'Выйти в лобби',
+        kicker: t('Leave table'),
+        title: t('Leave the table?'),
+        text: t('You will return to the lobby and your opponent gets the win. You can come back by link, but the game will already be over.'),
+        confirm: t('Leave to lobby'),
         danger: true,
         onConfirm: () => {
           this.closeModal();
@@ -1131,11 +1210,11 @@ class SalonApp {
       this.hintBusy = false;
       $('hintBtn').disabled = !this.session.isPlaying;
       if (!hint) {
-        this.showToast('Подсказка не нашлась — позиция уже решена.');
+        this.showToast(t('No hint found — the position is already decided.'));
         return;
       }
       this.scene.setHint(hint);
-      this.showToast(`Подсказка: ${hint.san}`, 'ok');
+      this.showToast(t('Hint: {san}', { san: hint.san }), 'ok');
       this.audio.select();
     }, 30);
   }
@@ -1145,7 +1224,7 @@ class SalonApp {
     if (!room) return;
     const link = roomUrl(room.id || room.name);
     const ok = await copyText(link);
-    this.showToast(ok ? 'Ссылка на стол скопирована.' : link, ok ? 'ok' : 'error');
+    this.showToast(ok ? t('Table link copied.') : link, ok ? 'ok' : 'error');
   }
 
   toggleFullscreen() {
@@ -1177,7 +1256,7 @@ class SalonApp {
     if (e.key === 'm' || e.key === 'M') {
       const on = this.audio.toggle();
       this.refreshSoundButton();
-      this.showToast(on ? 'Звук включён' : 'Звук выключен');
+      this.showToast(t(on ? 'Sound on' : 'Sound off'));
     }
     if (e.key === '?') this.openHelp();
   }
@@ -1185,7 +1264,7 @@ class SalonApp {
   refreshSoundButton() {
     const btn = $('soundBtn');
     btn.classList.toggle('is-muted', !this.audio.enabled);
-    btn.setAttribute('aria-label', this.audio.enabled ? 'Выключить звук' : 'Включить звук');
+    btn.setAttribute('aria-label', t(this.audio.enabled ? 'Mute sound' : 'Unmute sound'));
     btn.querySelector('use').setAttribute('href', this.audio.enabled ? '#i-sound' : '#i-mute');
   }
 
@@ -1223,18 +1302,18 @@ class SalonApp {
     this.syncInteraction();
   }
 
-  confirm({ kicker = 'Подтверждение', title, text, confirm = 'Подтвердить', danger = false, onConfirm }) {
+  confirm({ kicker = t('Confirmation'), title, text, confirm = t('Confirm'), danger = false, onConfirm }) {
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-modal', 'true');
     modal.innerHTML = `
-      <button class="icon-btn icon-btn--small modal__close" id="confirmClose" aria-label="Закрыть"><svg><use href="#i-close"></use></svg></button>
+      <button class="icon-btn icon-btn--small modal__close" id="confirmClose" aria-label="${t('Close')}"><svg><use href="#i-close"></use></svg></button>
       <p class="panel-kicker">${escapeHtml(kicker)}</p>
       <h2>${escapeHtml(title)}</h2>
       <p>${escapeHtml(text)}</p>
       <div class="modal__actions">
-        <button class="btn btn--ghost btn--compact" id="confirmCancel" type="button">Отмена</button>
+        <button class="btn btn--ghost btn--compact" id="confirmCancel" type="button">${t('Cancel')}</button>
         <button class="btn ${danger ? 'btn--danger' : 'btn--gold'} btn--compact" id="confirmYes" type="button">${escapeHtml(confirm)}</button>
       </div>
     `;
@@ -1252,21 +1331,21 @@ class SalonApp {
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-modal', 'true');
     modal.innerHTML = `
-      <button class="icon-btn icon-btn--small modal__close" id="helpClose" aria-label="Закрыть"><svg><use href="#i-close"></use></svg></button>
+      <button class="icon-btn icon-btn--small modal__close" id="helpClose" aria-label="${t('Close')}"><svg><use href="#i-close"></use></svg></button>
       <p class="panel-kicker">Ornate · 3D Chess Salon</p>
-      <h2>Как играть</h2>
-      <p>Выберите стол в гостиной или откройте свой. Первый гость играет белыми, второй — чёрными, остальные наблюдают.</p>
+      <h2>${t('How to play')}</h2>
+      <p>${t('Choose a table in the lounge or open your own. The first guest plays White, the second plays Black, everyone else watches.')}</p>
       <div class="help-grid">
-        <div class="help-item"><span class="help-item__icon">♟</span><div><strong>Ход</strong><p>Нажмите на свою фигуру, затем на подсвеченное поле. Точки — свободные поля, кольца — взятия.</p></div></div>
-        <div class="help-item"><span class="help-item__icon">♜</span><div><strong>Камера</strong><p>Вращайте доску мышью, приближайте колесом. «Перевернуть» меняет сторону, «Камера» возвращает парадный вид.</p></div></div>
-        <div class="help-item"><span class="help-item__icon">♞</span><div><strong>Соперник</strong><p>Пришлите другу ссылку на стол. Он попадёт сразу в партию. Для двух игроков на одном компьютере удобнее приватное окно или второй профиль браузера.</p></div></div>
-        <div class="help-item"><span class="help-item__icon">♛</span><div><strong>Честность</strong><p>Сервер передаёт позицию и ходы, а проверка правил идёт на клиенте. Это дружеский салон, а не турнир с античитом.</p></div></div>
-        <div class="help-item"><span class="help-item__icon">✦</span><div><strong>Клавиши</strong><p><b>R</b> — камера, <b>F</b> — переворот, <b>M</b> — звук, <b>Esc</b> — закрыть окно.</p></div></div>
+        <div class="help-item"><span class="help-item__icon">♟</span><div><strong>${t('Move')}</strong><p>${t('Click your piece, then a highlighted square. Dots are empty squares, rings are captures.')}</p></div></div>
+        <div class="help-item"><span class="help-item__icon">♜</span><div><strong>${t('Camera')}</strong><p>${t('Rotate the board with the mouse and zoom with the wheel. “Flip” changes sides, “Camera” returns to the ceremonial view.')}</p></div></div>
+        <div class="help-item"><span class="help-item__icon">♞</span><div><strong>${t('Opponent')}</strong><p>${t('Send a friend the table link. They will land straight in the game. For two players on one computer, a private window or a second browser profile is best.')}</p></div></div>
+        <div class="help-item"><span class="help-item__icon">♛</span><div><strong>${t('Fair play')}</strong><p>${t('The server relays the position and moves, while the rules are checked on the client. This is a friendly salon, not an anti-cheat tournament.')}</p></div></div>
+        <div class="help-item"><span class="help-item__icon">✦</span><div><strong>${t('Keys')}</strong><p>${t('<b>R</b> — camera, <b>F</b> — flip, <b>M</b> — sound, <b>Esc</b> — close a window.')}</p></div></div>
       </div>
       <div class="modal__actions">
-        <button class="btn btn--gold btn--compact" id="helpOk" type="button">Понятно</button>
+        <button class="btn btn--gold btn--compact" id="helpOk" type="button">${t('Got it')}</button>
       </div>
-      <p style="margin:18px 0 0;font-size:9px;color:var(--muted-2)">StarkFlow WebSocket · Three.js · без регистрации и установки</p>
+      <p style="margin:18px 0 0;font-size:9px;color:var(--muted-2)">${t('StarkFlow WebSocket · Three.js · no sign-up or installation')}</p>
     `;
     modal.querySelector('#helpClose').addEventListener('click', () => this.closeModal());
     modal.querySelector('#helpOk').addEventListener('click', () => this.closeModal());
@@ -1304,14 +1383,6 @@ class SalonApp {
     }
     setTimeout(() => this.renderGame(), 50);
   }
-}
-
-function plural(n, one, few, many) {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return one;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
-  return many;
 }
 
 const app = new SalonApp();

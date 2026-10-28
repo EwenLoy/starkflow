@@ -375,9 +375,10 @@ svg {
 }
 
 .boot__crest span {
-  transform: rotate(-45deg) translate(1px, -2px);
+  display: block;
+  transform: rotate(-45deg);
   color: var(--gold-bright);
-  font-family: var(--font-display);
+  font-family: 'Segoe UI Symbol', 'Apple Symbols', 'Noto Sans Symbols 2', var(--font-display);
   font-size: 52px;
   line-height: 1;
 }

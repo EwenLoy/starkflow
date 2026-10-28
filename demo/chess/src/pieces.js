@@ -24,30 +24,30 @@ const ivoryShade = new THREE.MeshPhysicalMaterial({
   envMapIntensity: 0.26,
 });
 
-// Black still has to read as black: a deep jade the rim light can describe, with
-// a whisper of emissive so the piece never turns into a hole in the board.
+// Black, not green: graphite with a cool sheen, so the set reads as obsidian and
+// never fades into the dark squares of the board.
 const onyxMaterial = new THREE.MeshPhysicalMaterial({
-  color: 0x254238,
-  roughness: 0.48,
-  metalness: 0.1,
-  clearcoat: 0.24,
-  clearcoatRoughness: 0.48,
-  sheen: 0.2,
-  sheenColor: 0x8fc4a8,
-  emissive: 0x0d1c16,
-  emissiveIntensity: 0.6,
-  envMapIntensity: 0.3,
+  color: 0x14181b,
+  roughness: 0.44,
+  metalness: 0.08,
+  clearcoat: 0.22,
+  clearcoatRoughness: 0.5,
+  sheen: 0.35,
+  sheenColor: 0x9fb4c4,
+  emissive: 0x0a0e12,
+  emissiveIntensity: 0.5,
+  envMapIntensity: 0.26,
 });
 
 const onyxShade = new THREE.MeshPhysicalMaterial({
-  color: 0x1b322a,
-  roughness: 0.56,
-  metalness: 0.08,
-  clearcoat: 0.18,
-  clearcoatRoughness: 0.5,
-  emissive: 0x0a1712,
-  emissiveIntensity: 0.5,
-  envMapIntensity: 0.28,
+  color: 0x10141a,
+  roughness: 0.52,
+  metalness: 0.06,
+  clearcoat: 0.16,
+  clearcoatRoughness: 0.55,
+  emissive: 0x080b0f,
+  emissiveIntensity: 0.45,
+  envMapIntensity: 0.24,
 });
 
 const brass = new THREE.MeshStandardMaterial({

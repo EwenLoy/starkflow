@@ -237,7 +237,7 @@ export class ChessScene {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.62;
+    this.renderer.toneMappingExposure = 0.68;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setClearColor(0x050c09, 0);
@@ -331,9 +331,9 @@ export class ChessScene {
   #applyFraming() {
     this.fitDistance = this.#fitDistance();
     this.controls.minDistance = Math.max(6, this.fitDistance * 0.62);
-    // The thrones stand at z = +-14.8: the orbit stops before the camera can
-    // crawl behind one of them, so a chair never fills the frame.
-    this.controls.maxDistance = Math.min(this.fitDistance * 1.25, 13.4);
+    // Free to pull back a long way: the camera rides high above the thrones, so a
+    // wide shot shows the whole hall without a chair in the way.
+    this.controls.maxDistance = Math.min(this.fitDistance * 2.4, 24);
     // The haze is a look, not a ruler: a phone pulls the camera back, so the
     // density follows, otherwise the board would drown in fog.
     if (this.scene.fog) this.scene.fog.density = 0.019 * clamp(13.4 / this.fitDistance, 0.42, 1);
@@ -398,7 +398,7 @@ export class ChessScene {
     this.keyLight = key;
     this.keyLightBase = key.intensity;
 
-    const rim = new THREE.SpotLight(0x578b78, 30, 26, 0.82, 0.92, 2);
+    const rim = new THREE.SpotLight(0x6f94a6, 30, 26, 0.82, 0.92, 2);
     rim.position.set(8.5, 7.6, -7);
     rim.target.position.set(0, 0.2, 0);
     this.scene.add(rim, rim.target);
@@ -407,7 +407,7 @@ export class ChessScene {
     fill.position.set(-8.6, 1.8, 3.4);
     this.scene.add(fill);
 
-    const under = new THREE.PointLight(0x2f6f57, 2.4, 9, 2);
+    const under = new THREE.PointLight(0x3f7488, 2.4, 9, 2);
     under.position.set(2.4, 0.4, 1.8);
     this.scene.add(under);
 
@@ -418,6 +418,15 @@ export class ChessScene {
       flame.position.set(x, 1.1, 6.1);
       this.scene.add(flame);
       this.brazierLights.push(flame);
+    }
+    // Two warm washes behind the colonnade: the library has to read from the
+    // table. Created once here, so the light count never changes at runtime.
+    this.libraryLights = [];
+    for (const [lx, lz] of [[16, 16], [-16, -16]]) {
+      const wash = new THREE.PointLight(0xffb066, 70, 34, 2);
+      wash.position.set(lx, 10.5, lz);
+      this.scene.add(wash);
+      this.libraryLights.push(wash);
     }
   }
 
@@ -440,21 +449,21 @@ export class ChessScene {
       map: lightTex,
       bumpMap: lightTex,
       bumpScale: 0.012,
-      roughness: 0.37,
+      roughness: 0.5,
       metalness: 0.02,
-      clearcoat: 0.22,
-      clearcoatRoughness: 0.55,
-      envMapIntensity: 0.55,
+      clearcoat: 0.08,
+      clearcoatRoughness: 0.7,
+      envMapIntensity: 0.3,
     });
     const darkMat = new THREE.MeshPhysicalMaterial({
       map: darkTex,
       bumpMap: darkTex,
       bumpScale: 0.015,
-      roughness: 0.3,
+      roughness: 0.46,
       metalness: 0.08,
-      clearcoat: 0.4,
-      clearcoatRoughness: 0.42,
-      envMapIntensity: 0.7,
+      clearcoat: 0.12,
+      clearcoatRoughness: 0.62,
+      envMapIntensity: 0.3,
     });
     this.squareMaterials = { light: lightMat, dark: darkMat };
 
@@ -673,7 +682,7 @@ export class ChessScene {
     // crested top. There is a short stone step under it, and both stand far enough
     // out that the orbit never reaches them.
     const throne = (sign) => {
-      const cz = sign * 16.2;
+      const cz = sign * 17.5;
       const ry = sign > 0 ? Math.PI : 0;
       const cos = Math.cos(ry);
       const sin = Math.sin(ry);
@@ -784,21 +793,52 @@ export class ChessScene {
       emissiveIntensity: 0.55,
     });
     const shelfWood = new THREE.MeshStandardMaterial({
-      color: 0x3a2416,
-      roughness: 0.78,
-      metalness: 0.05,
+      color: 0x54331c,
+      roughness: 0.72,
+      metalness: 0.04,
+      emissive: 0x160d06,
+      emissiveIntensity: 0.9,
       envMapIntensity: 0.16,
     });
     const bookLeather = new THREE.MeshStandardMaterial({
-      color: 0x55241c,
+      color: 0x7a3128,
       roughness: 0.86,
       metalness: 0.06,
+      emissive: 0x2c100b,
+      emissiveIntensity: 1,
       envMapIntensity: 0.12,
+    });
+    // Spines and shelves glow a little of their own: the library has to read from
+    // across a hall that is, by design, mostly dark.
+    const goldSpine = new THREE.MeshStandardMaterial({
+      color: 0xd8b06a,
+      roughness: 0.34,
+      metalness: 0.7,
+      emissive: 0x4a3513,
+      emissiveIntensity: 1,
+      envMapIntensity: 0.6,
+    });
+    const paleSpine = new THREE.MeshStandardMaterial({
+      color: 0xe3d7ba,
+      roughness: 0.6,
+      metalness: 0.02,
+      emissive: 0x3d3527,
+      emissiveIntensity: 1,
+      envMapIntensity: 0.2,
+    });
+    const carpet = new THREE.MeshStandardMaterial({
+      color: 0x3c1016,
+      roughness: 0.95,
+      metalness: 0.02,
+      emissive: 0x180609,
+      emissiveIntensity: 0.8,
+      envMapIntensity: 0.1,
     });
 
     const marbleParts = [];
     const brassParts = [];
     const waxParts = [];
+    const carpetParts = [];
     const flames = [];
     const put = (list, geometry, position, rotation) => list.push(dressed(geometry, position, rotation));
 
@@ -856,38 +896,58 @@ export class ChessScene {
       );
     }
 
-    // Bookcases in the bays: warm open wood shelving in three heights, packed
-    // with gilded, pale and leather-bound spines - a fairy-tale library rather
-    // than a wall.
+    // Bookcases fill the bays between the columns - open wood shelving in three
+    // heights, packed with gilded, pale and leather spines. They sit almost flush
+    // with the colonnade so you look straight into the library from the table.
     const shelfParts = [];
+    const goldSpineParts = [];
+    const paleSpineParts = [];
     const bookParts = [];
     for (let i = 0; i < bays; i += 1) {
       const a = ((i + 0.5) / bays) * Math.PI * 2;
-      const x = Math.cos(a) * (R + 2.9);
-      const z = Math.sin(a) * (R + 2.9);
+      const dist = R + 1.2;
+      const x = Math.cos(a) * dist;
+      const z = Math.sin(a) * dist;
       const ry = -a - Math.PI / 2;
-      const cos = Math.cos(ry);
-      const sin = Math.sin(ry);
+      const tx = -Math.sin(a);
+      const tz = Math.cos(a);
+      const nx = -Math.cos(a);
+      const nz = -Math.sin(a);
+      // local x runs along the bay, local z points into the hall
+      const at = (lx, y, lz) => [x + tx * lx + nx * lz, floorY + y, z + tz * lx + nz * lz];
+      const add = (list, geometry, lx, y, lz) => put(list, geometry, at(lx, y, lz), [0, ry, 0]);
+
       const height = 11.5 + (i % 3) * 1.5;
-      const width = 5.9;
-      put(shelfParts, new RoundedBoxGeometry(width, height, 0.8, 2, 0.05), [x, floorY + height / 2 + 0.3, z], [0, ry, 0]);
-      put(shelfParts, new RoundedBoxGeometry(width + 0.6, 0.36, 1.15, 2, 0.05), [x, floorY + height + 0.44, z], [0, ry, 0]);
-      put(shelfParts, new RoundedBoxGeometry(width + 0.45, 0.32, 1.05, 2, 0.05), [x, floorY + 0.2, z], [0, ry, 0]);
-      const levels = Math.floor((height - 1.5) / 2.3);
-      for (let l = 0; l < levels; l += 1) {
-        const y = floorY + 0.78 + l * 2.3;
-        put(shelfParts, new RoundedBoxGeometry(width - 0.5, 0.14, 0.72, 2, 0.03), [x, y, z], [0, ry, 0]);
-        for (let b = 0; b < 8; b += 1) {
-          const off = -2.25 + b * 0.63;
-          const tall = 1.5 + ((b * 7 + l * 3 + i) % 4) * 0.14;
-          const bucket = [brassParts, waxParts, bookParts][(b + l + i) % 3];
-          put(
-            bucket,
-            new THREE.BoxGeometry(0.11, tall, 0.36),
-            [x + cos * off, y + tall / 2 + 0.08, z - sin * off],
-            [0, ry, 0],
-          );
+      const width = 5.7;
+      const halfW = width / 2;
+
+      // an open carcass - back panel, two sides, moulded cornice and plinth - so
+      // the shelves and the spines are actually visible from the table
+      add(shelfParts, new RoundedBoxGeometry(width, height, 0.16, 2, 0.04), 0, height / 2 + 0.3, -0.28);
+      for (const s of [-1, 1]) {
+        add(shelfParts, new RoundedBoxGeometry(0.18, height, 0.66, 2, 0.04), s * (halfW - 0.09), height / 2 + 0.3, 0.02);
+      }
+      add(shelfParts, new RoundedBoxGeometry(width + 0.5, 0.4, 1.02, 2, 0.06), 0, height + 0.46, 0.02);
+      add(shelfParts, new RoundedBoxGeometry(width + 0.35, 0.34, 0.94, 2, 0.06), 0, 0.22, 0.02);
+
+      const levels = Math.max(3, Math.floor((height - 1.6) / 2.2));
+      for (let l = 0; l <= levels; l += 1) {
+        const y = 0.88 + l * 2.2;
+        add(shelfParts, new RoundedBoxGeometry(width - 0.5, 0.13, 0.58, 2, 0.03), 0, y, 0.02);
+        if (l === levels) break;
+        for (let b = 0; b < 9; b += 1) {
+          const off = -2.3 + b * 0.57;
+          const tall = 1.45 + ((b * 7 + l * 3 + i) % 4) * 0.14;
+          const bucket = [goldSpineParts, paleSpineParts, bookParts][(b + l + i) % 3];
+          add(bucket, new THREE.BoxGeometry(0.1, tall, 0.34), off, y + tall / 2 + 0.07, 0.04);
         }
+      }
+
+      // a candle on every other case top, so the library glows from inside
+      if (i % 2 === 0) {
+        add(brassParts, new THREE.CylinderGeometry(0.22, 0.14, 0.16, 10), 0, height + 0.66, 0.02);
+        add(waxParts, new THREE.CylinderGeometry(0.1, 0.12, 0.66, 8), 0, height + 1.08, 0.02);
+        flames.push(...at(0, height + 1.52, 0.02));
       }
     }
 
@@ -903,6 +963,31 @@ export class ChessScene {
     );
     wall.position.y = floorY + 18;
     this.scene.add(wall);
+
+    // A chandelier hangs high over the table - above every camera angle - and two
+    // crimson runners lead from the thrones to the table.
+    const chandelierY = floorY + 11.6;
+    put(brassParts, new THREE.TorusGeometry(3.4, 0.13, 8, 44), [0, chandelierY, 0], [Math.PI / 2, 0, 0]);
+    put(brassParts, new THREE.TorusGeometry(2.2, 0.09, 8, 36), [0, chandelierY + 0.6, 0], [Math.PI / 2, 0, 0]);
+    for (const [qx, qz] of [[1.6, 1.6], [-1.6, 1.6], [1.6, -1.6], [-1.6, -1.6]]) {
+      put(brassParts, new THREE.CylinderGeometry(0.03, 0.03, 7, 6), [qx, chandelierY + 4, qz]);
+    }
+    for (let i = 0; i < 8; i += 1) {
+      const ca = (i / 8) * Math.PI * 2;
+      const cx = Math.cos(ca) * 3.4;
+      const cz = Math.sin(ca) * 3.4;
+      put(brassParts, new THREE.CylinderGeometry(0.1, 0.14, 0.34, 10), [cx, chandelierY + 0.22, cz]);
+      put(waxParts, new THREE.CylinderGeometry(0.09, 0.11, 0.56, 8), [cx, chandelierY + 0.66, cz]);
+      flames.push(cx, chandelierY + 1.02, cz);
+    }
+    for (const s of [-1, 1]) {
+      const rz = s * 13.9;
+      put(carpetParts, new RoundedBoxGeometry(5.6, 0.06, 6.6, 2, 0.03), [0, floorY + 0.03, rz]);
+      for (const e of [-1, 1]) {
+        put(brassParts, new THREE.BoxGeometry(5.7, 0.025, 0.12), [0, floorY + 0.07, rz + e * 3.2]);
+        put(brassParts, new THREE.BoxGeometry(0.12, 0.025, 6.6), [e * 2.8, floorY + 0.07, rz]);
+      }
+    }
 
     // Sconces on every fourth column, and candlesticks on the table.
     for (let i = 0; i < bays; i += 4) {
@@ -968,7 +1053,10 @@ export class ChessScene {
     };
     addMerged(marbleParts, marbleCol);
     addMerged(shelfParts, shelfWood);
+    addMerged(goldSpineParts, goldSpine);
+    addMerged(paleSpineParts, paleSpine);
     addMerged(bookParts, bookLeather);
+    addMerged(carpetParts, carpet);
     addMerged(brassParts, this.brassMaterial);
     addMerged(waxParts, wax);
 

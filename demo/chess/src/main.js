@@ -1,9 +1,9 @@
-import { ChessScene } from './scene.js?v=20261028-20';
+import { ChessScene } from './scene.js?v=20261028-21';
 import { StarkFlowClient } from './net.js?v=20261028-14';
 import { ChessSession, START_FEN } from './session.js?v=20261028-14';
 import { ChessAudio } from './audio.js?v=20261028-14';
 import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-14';
-import { pieceGlyph } from './pieces.js?v=20261028-19';
+import { pieceGlyph } from './pieces.js?v=20261028-21';
 import { LocalNet } from './offline.js?v=20261028-14';
 import {
   applyTranslations,

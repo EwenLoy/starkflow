@@ -6,7 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { createPiece, pieceGlyph } from './pieces.js?v=20261028-14';
+import { createPiece, pieceGlyph } from './pieces.js?v=20261028-19';
 
 const FILES = 'abcdefgh';
 const PIECE_Y = 0.105;
@@ -331,10 +331,12 @@ export class ChessScene {
   #applyFraming() {
     this.fitDistance = this.#fitDistance();
     this.controls.minDistance = Math.max(6, this.fitDistance * 0.62);
-    this.controls.maxDistance = this.fitDistance * 1.4;
+    // The thrones stand at z = +-14.8: the orbit stops before the camera can
+    // crawl behind one of them, so a chair never fills the frame.
+    this.controls.maxDistance = Math.min(this.fitDistance * 1.25, 13.4);
     // The haze is a look, not a ruler: a phone pulls the camera back, so the
     // density follows, otherwise the board would drown in fog.
-    if (this.scene.fog) this.scene.fog.density = 0.025 * clamp(13.4 / this.fitDistance, 0.42, 1);
+    if (this.scene.fog) this.scene.fog.density = 0.019 * clamp(13.4 / this.fitDistance, 0.42, 1);
   }
 
   #lobbyPosition() {
@@ -381,9 +383,9 @@ export class ChessScene {
   #setupLights() {
     // The hall is lit by candles: a low cold wash so shapes exist, warm pools
     // on the table, and only as much key light as the board needs to be read.
-    this.scene.add(new THREE.HemisphereLight(0x6d8894, 0x040906, 0.15));
+    this.scene.add(new THREE.HemisphereLight(0x6d8894, 0x040906, 0.24));
 
-    const key = new THREE.SpotLight(0xffc98c, 62, 24, 0.62, 0.86, 2);
+    const key = new THREE.SpotLight(0xffc98c, 96, 26, 0.64, 0.86, 2);
     key.position.set(-2.2, 11.8, 5.4);
     key.target.position.set(0, 0, 0);
     key.castShadow = true;
@@ -396,23 +398,23 @@ export class ChessScene {
     this.keyLight = key;
     this.keyLightBase = key.intensity;
 
-    const rim = new THREE.SpotLight(0x578b78, 22, 26, 0.82, 0.92, 2);
+    const rim = new THREE.SpotLight(0x578b78, 30, 26, 0.82, 0.92, 2);
     rim.position.set(8.5, 7.6, -7);
     rim.target.position.set(0, 0.2, 0);
     this.scene.add(rim, rim.target);
 
-    const fill = new THREE.PointLight(0xff9c4e, 4, 16, 2);
+    const fill = new THREE.PointLight(0xff9c4e, 6, 16, 2);
     fill.position.set(-8.6, 1.8, 3.4);
     this.scene.add(fill);
 
-    const under = new THREE.PointLight(0x2f6f57, 1.8, 9, 2);
+    const under = new THREE.PointLight(0x2f6f57, 2.4, 9, 2);
     under.position.set(2.4, 0.4, 1.8);
     this.scene.add(under);
 
     // Two candle pools on the near table corners carry the scene.
     this.brazierLights = [];
     for (const x of [-7.4, 7.4]) {
-      const flame = new THREE.PointLight(0xffab5c, 15, 13, 2);
+      const flame = new THREE.PointLight(0xffab5c, 20, 14, 2);
       flame.position.set(x, 1.1, 6.1);
       this.scene.add(flame);
       this.brazierLights.push(flame);
@@ -663,15 +665,14 @@ export class ChessScene {
       put(brassParts, new THREE.BoxGeometry(0.06, 0.03, 10.7), [s * 5.33, -0.662, 0]);
     }
 
-    // Two thrones flank the table, facing it: a stone step, a tall carved back,
-    // green velvet, brass finials and scrolls. They stand to the sides so the
-    // camera never ends up behind one of them.
+    // Two thrones stand at the ends of the board - white on the near side, black
+    // on the far one - far enough out that the orbit never passes behind them.
     const throne = (sign) => {
-      const cx = sign * 11.6;
-      const ry = sign > 0 ? -Math.PI / 2 : Math.PI / 2;
+      const cz = sign * 14.8;
+      const ry = sign > 0 ? Math.PI : 0;
       const cos = Math.cos(ry);
       const sin = Math.sin(ry);
-      const at = (lx, y, lz) => [cx + lx * cos + lz * sin, floorY + y, -lx * sin + lz * cos];
+      const at = (lx, y, lz) => [lx * cos + lz * sin, floorY + y, cz - lx * sin + lz * cos];
       const add = (list, geometry, lx, y, lz, rx = 0) => put(list, geometry, at(lx, y, lz), [rx, ry, 0]);
 
       add(stoneParts, new RoundedBoxGeometry(4.6, 0.26, 4.2, 3, 0.08), 0, 0.13, 0, 0);
@@ -697,7 +698,6 @@ export class ChessScene {
     };
     throne(1);
     throne(-1);
-
     for (const [radius, opacity] of [
       [12.6, 0.2],
       [15.4, 0.11],
@@ -741,11 +741,11 @@ export class ChessScene {
 
   #buildRoom() {
     const floorY = this.floorY ?? -2.35;
-    const stone = new THREE.MeshStandardMaterial({
-      color: 0x0a1712,
-      roughness: 0.64,
-      metalness: 0.22,
-      envMapIntensity: 0.32,
+    const marbleCol = new THREE.MeshStandardMaterial({
+      color: 0xe6dfcd,
+      roughness: 0.58,
+      metalness: 0.04,
+      envMapIntensity: 0.26,
     });
     const wax = new THREE.MeshStandardMaterial({
       color: 0xe6d8b6,
@@ -761,58 +761,85 @@ export class ChessScene {
       envMapIntensity: 0.14,
     });
 
-    const columnParts = [];
+    const marbleParts = [];
     const brassParts = [];
     const waxParts = [];
     const flames = [];
     const put = (list, geometry, position, rotation) => list.push(dressed(geometry, position, rotation));
 
-    // A round hall: tall columns carry a ring of arches, bookcases fill the bays
-    // behind them, and a curved wall closes the room so the fog has an edge to
-    // fade into instead of an open void.
-    const R = 14.4;
-    const bays = 16;
+    // A round hall: fluted marble columns carry a ring of arches, tall bookcases
+    // fill the bays behind them, and a curved wall closes the room. The shafts are
+    // tall enough that their capitals stay out of frame - the hall has no ceiling
+    // you can see, only darkness above.
+    const R = 18.8;
+    const bays = 18;
+    const shaft = 17.6;
     const archRadius = R * Math.sin(Math.PI / bays);
     for (let i = 0; i < bays; i += 1) {
       const a = (i / bays) * Math.PI * 2;
       const x = Math.cos(a) * R;
       const z = Math.sin(a) * R;
-      put(columnParts, new THREE.CylinderGeometry(0.88, 1.06, 0.4, 12), [x, floorY + 0.2, z]);
-      put(columnParts, new THREE.CylinderGeometry(0.54, 0.68, 7.9, 14), [x, floorY + 4.35, z]);
-      put(columnParts, new THREE.CylinderGeometry(0.84, 0.58, 0.36, 12), [x, floorY + 8.48, z]);
-      put(columnParts, new RoundedBoxGeometry(1.7, 0.26, 1.7, 2, 0.06), [x, floorY + 8.79, z], [0, -a, 0]);
-      put(brassParts, new THREE.TorusGeometry(0.64, 0.05, 6, 18), [x, floorY + 8.3, z], [Math.PI / 2, 0, 0]);
+      const capY = floorY + 0.74 + shaft;
+
+      // base: plinth, torus, and the apophyge above it
+      put(marbleParts, new THREE.CylinderGeometry(1.3, 1.5, 0.44, 16), [x, floorY + 0.22, z]);
+      put(marbleParts, new THREE.CylinderGeometry(1.14, 1.28, 0.26, 16), [x, floorY + 0.57, z]);
+      put(brassParts, new THREE.TorusGeometry(1.16, 0.045, 6, 22), [x, floorY + 0.72, z], [Math.PI / 2, 0, 0]);
+
+      // fluted shaft: a tapered drum with the fillets between the flutes standing
+      // proud of it, which is what reads as fluting from any distance
+      put(marbleParts, new THREE.CylinderGeometry(0.74, 0.94, shaft, 20), [x, floorY + 0.74 + shaft / 2, z]);
+      for (let f = 0; f < 20; f += 1) {
+        const t = (f / 20) * Math.PI * 2;
+        put(
+          marbleParts,
+          new THREE.BoxGeometry(0.09, shaft - 0.5, 0.09),
+          [x + Math.cos(t) * 0.85, floorY + 0.74 + shaft / 2, z + Math.sin(t) * 0.85],
+          [0, -t, 0],
+        );
+      }
+
+      // Ionic capital: echinus, two volutes turned to the bay, abacus
+      put(marbleParts, new THREE.CylinderGeometry(1.04, 0.78, 0.38, 16), [x, capY + 0.17, z]);
+      for (const s of [-1, 1]) {
+        put(
+          marbleParts,
+          new THREE.TorusGeometry(0.32, 0.11, 8, 18),
+          [x + Math.cos(a + Math.PI / 2) * 0.94 * s, capY + 0.36, z + Math.sin(a + Math.PI / 2) * 0.94 * s],
+          [0, -a, 0],
+        );
+      }
+      put(marbleParts, new RoundedBoxGeometry(2.34, 0.26, 2.34, 2, 0.06), [x, capY + 0.6, z], [0, -a, 0]);
     }
     for (let i = 0; i < bays; i += 1) {
       const a = ((i + 0.5) / bays) * Math.PI * 2;
       put(
-        columnParts,
-        new THREE.TorusGeometry(archRadius, 0.12, 6, 18, Math.PI),
-        [Math.cos(a) * R, floorY + 8.86, Math.sin(a) * R],
+        marbleParts,
+        new THREE.TorusGeometry(archRadius, 0.13, 6, 18, Math.PI),
+        [Math.cos(a) * R, floorY + 0.74 + shaft + 0.73, Math.sin(a) * R],
         [0, -a - Math.PI / 2, 0],
       );
     }
-    put(columnParts, new THREE.TorusGeometry(R, 0.3, 6, 96), [0, floorY + 9.6, 0], [Math.PI / 2, 0, 0]);
 
     // Bookcases in the bays: tall dark cases with shelves and a hint of gilded
     // spines, so the room reads as a library rather than a void.
     const shelfParts = [];
     for (let i = 0; i < bays; i += 1) {
       const a = ((i + 0.5) / bays) * Math.PI * 2;
-      const x = Math.cos(a) * (R + 1.6);
-      const z = Math.sin(a) * (R + 1.6);
+      const x = Math.cos(a) * (R + 2.6);
+      const z = Math.sin(a) * (R + 2.6);
       const ry = -a - Math.PI / 2;
       const cos = Math.cos(ry);
       const sin = Math.sin(ry);
-      put(shelfParts, new RoundedBoxGeometry(4.2, 7, 0.6, 2, 0.05), [x, floorY + 3.7, z], [0, ry, 0]);
-      for (const level of [1.6, 3.2, 4.8, 6.2]) {
-        put(shelfParts, new RoundedBoxGeometry(3.7, 0.14, 0.52, 2, 0.03), [x, floorY + level, z], [0, ry, 0]);
-        for (let b = 0; b < 6; b += 1) {
-          const off = -1.4 + b * 0.56;
+      put(shelfParts, new RoundedBoxGeometry(5.2, 12.4, 0.7, 2, 0.05), [x, floorY + 6.6, z], [0, ry, 0]);
+      for (const level of [2.2, 4.6, 7, 9.4, 11.4]) {
+        put(shelfParts, new RoundedBoxGeometry(4.6, 0.16, 0.6, 2, 0.03), [x, floorY + level, z], [0, ry, 0]);
+        for (let b = 0; b < 7; b += 1) {
+          const off = -1.85 + b * 0.62;
           put(
             brassParts,
-            new THREE.BoxGeometry(0.1, 1.06, 0.3),
-            [x + cos * off, floorY + level + 0.6, z - sin * off],
+            new THREE.BoxGeometry(0.1, 1.5, 0.32),
+            [x + cos * off, floorY + level + 0.84, z - sin * off],
             [0, ry, 0],
           );
         }
@@ -821,7 +848,7 @@ export class ChessScene {
 
     // The curved wall behind the shelves.
     const wall = new THREE.Mesh(
-      new THREE.CylinderGeometry(R + 5, R + 5, 28, 40, 1, true),
+      new THREE.CylinderGeometry(R + 8, R + 8, 46, 44, 1, true),
       new THREE.MeshStandardMaterial({
         color: 0x050d0a,
         roughness: 0.96,
@@ -829,19 +856,19 @@ export class ChessScene {
         side: THREE.BackSide,
       }),
     );
-    wall.position.y = floorY + 10;
+    wall.position.y = floorY + 18;
     this.scene.add(wall);
 
-    // Sconces on every fourth column, and candlesticks on the table.
-    for (let i = 0; i < bays; i += 4) {
+    // Sconces on every third column, and candlesticks on the table.
+    for (let i = 0; i < bays; i += 3) {
       const a = (i / bays) * Math.PI * 2;
-      const x = Math.cos(a) * (R - 0.95);
-      const z = Math.sin(a) * (R - 0.95);
-      const y = floorY + 5.3;
-      put(brassParts, new THREE.BoxGeometry(0.66, 0.12, 0.12), [x, y, z], [0, -a, 0]);
-      put(brassParts, new THREE.CylinderGeometry(0.3, 0.17, 0.18, 10), [x, y + 0.07, z]);
-      put(waxParts, new THREE.CylinderGeometry(0.1, 0.12, 0.72, 8), [x, y + 0.52, z]);
-      flames.push(x, y + 0.98, z);
+      const x = Math.cos(a) * (R - 1.15);
+      const z = Math.sin(a) * (R - 1.15);
+      const y = floorY + 6.1;
+      put(brassParts, new THREE.BoxGeometry(0.8, 0.14, 0.14), [x, y, z], [0, -a, 0]);
+      put(brassParts, new THREE.CylinderGeometry(0.34, 0.19, 0.2, 10), [x, y + 0.08, z]);
+      put(waxParts, new THREE.CylinderGeometry(0.11, 0.13, 0.8, 8), [x, y + 0.58, z]);
+      flames.push(x, y + 1.08, z);
     }
     for (const x of [-6.9, 6.9]) {
       for (const z of [-6.5, 6.5]) {
@@ -854,8 +881,8 @@ export class ChessScene {
     }
     // Braziers between the thrones and the colonnade keep the ring alive.
     for (const a of [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75]) {
-      const x = Math.cos(a) * 11.9;
-      const z = Math.sin(a) * 11.9;
+      const x = Math.cos(a) * 13.6;
+      const z = Math.sin(a) * 13.6;
       put(brassParts, new THREE.CylinderGeometry(0.11, 0.26, 2.4, 12), [x, floorY + 1.2, z]);
       put(brassParts, new THREE.CylinderGeometry(0.56, 0.26, 0.36, 16), [x, floorY + 2.5, z]);
       flames.push(x, floorY + 2.84, z);
@@ -894,7 +921,7 @@ export class ChessScene {
       mesh.receiveShadow = true;
       this.scene.add(mesh);
     };
-    addMerged(columnParts, stone);
+    addMerged(marbleParts, marbleCol);
     addMerged(shelfParts, shelfWood);
     addMerged(brassParts, this.brassMaterial);
     addMerged(waxParts, wax);
@@ -1876,8 +1903,8 @@ export class ChessScene {
       if (this.flameHaloMaterial) this.flameHaloMaterial.opacity = 0.22 * (0.82 + flicker * 0.22);
       // The two warm lamps behind the table breathe with the candles.
       if (this.brazierLights?.length) {
-        this.brazierLights[0].intensity = 13 + flicker * 5;
-        if (this.brazierLights[1]) this.brazierLights[1].intensity = 13 + (1.06 - flicker) * 5;
+        this.brazierLights[0].intensity = 17 + flicker * 6;
+        if (this.brazierLights[1]) this.brazierLights[1].intensity = 17 + (1.06 - flicker) * 6;
       }
     }
 

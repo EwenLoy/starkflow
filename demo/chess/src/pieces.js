@@ -2,42 +2,52 @@ import * as THREE from 'three';
 
 const TAU = Math.PI * 2;
 
+// Broad, soft highlights instead of a mirror: a low clearcoat and a rougher
+// surface keep candle light from blowing out the silhouette.
 const ivoryMaterial = new THREE.MeshPhysicalMaterial({
-  color: 0xf1e6cf,
-  roughness: 0.34,
+  color: 0xf3ead6,
+  roughness: 0.46,
   metalness: 0.02,
-  clearcoat: 0.45,
-  clearcoatRoughness: 0.32,
-  sheen: 0.18,
+  clearcoat: 0.22,
+  clearcoatRoughness: 0.5,
+  sheen: 0.14,
   sheenColor: 0xfff3d4,
-  envMapIntensity: 0.52,
+  envMapIntensity: 0.28,
 });
 
 const ivoryShade = new THREE.MeshPhysicalMaterial({
-  color: 0xd7c8aa,
-  roughness: 0.4,
+  color: 0xd9cbae,
+  roughness: 0.52,
   metalness: 0.03,
-  clearcoat: 0.4,
-  envMapIntensity: 0.58,
+  clearcoat: 0.18,
+  clearcoatRoughness: 0.55,
+  envMapIntensity: 0.26,
 });
 
+// Black still has to read as black: a deep jade the rim light can describe, with
+// a whisper of emissive so the piece never turns into a hole in the board.
 const onyxMaterial = new THREE.MeshPhysicalMaterial({
-  color: 0x15251f,
-  roughness: 0.26,
-  metalness: 0.28,
-  clearcoat: 0.68,
-  clearcoatRoughness: 0.24,
-  sheen: 0.25,
-  sheenColor: 0x73a68f,
-  envMapIntensity: 0.7,
+  color: 0x254238,
+  roughness: 0.48,
+  metalness: 0.1,
+  clearcoat: 0.24,
+  clearcoatRoughness: 0.48,
+  sheen: 0.2,
+  sheenColor: 0x8fc4a8,
+  emissive: 0x0d1c16,
+  emissiveIntensity: 0.6,
+  envMapIntensity: 0.3,
 });
 
 const onyxShade = new THREE.MeshPhysicalMaterial({
-  color: 0x0b1713,
-  roughness: 0.34,
-  metalness: 0.22,
-  clearcoat: 0.65,
-  envMapIntensity: 0.8,
+  color: 0x1b322a,
+  roughness: 0.56,
+  metalness: 0.08,
+  clearcoat: 0.18,
+  clearcoatRoughness: 0.5,
+  emissive: 0x0a1712,
+  emissiveIntensity: 0.5,
+  envMapIntensity: 0.28,
 });
 
 const brass = new THREE.MeshStandardMaterial({

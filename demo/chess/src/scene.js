@@ -177,6 +177,48 @@ function radialTexture(inner = 'rgba(230,196,124,.34)', outer = 'rgba(0,0,0,0)')
   return tex;
 }
 
+/**
+ * A primitive with its transform baked in, so a whole hall of columns, arches
+ * and chairs can collapse into one draw call per material instead of a hundred.
+ */
+function dressed(geometry, position = [0, 0, 0], rotation = [0, 0, 0], scale = [1, 1, 1]) {
+  let piece = geometry;
+  if (geometry.index) {
+    piece = geometry.toNonIndexed();
+    geometry.dispose();
+  }
+  const matrix = new THREE.Matrix4().compose(
+    new THREE.Vector3(position[0], position[1], position[2]),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(rotation[0], rotation[1], rotation[2])),
+    new THREE.Vector3(scale[0], scale[1], scale[2]),
+  );
+  piece.applyMatrix4(matrix);
+  return piece;
+}
+
+function mergeAll(pieces) {
+  let total = 0;
+  for (const piece of pieces) total += piece.attributes.position.count;
+  const position = new Float32Array(total * 3);
+  const normal = new Float32Array(total * 3);
+  const uv = new Float32Array(total * 2);
+  let offset = 0;
+  for (const piece of pieces) {
+    const count = piece.attributes.position.count;
+    position.set(piece.attributes.position.array, offset * 3);
+    normal.set(piece.attributes.normal.array, offset * 3);
+    if (piece.attributes.uv) uv.set(piece.attributes.uv.array, offset * 2);
+    offset += count;
+    piece.dispose();
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(position, 3));
+  merged.setAttribute('normal', new THREE.BufferAttribute(normal, 3));
+  merged.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  merged.computeBoundingSphere();
+  return merged;
+}
+
 export class ChessScene {
   constructor(canvas, { onSquareClick } = {}) {
     this.canvas = canvas;
@@ -280,10 +322,10 @@ export class ChessScene {
   #fitDistance() {
     const aspect = this.camera.aspect || 1;
     const halfFov = ((this.camera.fov || 36) * Math.PI) / 360;
-    const byWidth = 6.05 / (Math.tan(halfFov) * Math.min(aspect, 2.2));
-    const span = window.innerHeight <= 520 ? 9.8 : 8.6;
+    const byWidth = 6.7 / (Math.tan(halfFov) * Math.min(aspect, 2.2));
+    const span = window.innerHeight <= 520 ? 10.2 : 9.2;
     const byDepth = span / (2 * Math.tan(halfFov));
-    return clamp(Math.max(byWidth, byDepth), 7.4, 42);
+    return clamp(Math.max(byWidth, byDepth), 7.8, 42);
   }
 
   #applyFraming() {
@@ -292,7 +334,7 @@ export class ChessScene {
     this.controls.maxDistance = this.fitDistance * 1.4;
     // The haze is a look, not a ruler: a phone pulls the camera back, so the
     // density follows, otherwise the board would drown in fog.
-    if (this.scene.fog) this.scene.fog.density = 0.022 * clamp(13.4 / this.fitDistance, 0.42, 1);
+    if (this.scene.fog) this.scene.fog.density = 0.025 * clamp(13.4 / this.fitDistance, 0.42, 1);
   }
 
   #lobbyPosition() {
@@ -366,9 +408,9 @@ export class ChessScene {
     this.scene.add(under);
 
     this.brazierLights = [];
-    for (const x of [-6.2, 6.2]) {
-      const flame = new THREE.PointLight(0xffb55e, 2.5, 7, 2);
-      flame.position.set(x, 2.1, -4.8);
+    for (const x of [-7.2, 7.2]) {
+      const flame = new THREE.PointLight(0xffb55e, 10, 11, 2);
+      flame.position.set(x, 1.5, 6.2);
       this.scene.add(flame);
       this.brazierLights.push(flame);
     }
@@ -556,150 +598,245 @@ export class ChessScene {
   }
 
   #buildTable() {
-    const tableMat = new THREE.MeshPhysicalMaterial({
-      color: 0x101f19,
-      roughness: 0.24,
-      metalness: 0.4,
-      clearcoat: 0.3,
-      envMapIntensity: 0.35,
-    });
-    const table = new THREE.Mesh(new THREE.CylinderGeometry(7.2, 7.6, 0.38, 72), tableMat);
-    table.position.y = -0.86;
-    table.receiveShadow = true;
-    this.scene.add(table);
+    const floorY = -2.35;
+    this.floorY = floorY;
 
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(7.19, 0.035, 10, 120), this.brassMaterial);
-    rim.rotation.x = Math.PI / 2;
-    rim.position.y = -0.665;
-    this.scene.add(rim);
-
-    const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x07110d,
-      roughness: 0.36,
-      metalness: 0.48,
-      envMapIntensity: 0.25,
+    const wood = new THREE.MeshPhysicalMaterial({
+      color: 0x2b1a11,
+      roughness: 0.33,
+      metalness: 0.16,
+      clearcoat: 0.55,
+      clearcoatRoughness: 0.3,
+      envMapIntensity: 0.55,
     });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), floorMat);
+    const stone = new THREE.MeshStandardMaterial({
+      color: 0x09140f,
+      roughness: 0.5,
+      metalness: 0.26,
+      envMapIntensity: 0.3,
+    });
+    const velvet = new THREE.MeshStandardMaterial({
+      color: 0x14322a,
+      roughness: 0.96,
+      metalness: 0.01,
+      envMapIntensity: 0.18,
+    });
+    this.hallMaterials = { wood, stone, velvet };
+
+    const woodParts = [];
+    const stoneParts = [];
+    const velvetParts = [];
+    const brassParts = [];
+    const put = (list, geometry, position, rotation) => list.push(dressed(geometry, position, rotation));
+
+    // Floor: polished stone that keeps going until the fog swallows it.
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(120, 120),
+      new THREE.MeshStandardMaterial({
+        color: 0x06100c,
+        roughness: 0.42,
+        metalness: 0.42,
+        envMapIntensity: 0.22,
+      }),
+    );
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -1.06;
+    floor.position.y = floorY;
     floor.receiveShadow = true;
     this.scene.add(floor);
 
+    // Two steps up to the royal table.
+    put(stoneParts, new RoundedBoxGeometry(23, 0.3, 21.4, 3, 0.08), [0, floorY + 0.16, 0]);
+    put(stoneParts, new RoundedBoxGeometry(19.8, 0.3, 18.4, 3, 0.08), [0, floorY + 0.46, 0]);
+
+    // The table: a carved slab wide enough for the board and the candlesticks,
+    // with a wooden top face the board actually rests on.
+    put(woodParts, new RoundedBoxGeometry(16.4, 1.04, 15.4, 4, 0.18), [0, -1.18, 0]);
+    put(stoneParts, new RoundedBoxGeometry(17.2, 0.34, 16.2, 3, 0.1), [0, -1.84, 0]);
+    put(woodParts, new RoundedBoxGeometry(16.6, 0.16, 15.6, 3, 0.06), [0, -0.74, 0]);
+    for (const s of [-1, 1]) {
+      put(brassParts, new THREE.BoxGeometry(16.7, 0.06, 0.12), [0, -0.68, s * 7.76]);
+      put(brassParts, new THREE.BoxGeometry(0.12, 0.06, 15.7), [s * 8.26, -0.68, 0]);
+      put(brassParts, new THREE.BoxGeometry(10.7, 0.03, 0.06), [0, -0.662, s * 5.33]);
+      put(brassParts, new THREE.BoxGeometry(0.06, 0.03, 10.7), [s * 5.33, -0.662, 0]);
+    }
+
+    // Two thrones, one for each side of the board.
+    const throne = (z) => {
+      const flip = z > 0;
+      const ry = flip ? Math.PI : 0;
+      const at = (x, y, lz) => [flip ? -x : x, floorY + y, z + (flip ? -lz : lz)];
+      const add = (list, geometry, x, y, lz, rx = 0) => put(list, geometry, at(x, y, lz), [rx, ry, 0]);
+
+      for (const [lx, lz] of [[-1.3, -1.05], [1.3, -1.05], [-1.3, 1.05], [1.3, 1.05]]) {
+        add(woodParts, new THREE.CylinderGeometry(0.11, 0.15, 0.9, 10), lx, 0.45, lz);
+        add(brassParts, new THREE.CylinderGeometry(0.17, 0.17, 0.07, 10), lx, 0.04, lz);
+      }
+      add(woodParts, new RoundedBoxGeometry(3.1, 0.26, 2.5, 3, 0.08), 0, 1.02, 0);
+      add(velvetParts, new RoundedBoxGeometry(2.7, 0.2, 2.1, 3, 0.07), 0, 1.22, 0);
+      for (const s of [-1, 1]) {
+        add(woodParts, new THREE.CylinderGeometry(0.1, 0.12, 2.3, 10), s * 1.42, 2.28, -1.16);
+        add(brassParts, new THREE.SphereGeometry(0.17, 12, 10), s * 1.42, 3.48, -1.16);
+        add(woodParts, new THREE.BoxGeometry(0.16, 0.14, 1.5), s * 1.42, 1.72, -0.35);
+        add(woodParts, new THREE.CylinderGeometry(0.09, 0.1, 0.66, 8), s * 1.42, 1.36, 0.34);
+      }
+      add(woodParts, new RoundedBoxGeometry(2.9, 2.2, 0.2, 3, 0.07), 0, 2.32, -1.24, -0.05);
+      add(velvetParts, new RoundedBoxGeometry(2.4, 1.7, 0.12, 3, 0.05), 0, 2.28, -1.13, -0.05);
+      add(brassParts, new THREE.TorusGeometry(0.34, 0.05, 8, 18), 0, 3.52, -1.2);
+    };
+    throne(12);
+    throne(-12);
+
     for (const [radius, opacity] of [
-      [8.4, 0.22],
-      [10.2, 0.13],
-      [13.2, 0.07],
+      [12.6, 0.2],
+      [15.4, 0.11],
+      [18.6, 0.055],
     ]) {
       const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(radius, 0.018, 6, 160),
+        new THREE.TorusGeometry(radius, 0.02, 6, 128),
         new THREE.MeshBasicMaterial({ color: 0xb18b52, transparent: true, opacity, blending: THREE.AdditiveBlending }),
       );
       ring.rotation.x = Math.PI / 2;
-      ring.position.y = -1.045;
+      ring.position.y = floorY + 0.012;
       this.scene.add(ring);
     }
 
     const glow = new THREE.Mesh(
-      new THREE.PlaneGeometry(17, 17),
+      new THREE.PlaneGeometry(36, 36),
       new THREE.MeshBasicMaterial({
-        map: radialTexture('rgba(78,150,116,.13)', 'rgba(0,0,0,0)'),
+        map: radialTexture('rgba(70,132,104,.12)', 'rgba(0,0,0,0)'),
         transparent: true,
-        opacity: 0.8,
+        opacity: 0.75,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       }),
     );
     glow.rotation.x = -Math.PI / 2;
-    glow.position.y = -1.04;
+    glow.position.y = floorY + 0.01;
     this.scene.add(glow);
+
+    const merged = (parts, material, cast = false) => {
+      if (!parts.length) return;
+      const mesh = new THREE.Mesh(mergeAll(parts), material);
+      mesh.castShadow = cast;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+    };
+    merged(stoneParts, stone);
+    merged(woodParts, wood);
+    merged(velvetParts, velvet);
+    merged(brassParts, this.brassMaterial);
   }
 
   #buildRoom() {
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x07110d, roughness: 0.92, metalness: 0.05 });
-    const wall = new THREE.Mesh(new THREE.PlaneGeometry(40, 17), wallMat);
-    wall.position.set(0, 5.5, -13);
+    const floorY = this.floorY ?? -2.35;
+    const stone = new THREE.MeshStandardMaterial({
+      color: 0x0a1712,
+      roughness: 0.64,
+      metalness: 0.22,
+      envMapIntensity: 0.32,
+    });
+    const wax = new THREE.MeshStandardMaterial({
+      color: 0xe6d8b6,
+      roughness: 0.55,
+      metalness: 0.02,
+      emissive: 0x3a2a12,
+      emissiveIntensity: 0.55,
+    });
+
+    const columnParts = [];
+    const brassParts = [];
+    const waxParts = [];
+    const flames = [];
+    const put = (list, geometry, position, rotation) => list.push(dressed(geometry, position, rotation));
+
+    // The hall goes dark in every direction: one far wall, and the fog does the
+    // rest, so nothing ever reads as "empty space around the board".
+    const wall = new THREE.Mesh(
+      new THREE.PlaneGeometry(120, 34),
+      new THREE.MeshStandardMaterial({ color: 0x040b08, roughness: 0.95, metalness: 0.04 }),
+    );
+    wall.position.set(0, floorY + 15, -44);
     this.scene.add(wall);
 
-    const arch = new THREE.Mesh(
-      new THREE.TorusGeometry(5.1, 0.055, 12, 180),
-      new THREE.MeshStandardMaterial({
-        color: 0xb08a50,
-        roughness: 0.3,
-        metalness: 0.9,
-        emissive: 0x4c3514,
-        emissiveIntensity: 0.35,
-      }),
-    );
-    arch.position.set(0, 3.35, -9.2);
-    this.scene.add(arch);
-
-    const halo = new THREE.Sprite(
-      new THREE.SpriteMaterial({
-        map: radialTexture('rgba(178,139,75,.13)', 'rgba(0,0,0,0)'),
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      }),
-    );
-    halo.position.set(0, 4.2, -10.5);
-    halo.scale.set(18, 18, 1);
-    this.scene.add(halo);
-
-    const columnMat = new THREE.MeshStandardMaterial({ color: 0x0b1813, roughness: 0.62, metalness: 0.2 });
-    for (const x of [-8.2, 8.2]) {
-      const column = new THREE.Group();
-      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.46, 6.4, 24), columnMat);
-      shaft.position.y = 3.2;
-      shaft.castShadow = true;
-      column.add(shaft);
-      for (const y of [0.28, 6.2]) {
-        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.22, 24), this.brassMaterial);
-        cap.position.y = y;
-        column.add(cap);
+    const columnZ = [7, 0.6, -5.8, -12.2, -18.6, -25];
+    for (const x of [-11.4, 11.4]) {
+      for (const z of columnZ) {
+        put(columnParts, new THREE.CylinderGeometry(0.78, 0.94, 0.34, 12), [x, floorY + 0.17, z]);
+        put(columnParts, new THREE.CylinderGeometry(0.5, 0.62, 7.2, 14), [x, floorY + 3.94, z]);
+        put(columnParts, new THREE.CylinderGeometry(0.76, 0.54, 0.3, 12), [x, floorY + 7.69, z]);
+        put(columnParts, new RoundedBoxGeometry(1.5, 0.24, 1.5, 2, 0.06), [x, floorY + 7.96, z]);
+        put(brassParts, new THREE.TorusGeometry(0.58, 0.05, 6, 18), [x, floorY + 7.53, z], [Math.PI / 2, 0, 0]);
       }
-      column.position.set(x, -1, -7.4);
-      this.scene.add(column);
+      for (let i = 0; i < columnZ.length - 1; i += 1) {
+        const zMid = (columnZ[i] + columnZ[i + 1]) / 2;
+        put(columnParts, new THREE.TorusGeometry(3.2, 0.1, 6, 16, Math.PI), [x, floorY + 8, zMid], [0, Math.PI / 2, 0]);
+      }
     }
 
-    // Two braziers for depth and a second warm source.
-    for (const x of [-6.2, 6.2]) {
-      const group = new THREE.Group();
-      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.19, 1.9, 16), this.brassMaterial);
-      stem.position.y = 0.95;
-      group.add(stem);
-      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.2, 0.3, 20), this.brassMaterial);
-      bowl.position.y = 1.95;
-      group.add(bowl);
-      const flame = new THREE.Sprite(
-        new THREE.SpriteMaterial({
-          map: radialTexture('rgba(255,164,69,.95)', 'rgba(255,76,0,0)'),
-          transparent: true,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-        }),
-      );
-      flame.position.y = 2.32;
-      flame.scale.set(0.72, 1.15, 1);
-      group.add(flame);
-      group.position.set(x, -1.03, -4.8);
-      this.scene.add(group);
-      this.brazierFlames = this.brazierFlames || [];
-      this.brazierFlames.push(flame);
+    // Sconces on the inner face of the colonnade, and candlesticks on the table.
+    for (const x of [-11.4, 11.4]) {
+      const inward = x > 0 ? -1 : 1;
+      for (const z of [0.6, -12.2, -25]) {
+        const y = floorY + 4.7;
+        put(brassParts, new THREE.BoxGeometry(0.56, 0.1, 0.1), [x + inward * 0.32, y, z]);
+        put(brassParts, new THREE.CylinderGeometry(0.28, 0.16, 0.16, 10), [x + inward * 0.66, y + 0.06, z]);
+        put(waxParts, new THREE.CylinderGeometry(0.09, 0.11, 0.62, 8), [x + inward * 0.66, y + 0.44, z]);
+        flames.push(x + inward * 0.66, y + 0.84, z);
+      }
+    }
+    for (const x of [-6.9, 6.9]) {
+      for (const z of [-6.5, 6.5]) {
+        put(brassParts, new THREE.CylinderGeometry(0.3, 0.44, 0.12, 12), [x, -0.6, z]);
+        put(brassParts, new THREE.CylinderGeometry(0.09, 0.15, 0.52, 10), [x, -0.3, z]);
+        put(brassParts, new THREE.CylinderGeometry(0.22, 0.12, 0.1, 12), [x, -0.02, z]);
+        put(waxParts, new THREE.CylinderGeometry(0.11, 0.13, 0.92, 10), [x, 0.49, z]);
+        flames.push(x, 1.02, z);
+      }
+    }
+    // Two braziers far down the hall give the darkness something to hold.
+    for (const x of [-5.6, 5.6]) {
+      const z = -27;
+      put(brassParts, new THREE.CylinderGeometry(0.1, 0.24, 2.2, 12), [x, floorY + 1.1, z]);
+      put(brassParts, new THREE.CylinderGeometry(0.52, 0.24, 0.34, 16), [x, floorY + 2.3, z]);
+      flames.push(x, floorY + 2.62, z);
     }
 
-    const coneMat = new THREE.MeshBasicMaterial({
-      color: 0xd8b477,
+    const flameTexture = radialTexture('rgba(255,216,150,.95)', 'rgba(255,110,30,0)');
+    const flameGeometry = new THREE.BufferGeometry();
+    flameGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(flames), 3));
+    this.flameMaterial = new THREE.PointsMaterial({
+      map: flameTexture,
+      color: 0xffcd94,
+      size: 0.9,
       transparent: true,
-      opacity: 0.008,
+      opacity: 0.95,
       depthWrite: false,
-      side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
+      sizeAttenuation: true,
     });
-    for (const x of [-2.6, 2.6]) {
-      const cone = new THREE.Mesh(new THREE.ConeGeometry(2.8, 7, 32, 1, true), coneMat);
-      cone.position.set(x, 3.15, 0.4);
-      this.scene.add(cone);
-    }
+    this.scene.add(new THREE.Points(flameGeometry, this.flameMaterial));
+
+    this.flameHaloMaterial = new THREE.PointsMaterial({
+      map: flameTexture,
+      color: 0xff9a4a,
+      size: 3.4,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      sizeAttenuation: true,
+    });
+    this.scene.add(new THREE.Points(flameGeometry, this.flameHaloMaterial));
+
+    const addMerged = (parts, material) => {
+      if (!parts.length) return;
+      const mesh = new THREE.Mesh(mergeAll(parts), material);
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+    };
+    addMerged(columnParts, stone);
+    addMerged(brassParts, this.brassMaterial);
+    addMerged(waxParts, wax);
 
     // Fine suspended dust.
     const count = this.quality.dust;
@@ -707,9 +844,9 @@ export class ChessScene {
     this.dustBase = new Float32Array(count * 3);
     const rand = seeded(97);
     for (let i = 0; i < count; i += 1) {
-      const x = (rand() - 0.5) * 22;
-      const y = rand() * 9;
-      const z = (rand() - 0.5) * 18 - 2;
+      const x = (rand() - 0.5) * 26;
+      const y = rand() * 10 - 1;
+      const z = (rand() - 0.5) * 34 - 4;
       positions[i * 3] = x;
       positions[i * 3 + 1] = y;
       positions[i * 3 + 2] = z;
@@ -1672,11 +1809,14 @@ export class ChessScene {
     this.#updateTrails(dt);
     this.#updateEffects(dt);
 
-    if (this.brazierFlames) {
-      for (const [i, flame] of this.brazierFlames.entries()) {
-        const flicker = 0.92 + Math.sin(this.time * 8.2 + i * 3.1) * 0.08 + Math.sin(this.time * 13.7 + i) * 0.04;
-        flame.scale.set(0.72 * flicker, 1.15 * flicker, 1);
-        if (this.brazierLights?.[i]) this.brazierLights[i].intensity = 8 + flicker * 3;
+    if (this.flameMaterial) {
+      const flicker = 0.9 + Math.sin(this.time * 7.3) * 0.07 + Math.sin(this.time * 13.1 + 1.7) * 0.04;
+      this.flameMaterial.opacity = 0.95 * flicker;
+      if (this.flameHaloMaterial) this.flameHaloMaterial.opacity = 0.22 * (0.82 + flicker * 0.22);
+      // The two warm lamps behind the table breathe with the candles.
+      if (this.brazierLights?.length) {
+        this.brazierLights[0].intensity = 9 + flicker * 3.4;
+        if (this.brazierLights[1]) this.brazierLights[1].intensity = 9 + (1.06 - flicker) * 3.4;
       }
     }
 
@@ -1909,6 +2049,27 @@ export class ChessScene {
     }
     this.checkGlow?.mesh?.material?.dispose?.();
     this.glowTexture?.dispose?.();
+    this.envMap?.dispose?.();
+    const seen = new Set();
+    this.scene.traverse((object) => {
+      if (object.geometry && !seen.has(object.geometry)) {
+        seen.add(object.geometry);
+        object.geometry.dispose();
+      }
+      const material = object.material;
+      const list = Array.isArray(material) ? material : material ? [material] : [];
+      for (const item of list) {
+        if (seen.has(item)) continue;
+        seen.add(item);
+        for (const value of Object.values(item)) {
+          if (value && value.isTexture && !seen.has(value)) {
+            seen.add(value);
+            value.dispose();
+          }
+        }
+        item.dispose?.();
+      }
+    });
   }
 }
 

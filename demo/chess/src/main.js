@@ -1,10 +1,10 @@
-import { ChessScene } from './scene.js?v=20261028-12';
-import { StarkFlowClient } from './net.js?v=20261028-12';
-import { ChessSession, START_FEN } from './session.js?v=20261028-12';
-import { ChessAudio } from './audio.js?v=20261028-12';
-import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-12';
-import { pieceGlyph } from './pieces.js?v=20261028-12';
-import { LocalNet } from './offline.js?v=20261028-12';
+import { ChessScene } from './scene.js?v=20261028-13';
+import { StarkFlowClient } from './net.js?v=20261028-13';
+import { ChessSession, START_FEN } from './session.js?v=20261028-13';
+import { ChessAudio } from './audio.js?v=20261028-13';
+import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-13';
+import { pieceGlyph } from './pieces.js?v=20261028-13';
+import { LocalNet } from './offline.js?v=20261028-13';
 import {
   applyTranslations,
   getLocale,
@@ -12,7 +12,7 @@ import {
   pluralRu,
   setLocale,
   t,
-} from './i18n.js?v=20261028-12';
+} from './i18n.js?v=20261028-13';
 
 const CONFIG = {
   url: 'wss://starkflow.orkestr.run/ws',
@@ -1367,7 +1367,7 @@ class SalonApp {
     const start = this.globalDown;
     this.globalDown = null;
     if (!start || event.button !== 0 || $('game').hidden || this.modalOpen) return;
-    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > (event.pointerType === 'touch' ? 16 : 8)) return;
     if (!this.net.room && !this.offline) return;
 
     const target = event.target;

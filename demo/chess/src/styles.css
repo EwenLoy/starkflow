@@ -2454,18 +2454,18 @@ draw-offer .mini-btn {
   }
 
   .action-btn {
-    min-height: 30px;
-    font-size: 6.5px;
+    min-height: 34px;
+    font-size: 7px;
   }
 
   .board-controls {
-    bottom: 15px;
+    bottom: calc(13px + env(safe-area-inset-bottom, 0px));
   }
 
   .pill-btn {
-    min-height: 27px;
-    padding: 0 9px;
-    font-size: 6.5px;
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: 8px;
   }
 
   .turn-toast {
@@ -2559,8 +2559,9 @@ draw-offer .mini-btn {
   }
 
   .game-panel {
-    width: 177px;
-    bottom: 49px;
+    width: 150px;
+    bottom: calc(46px + env(safe-area-inset-bottom, 0px));
+    padding: 10px;
   }
 
   .game-panel__status h3 {
@@ -2572,33 +2573,36 @@ draw-offer .mini-btn {
   }
 
   .player-card {
-    width: 180px;
+    width: 152px;
+    padding: 6px 8px;
+    gap: 8px;
   }
 
   .player-card--black {
-    top: 103px;
+    top: 96px;
   }
 
   .player-card--white {
-    bottom: 57px;
+    bottom: calc(50px + env(safe-area-inset-bottom, 0px));
   }
 
   .game.view-black .player-card--black {
     top: auto;
-    bottom: 57px;
+    bottom: calc(50px + env(safe-area-inset-bottom, 0px));
   }
 
   .game.view-black .player-card--white {
-    top: 103px;
+    top: 96px;
     bottom: auto;
   }
 
   .game-panel__actions {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
   }
 
   .action-btn--wide {
-    grid-column: auto;
+    grid-column: 1 / -1;
   }
 
   .board-controls #hintBtn {
@@ -2633,6 +2637,173 @@ draw-offer .mini-btn {
 
   .game-panel {
     top: 137px;
+  }
+}
+
+/* ------------------------------------------------ touch and small screens */
+@media (pointer: coarse) {
+  .topbar {
+    padding-top: max(18px, env(safe-area-inset-top, 0px));
+  }
+
+  .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .icon-btn--small {
+    width: 36px;
+    height: 36px;
+  }
+
+  .net-pill {
+    min-height: 38px;
+    padding: 0 13px;
+  }
+
+  .text-btn {
+    padding: 12px 0;
+  }
+
+  .room-card {
+    min-height: 64px;
+  }
+
+  .action-btn {
+    min-height: 40px;
+  }
+
+  .pill-btn {
+    min-height: 36px;
+    padding: 0 13px;
+  }
+
+  /* A live WebGL canvas under a blurred panel is re-blurred every frame: the
+     most expensive thing on a phone HUD, and barely visible on a small screen. */
+  .player-card,
+  .game-panel,
+  .board-controls,
+  .net-pill,
+  .turn-toast,
+  .draw-offer,
+  .lobby__panel,
+  .topbar__tools .icon-btn {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(4, 12, 9, 0.86);
+  }
+}
+
+@media (max-width: 560px) {
+  .game {
+    padding-bottom: calc(46px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .player-card__captures {
+    display: none;
+  }
+
+  .status-meta {
+    font-size: 8px;
+  }
+
+  .board-controls {
+    gap: 5px;
+  }
+}
+
+/* Phones on their side: the HUD has to shrink, the board keeps the room. */
+@media (max-height: 520px) and (pointer: coarse) {
+  .game {
+    padding: 52px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .game__topline {
+    top: 46px;
+  }
+
+  .player-card {
+    width: 148px;
+    padding: 5px 7px;
+    gap: 7px;
+  }
+
+  .player-card__avatar {
+    flex-basis: 26px;
+    width: 26px;
+    height: 26px;
+    font-size: 15px;
+  }
+
+  .player-card__name {
+    font-size: 12px;
+  }
+
+  .player-card__captures,
+  .player-card__meta {
+    display: none;
+  }
+
+  .player-card--black {
+    top: 56px;
+  }
+
+  .player-card--white {
+    bottom: calc(42px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .game.view-black .player-card--black {
+    top: auto;
+    bottom: calc(42px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .game.view-black .player-card--white {
+    top: 56px;
+    bottom: auto;
+  }
+
+  .game-panel {
+    width: 148px;
+    bottom: calc(42px + env(safe-area-inset-bottom, 0px));
+    padding: 8px;
+    max-height: 66vh;
+  }
+
+  .game-panel__status {
+    padding-bottom: 8px;
+  }
+
+  .game-panel__status h3 {
+    font-size: 14px;
+  }
+
+  .status-meta,
+  .turn-pill {
+    font-size: 6.5px;
+  }
+
+  .game-panel__actions {
+    margin-top: 6px;
+    padding-top: 6px;
+    gap: 5px;
+  }
+
+  .action-btn {
+    min-height: 32px;
+    font-size: 6.5px;
+  }
+
+  .board-controls {
+    bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .turn-toast {
+    top: 48px;
+    font-size: 6.5px;
+  }
+
+  .draw-offer {
+    bottom: calc(42px + env(safe-area-inset-bottom, 0px));
   }
 }
 

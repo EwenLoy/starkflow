@@ -11,11 +11,38 @@ import { createPiece, pieceGlyph } from './pieces.js?v=20261028-9';
 const FILES = 'abcdefgh';
 const PIECE_Y = 0.105;
 const TAU = Math.PI * 2;
+const TRAIL_POINTS = 25;
 
 const easeOut = (t) => 1 - (1 - t) ** 3;
 const easeOutBack = (t) => 1 + 2.4 * (t - 1) ** 3 + 1.4 * (t - 1) ** 2;
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+
+/**
+ * One profile for the whole demo: a phone has a fraction of the fill rate of a
+ * desktop GPU, so the pixel ratio, the shadow map, the bloom and the number of
+ * particles are set once at startup instead of being discovered per frame.
+ */
+function qualityProfile() {
+  const cores = navigator.hardwareConcurrency || 4;
+  const memory = navigator.deviceMemory || 4;
+  const mobile = window.matchMedia?.('(pointer: coarse)').matches || Math.min(window.innerWidth, window.innerHeight) <= 820;
+  const weak = mobile || cores <= 4 || memory <= 4;
+  const hardware = window.devicePixelRatio || 1;
+  return {
+    mobile,
+    weak,
+    maxPixelRatio: mobile ? Math.min(hardware, 1.5) : Math.min(hardware, 2),
+    pixelRatio: mobile ? Math.min(hardware, 1.25) : Math.min(hardware, 1.75),
+    antialias: !mobile,
+    shadowMap: mobile ? 1024 : 2048,
+    dust: mobile ? 84 : 180,
+    fx: mobile ? 0.55 : 1,
+    bloom: !mobile && !weak,
+    shards: mobile ? 4 : 7,
+    ringSegments: mobile ? 28 : 44,
+  };
+}
 
 function squarePos(square, y = PIECE_Y) {
   const file = FILES.indexOf(square[0]);
@@ -154,16 +181,17 @@ export class ChessScene {
   constructor(canvas, { onSquareClick } = {}) {
     this.canvas = canvas;
     this.onSquareClick = onSquareClick || (() => {});
+    this.quality = qualityProfile();
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.FogExp2(0x050c09, 0.022);
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      antialias: this.quality.antialias,
       alpha: true,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setPixelRatio(this.quality.pixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -173,7 +201,7 @@ export class ChessScene {
     this.renderer.setClearColor(0x050c09, 0);
 
     this.camera = new THREE.PerspectiveCamera(36, window.innerWidth / window.innerHeight, 0.1, 100);
-    this.camera.position.set(0.4, 7.6, 11.4);
+    this.camera.position.copy(this.#lobbyPosition());
 
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.target.set(0, 0.35, 0);
@@ -206,9 +234,10 @@ export class ChessScene {
     this.trails = [];
     this.ripples = [];
     this.flares = [];
-    this.burstAssets = [];
+    this.burstAssets = new Map();
     this.shards = [];
-    this.flashLights = [];
+    this.glows = [];
+    this.checkGlow = null;
     this.pulses = [];
     this.pendingBoard = null;
     this.disposed = false;
@@ -217,7 +246,14 @@ export class ChessScene {
     this.clock = new THREE.Clock();
     this.time = 0;
     this._raf = 0;
+    this.pixelRatio = this.quality.pixelRatio;
+    this.frameTime = 1 / 60;
+    this.qualityClock = 0;
+    this.dustClock = 0;
 
+    this.#initPools();
+    this.#applyLens();
+    this.#applyFraming();
     this.#setupEnvironment();
     this.#setupLights();
     this.#buildBoard();
@@ -226,6 +262,67 @@ export class ChessScene {
     this.#setupPost();
     this.#bindEvents();
     this.#loop();
+  }
+
+  /* ----------------------------------------------------------- quality */
+  /**
+   * The camera has to frame a square board inside any viewport, and a portrait
+   * phone is the worst case: a 36 degree lens sees four squares of a nine unit
+   * board. The lens widens and the distance grows with the aspect ratio, so the
+   * whole board is on screen and the HUD no longer sits on top of it.
+   */
+  #applyLens() {
+    const aspect = this.camera.aspect || 1;
+    this.camera.fov = aspect < 1 ? clamp(36 / (aspect + 0.34), 42, 62) : 36;
+    this.camera.updateProjectionMatrix();
+  }
+
+  #fitDistance() {
+    const aspect = this.camera.aspect || 1;
+    const halfFov = ((this.camera.fov || 36) * Math.PI) / 360;
+    const byWidth = 6.05 / (Math.tan(halfFov) * Math.min(aspect, 2.2));
+    const span = window.innerHeight <= 520 ? 9.8 : 8.6;
+    const byDepth = span / (2 * Math.tan(halfFov));
+    return clamp(Math.max(byWidth, byDepth), 7.4, 42);
+  }
+
+  #applyFraming() {
+    this.fitDistance = this.#fitDistance();
+    this.controls.minDistance = Math.max(6, this.fitDistance * 0.62);
+    this.controls.maxDistance = this.fitDistance * 1.4;
+    // The haze is a look, not a ruler: a phone pulls the camera back, so the
+    // density follows, otherwise the board would drown in fog.
+    if (this.scene.fog) this.scene.fog.density = 0.022 * clamp(13.4 / this.fitDistance, 0.42, 1);
+  }
+
+  #lobbyPosition() {
+    return new THREE.Vector3(0.52, 0.48, 0.72).normalize().multiplyScalar(this.#fitDistance() * 1.18);
+  }
+
+  /* --------------------------------------------------------------- pools */
+  #initPools() {
+    this.shardPool = [];
+    this.shardFree = [];
+    this.ripplePool = [];
+    this.rippleFree = [];
+    this.flarePool = [];
+    this.flareFree = [];
+    this.trailPool = [];
+    this.trailFree = [];
+    this.glowPool = [];
+    this.glowFree = [];
+    this.glowTexture = radialTexture('rgba(255,236,196,.95)', 'rgba(255,176,86,0)');
+  }
+
+  #lease(free, make) {
+    const item = free.pop() || make();
+    item.mesh.visible = true;
+    return item;
+  }
+
+  #release(free, item) {
+    item.mesh.visible = false;
+    free.push(item);
   }
 
   /* ------------------------------------------------------------ build */
@@ -246,7 +343,7 @@ export class ChessScene {
     key.position.set(-1.5, 13.5, 7);
     key.target.position.set(0, 0, 0);
     key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.mapSize.set(this.quality.shadowMap, this.quality.shadowMap);
     key.shadow.camera.near = 1;
     key.shadow.camera.far = 26;
     key.shadow.bias = -0.00035;
@@ -605,7 +702,7 @@ export class ChessScene {
     }
 
     // Fine suspended dust.
-    const count = 180;
+    const count = this.quality.dust;
     const positions = new Float32Array(count * 3);
     this.dustBase = new Float32Array(count * 3);
     const rand = seeded(97);
@@ -664,8 +761,7 @@ export class ChessScene {
   }
 
   #setupPost() {
-    const mobile = window.matchMedia('(max-width: 820px)').matches;
-    this.usePost = !mobile;
+    this.usePost = this.quality.bloom;
     if (!this.usePost) return;
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -692,7 +788,7 @@ export class ChessScene {
       this.canvas.style.cursor = this.hoverSquare ? 'pointer' : 'grab';
       if (!start) return;
       const dist = Math.hypot(e.clientX - start.x, e.clientY - start.y);
-      if (dist > 7) return;
+      if (dist > (e.pointerType === 'touch' ? 14 : 7)) return;
       const square = this.#pickSquare(e.clientX, e.clientY);
       if (square) this.onSquareClick(square);
     };
@@ -703,6 +799,8 @@ export class ChessScene {
     };
 
     window.addEventListener('resize', this._onResize);
+    this._onVisibility = () => this.#onVisibility();
+    document.addEventListener('visibilitychange', this._onVisibility);
     this.canvas.addEventListener('pointermove', this._onMove);
     this.canvas.addEventListener('pointerdown', this._onDown);
     this.canvas.addEventListener('pointerup', this._onUp);
@@ -716,11 +814,19 @@ export class ChessScene {
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, w < 820 ? 1.6 : 2));
+    const aspect = w / h;
+    const changed = Math.abs(aspect - this.camera.aspect) > 0.04;
+    this.camera.aspect = aspect;
+    this.#applyLens();
+    this.#applyFraming();
+    this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setSize(w, h);
     this.composer?.setSize(w, h);
+    if (changed && this.mode === 'game' && !this.topViewActive && !this.cameraTween) {
+      this.camera.position.copy(this.#sidePosition(this.viewSide));
+      this.controls.target.set(0, 0.42, 0);
+      this.controls.update();
+    }
   }
 
   /* ------------------------------------------------------- camera / mode */
@@ -730,7 +836,7 @@ export class ChessScene {
       this.setInteractive(false);
       this.controls.autoRotate = true;
       this.controls.autoRotateSpeed = 0.55;
-      this.#animateCamera(new THREE.Vector3(8.4, 7.8, 12.8), new THREE.Vector3(0, 0.55, 0), 1.8);
+      this.#animateCamera(this.#lobbyPosition(), new THREE.Vector3(0, 0.55, 0), 1.8);
     } else {
       this.controls.autoRotate = false;
       this.#animateCamera(this.#sidePosition(this.viewSide), new THREE.Vector3(0, 0.42, 0), 1.4);
@@ -738,8 +844,8 @@ export class ChessScene {
   }
 
   #sidePosition(side) {
-    if (side === 'b') return new THREE.Vector3(-0.35, 7.4, -11.2);
-    return new THREE.Vector3(0.35, 7.4, 11.2);
+    const dir = side === 'b' ? new THREE.Vector3(-0.03, 0.58, -0.81) : new THREE.Vector3(0.03, 0.58, 0.81);
+    return dir.normalize().multiplyScalar(this.fitDistance || this.#fitDistance());
   }
 
   topView() {
@@ -750,7 +856,12 @@ export class ChessScene {
       return;
     }
     this.topViewActive = true;
-    this.#animateCamera(new THREE.Vector3(0.01, 15.8, 4.2), new THREE.Vector3(0, 0.3, 0.5), 1.05);
+    const distance = (this.fitDistance || this.#fitDistance()) * 0.95;
+    this.#animateCamera(
+      new THREE.Vector3(0.01, distance, distance * 0.26),
+      new THREE.Vector3(0, 0.3, 0.5),
+      1.05,
+    );
   }
 
   setViewSide(side, animate = true) {
@@ -993,14 +1104,49 @@ export class ChessScene {
   }
 
   /* ------------------------------------------------------------ markers */
-  #clearGroup(group) {
+  #clearGroup(group, dispose = true) {
     while (group.children.length) {
       const child = group.children.pop();
-      child.geometry?.dispose?.();
-      if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose?.());
-      else child.material?.dispose?.();
+      if (dispose) {
+        child.geometry?.dispose?.();
+        if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose?.());
+        else child.material?.dispose?.();
+      }
       group.remove(child);
     }
+  }
+
+  /**
+   * Markers of selection, legal moves and the last move are the same handful of
+   * shapes for the whole game: build them once instead of allocating a material
+   * per click (a fresh material can drag a shader compile in with it).
+   */
+  #markerAssets() {
+    if (this.markers) return this.markers;
+    const additive = (color, opacity, side = THREE.DoubleSide) =>
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side,
+      });
+    const border = (color) =>
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false });
+    const glowGeometry = new THREE.PlaneGeometry(0.88, 0.88);
+    const borderGeometry = new THREE.RingGeometry(0.4, 0.42, 4, 1);
+    this.markers = {
+      tile: { geometry: new THREE.PlaneGeometry(0.98, 0.98), material: additive(0xf0cd86, 0.16) },
+      ring: { geometry: new THREE.TorusGeometry(0.4, 0.026, 10, 52), material: additive(0xf5d692, 0.95) },
+      capture: { geometry: new THREE.TorusGeometry(0.36, 0.026, 8, 40), material: additive(0xe7ad74, 0.72) },
+      dot: { geometry: new THREE.CircleGeometry(0.11, 24), material: additive(0xcfe3c2, 0.58) },
+      lastGlowW: { geometry: glowGeometry, material: additive(0xd6b371, 0.13) },
+      lastGlowB: { geometry: glowGeometry, material: additive(0x72b596, 0.13) },
+      lastBorderW: { geometry: borderGeometry, material: border(0xefd196) },
+      lastBorderB: { geometry: borderGeometry, material: border(0x8bd0ac) },
+    };
+    return this.markers;
   }
 
   clearSelection() {
@@ -1008,37 +1154,19 @@ export class ChessScene {
   }
 
   #clearSelection() {
-    this.#clearGroup(this.selectionGroup);
-    this.#clearGroup(this.legalGroup);
+    this.#clearGroup(this.selectionGroup, false);
+    this.#clearGroup(this.legalGroup, false);
   }
 
   selectSquare(square, moves = []) {
     this.#clearSelection();
+    const assets = this.#markerAssets();
     const pos = squarePos(square, 0.09);
-    const tile = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.98, 0.98),
-      new THREE.MeshBasicMaterial({
-        color: 0xf0cd86,
-        transparent: true,
-        opacity: 0.16,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      }),
-    );
+    const tile = new THREE.Mesh(assets.tile.geometry, assets.tile.material);
     tile.rotation.x = -Math.PI / 2;
     tile.position.copy(pos);
     this.selectionGroup.add(tile);
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.4, 0.026, 10, 52),
-      new THREE.MeshBasicMaterial({
-        color: 0xf5d692,
-        transparent: true,
-        opacity: 0.95,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
-    );
+    const ring = new THREE.Mesh(assets.ring.geometry, assets.ring.material);
     ring.rotation.x = -Math.PI / 2;
     ring.position.copy(pos);
     this.selectionGroup.add(ring);
@@ -1046,20 +1174,8 @@ export class ChessScene {
     for (const [i, move] of moves.entries()) {
       const target = squarePos(move.to, 0.092);
       const capture = !!move.captured;
-      const geom = capture
-        ? new THREE.TorusGeometry(0.36, 0.026, 8, 40)
-        : new THREE.CircleGeometry(0.11, 24);
-      const marker = new THREE.Mesh(
-        geom,
-        new THREE.MeshBasicMaterial({
-          color: capture ? 0xe7ad74 : 0xcfe3c2,
-          transparent: true,
-          opacity: capture ? 0.72 : 0.58,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-        }),
-      );
+      const asset = capture ? assets.capture : assets.dot;
+      const marker = new THREE.Mesh(asset.geometry, asset.material);
       marker.rotation.x = -Math.PI / 2;
       marker.position.copy(target);
       marker.userData.phase = i * 0.35;
@@ -1069,40 +1185,31 @@ export class ChessScene {
   }
 
   #updateLastMove(lastMove) {
-    this.#clearGroup(this.lastMoveGroup);
+    this.#clearGroup(this.lastMoveGroup, false);
     if (!lastMove?.from || !lastMove?.to) return;
+    const assets = this.#markerAssets();
+    const glowAsset = lastMove.color === 'b' ? assets.lastGlowB : assets.lastGlowW;
+    const borderAsset = lastMove.color === 'b' ? assets.lastBorderB : assets.lastBorderW;
     for (const square of [lastMove.from, lastMove.to]) {
-      const mat = new THREE.MeshBasicMaterial({
-        color: lastMove.color === 'b' ? 0x72b596 : 0xd6b371,
-        transparent: true,
-        opacity: 0.13,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.88, 0.88), mat);
+      const glow = new THREE.Mesh(glowAsset.geometry, glowAsset.material);
       glow.rotation.x = -Math.PI / 2;
       glow.position.copy(squarePos(square, 0.083));
       this.lastMoveGroup.add(glow);
-      const border = new THREE.Mesh(
-        new THREE.RingGeometry(0.4, 0.42, 4, 1),
-        new THREE.MeshBasicMaterial({
-          color: lastMove.color === 'b' ? 0x8bd0ac : 0xefd196,
-          transparent: true,
-          opacity: 0.5,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        }),
-      );
-      border.rotation.x = -Math.PI / 2;
-      border.rotation.z = Math.PI / 4;
-      border.position.copy(squarePos(square, 0.085));
-      this.lastMoveGroup.add(border);
+      const marker = new THREE.Mesh(borderAsset.geometry, borderAsset.material);
+      marker.rotation.x = -Math.PI / 2;
+      marker.rotation.z = Math.PI / 4;
+      marker.position.copy(squarePos(square, 0.085));
+      this.lastMoveGroup.add(marker);
     }
   }
 
   setCheck(square) {
     this.#clearGroup(this.checkGroup);
-    if (!square) return;
+    if (!this.checkGlow) this.checkGlow = this.#makeGlow();
+    if (!square) {
+      this.checkGlow.mesh.visible = false;
+      return;
+    }
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(0.41, 0.03, 10, 48),
       new THREE.MeshBasicMaterial({
@@ -1116,9 +1223,11 @@ export class ChessScene {
     ring.rotation.x = -Math.PI / 2;
     ring.position.copy(squarePos(square, 0.094));
     this.checkGroup.add(ring);
-    const light = new THREE.PointLight(0xff4f38, 5, 2.2, 2);
-    light.position.copy(squarePos(square, 0.7));
-    this.checkGroup.add(light);
+    this.checkGlow.mesh.material.color.setHex(0xff5a44);
+    this.checkGlow.mesh.material.opacity = 0.3;
+    this.checkGlow.mesh.position.copy(squarePos(square, 0.72));
+    this.checkGlow.mesh.scale.setScalar(1.9);
+    this.checkGlow.mesh.visible = true;
   }
 
   setHint(move, duration = 4200) {
@@ -1166,40 +1275,76 @@ export class ChessScene {
     this.hintTimer = setTimeout(() => this.#clearGroup(this.hintGroup), duration);
   }
 
-  #moveTrail(start, end, isKnight, color) {
-    const a = start.clone();
-    a.y = 0.22;
-    const b = end.clone();
-    b.y = 0.22;
-    const mid = a.clone().add(b).multiplyScalar(0.5);
-    mid.y += isKnight ? 1.05 : 0.4;
-    const points = new THREE.QuadraticBezierCurve3(a, mid, b).getPoints(24);
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  #makeTrail() {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_POINTS * 3), 3));
     const material = new THREE.LineBasicMaterial({
-      color: color === 'b' ? 0x9bd4b7 : 0xf2d69a,
+      color: 0xf2d69a,
       transparent: true,
       opacity: 0.55,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const line = new THREE.Line(geometry, material);
+    line.visible = false;
+    line.frustumCulled = false;
     this.scene.add(line);
-    this.trails.push({ line, life: 0, maxLife: 0.55 });
+    return { mesh: line, life: 0, maxLife: 0.55 };
+  }
+
+  #moveTrail(start, end, isKnight, color) {
+    const trail = this.#lease(this.trailFree, () => this.#makeTrail());
+    trail.life = 0;
+    trail.maxLife = 0.55;
+    trail.mesh.material.color.setHex(color === 'b' ? 0x9bd4b7 : 0xf2d69a);
+    trail.mesh.material.opacity = 0.55;
+    const attr = trail.mesh.geometry.attributes.position;
+    const ax = start.x;
+    const az = start.z;
+    const bx = end.x;
+    const bz = end.z;
+    const mx = (ax + bx) * 0.5;
+    const mz = (az + bz) * 0.5;
+    const my = 0.22 + (isKnight ? 1.05 : 0.4);
+    for (let i = 0; i < TRAIL_POINTS; i += 1) {
+      const t = i / (TRAIL_POINTS - 1);
+      const u = 1 - t;
+      attr.array[i * 3] = u * u * ax + 2 * u * t * mx + t * t * bx;
+      attr.array[i * 3 + 1] = u * u * 0.22 + 2 * u * t * my + t * t * 0.22;
+      attr.array[i * 3 + 2] = u * u * az + 2 * u * t * mz + t * t * bz;
+    }
+    attr.needsUpdate = true;
+    this.trails.push(trail);
+  }
+
+  /**
+   * One geometry and one material per colour, kept alive for the whole session.
+   * Creating a material per burst and disposing it a second later forced the
+   * renderer to compile the shader again on every capture — that was the freeze.
+   */
+  #burstAsset(color) {
+    let asset = this.burstAssets.get(color);
+    if (!asset) {
+      asset = {
+        geometry: new THREE.SphereGeometry(0.018, 5, 4),
+        material: new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 1,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      };
+      this.burstAssets.set(color, asset);
+    }
+    return asset;
   }
 
   #burst(origin, color = 0xe2c487, count = 24) {
-    const geometry = new THREE.SphereGeometry(0.018, 5, 4);
-    const material = new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 1,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const asset = { geometry, material, count };
-    this.burstAssets.push(asset);
-    for (let i = 0; i < count; i += 1) {
-      const mesh = new THREE.Mesh(geometry, material);
+    const total = Math.max(4, Math.round(count * this.quality.fx));
+    const asset = this.#burstAsset(color);
+    for (let i = 0; i < total; i += 1) {
+      const mesh = new THREE.Mesh(asset.geometry, asset.material);
       mesh.position.copy(origin);
       const angle = Math.random() * TAU;
       const speed = 0.4 + Math.random() * 1.2;
@@ -1214,11 +1359,11 @@ export class ChessScene {
     }
   }
 
-  #ripple(position, color) {
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.26, 0.34, 44),
+  #makeRipple() {
+    const mesh = new THREE.Mesh(
+      new THREE.RingGeometry(0.26, 0.34, this.quality.ringSegments),
       new THREE.MeshBasicMaterial({
-        color: color === 'b' ? 0x9bd4b7 : 0xf2d69a,
+        color: 0xf2d69a,
         transparent: true,
         opacity: 0.62,
         side: THREE.DoubleSide,
@@ -1226,17 +1371,28 @@ export class ChessScene {
         blending: THREE.AdditiveBlending,
       }),
     );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.copy(position).setY(0.1);
-    this.scene.add(ring);
-    this.ripples.push({ mesh: ring, t: 0, duration: 0.62 });
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.visible = false;
+    this.scene.add(mesh);
+    return { mesh, t: 0, duration: 0.62 };
   }
 
-  #promoteFlare(square, color) {
-    const column = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.16, 0.32, 1.9, 22, 1, true),
+  #ripple(position, color) {
+    const ripple = this.#lease(this.rippleFree, () => this.#makeRipple());
+    ripple.t = 0;
+    ripple.duration = 0.62;
+    ripple.mesh.material.color.setHex(color === 'b' ? 0x9bd4b7 : 0xf2d69a);
+    ripple.mesh.material.opacity = 0.62;
+    ripple.mesh.scale.setScalar(1);
+    ripple.mesh.position.copy(position).setY(0.1);
+    this.ripples.push(ripple);
+  }
+
+  #makeFlare() {
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.32, 1.9, 18, 1, true),
       new THREE.MeshBasicMaterial({
-        color: color === 'b' ? 0x8fd7b4 : 0xf6dda2,
+        color: 0xf6dda2,
         transparent: true,
         opacity: 0.5,
         side: THREE.DoubleSide,
@@ -1244,10 +1400,54 @@ export class ChessScene {
         blending: THREE.AdditiveBlending,
       }),
     );
-    column.position.copy(squarePos(square, 1.0));
-    this.scene.add(column);
-    this.flares.push({ mesh: column, t: 0, duration: 0.95, baseY: column.position.y });
+    mesh.visible = false;
+    this.scene.add(mesh);
+    return { mesh, t: 0, duration: 0.95, baseY: 1 };
+  }
+
+  #promoteFlare(square, color) {
+    const flare = this.#lease(this.flareFree, () => this.#makeFlare());
+    flare.t = 0;
+    flare.duration = 0.95;
+    flare.baseY = 1.0;
+    flare.mesh.material.color.setHex(color === 'b' ? 0x8fd7b4 : 0xf6dda2);
+    flare.mesh.material.opacity = 0.5;
+    flare.mesh.scale.setScalar(1);
+    flare.mesh.position.copy(squarePos(square, 1.0));
+    this.flares.push(flare);
     this.#burst(squarePos(square, 0.5), 0xffe8b6, 26);
+  }
+
+  #makeGlow() {
+    const mesh = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: this.glowTexture,
+        color: 0xffd7a0,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    mesh.visible = false;
+    this.scene.add(mesh);
+    return { mesh, t: 0, duration: 0.45 };
+  }
+
+  /**
+   * A flash used to be a PointLight: adding one changed the light count, so the
+   * renderer rebuilt every shader twice per capture. An additive sprite glows
+   * the same and costs nothing.
+   */
+  #flash(position, color) {
+    const glow = this.#lease(this.glowFree, () => this.#makeGlow());
+    glow.t = 0;
+    glow.duration = 0.45;
+    glow.mesh.material.color.setHex(color);
+    glow.mesh.material.opacity = 0.7;
+    glow.mesh.position.copy(position);
+    glow.mesh.scale.setScalar(2.2);
+    this.glows.push(glow);
   }
 
   #captureEffect(position, victimColor, captorColor) {
@@ -1255,108 +1455,132 @@ export class ChessScene {
     this.#burst(position.clone().setY(position.y + 0.46), accent, 22);
     this.#burst(position.clone().setY(position.y + 0.22), 0xffe9bd, 12);
     this.#ripple(position.clone(), victimColor);
-    this.#shards(position.clone().setY(position.y + 0.42), 7);
-    const light = new THREE.PointLight(captorColor === 'b' ? 0x8fd7b4 : 0xffd7a0, 30, 3.6, 2);
-    light.position.copy(position).setY(0.85);
-    this.scene.add(light);
-    this.flashLights.push({ light, t: 0, duration: 0.45, peak: 30 });
+    this.#shards(position.clone().setY(position.y + 0.42), this.quality.shards);
+    this.#flash(position.clone().setY(0.85), captorColor === 'b' ? 0x8fd7b4 : 0xffd7a0);
+  }
+
+  #makeShard() {
+    const mesh = new THREE.Mesh(
+      new THREE.TetrahedronGeometry(0.05),
+      new THREE.MeshStandardMaterial({
+        color: 0xe9d9b8,
+        roughness: 0.32,
+        metalness: 0.3,
+        transparent: true,
+        opacity: 1,
+      }),
+    );
+    mesh.visible = false;
+    this.scene.add(mesh);
+    return { mesh, velocity: new THREE.Vector3(), spin: new THREE.Vector3(), t: 0, duration: 1 };
   }
 
   #shards(origin, count) {
-    for (let i = 0; i < count; i += 1) {
-      const mesh = new THREE.Mesh(
-        new THREE.TetrahedronGeometry(0.036 + Math.random() * 0.032),
-        new THREE.MeshStandardMaterial({
-          color: 0xe9d9b8,
-          roughness: 0.32,
-          metalness: 0.3,
-          transparent: true,
-          opacity: 1,
-        }),
-      );
-      mesh.position.copy(origin);
-      this.scene.add(mesh);
+    const total = Math.max(2, Math.round(count * (this.quality.mobile ? 0.7 : 1)));
+    for (let i = 0; i < total; i += 1) {
+      const shard = this.#lease(this.shardFree, () => this.#makeShard());
+      shard.t = 0;
+      shard.duration = 0.9 + Math.random() * 0.45;
+      shard.mesh.position.copy(origin);
+      shard.mesh.scale.setScalar(0.7 + Math.random() * 0.75);
+      shard.mesh.rotation.set(Math.random() * TAU, Math.random() * TAU, Math.random() * TAU);
+      shard.mesh.material.opacity = 1;
       const angle = Math.random() * TAU;
       const speed = 0.9 + Math.random() * 1.5;
-      this.shards.push({
-        mesh,
-        velocity: new THREE.Vector3(Math.cos(angle) * speed * 0.55, 1.2 + Math.random() * 1.4, Math.sin(angle) * speed * 0.55),
-        spin: new THREE.Vector3(Math.random() * 7, Math.random() * 7, Math.random() * 7),
-        t: 0,
-        duration: 0.9 + Math.random() * 0.45,
-      });
+      shard.velocity.set(Math.cos(angle) * speed * 0.55, 1.2 + Math.random() * 1.4, Math.sin(angle) * speed * 0.55);
+      shard.spin.set(Math.random() * 7, Math.random() * 7, Math.random() * 7);
+      this.shards.push(shard);
     }
   }
 
   #updateEffects(dt) {
     if (this.ripples.length) {
-      for (const ripple of this.ripples) {
+      let live = 0;
+      for (let i = 0; i < this.ripples.length; i += 1) {
+        const ripple = this.ripples[i];
         ripple.t += dt;
+        if (ripple.t >= ripple.duration) {
+          this.#release(this.rippleFree, ripple);
+          continue;
+        }
         const k = clamp(ripple.t / ripple.duration, 0, 1);
         ripple.mesh.scale.setScalar(1 + k * 2.7);
         ripple.mesh.material.opacity = 0.62 * (1 - k);
+        this.ripples[live] = ripple;
+        live += 1;
       }
-      const dead = this.ripples.filter((ripple) => ripple.t >= ripple.duration);
-      for (const ripple of dead) {
-        this.scene.remove(ripple.mesh);
-        ripple.mesh.geometry.dispose();
-        ripple.mesh.material.dispose();
-      }
-      this.ripples = this.ripples.filter((ripple) => ripple.t < ripple.duration);
+      this.ripples.length = live;
     }
     if (this.flares.length) {
-      for (const flare of this.flares) {
+      let live = 0;
+      for (let i = 0; i < this.flares.length; i += 1) {
+        const flare = this.flares[i];
         flare.t += dt;
+        if (flare.t >= flare.duration) {
+          this.#release(this.flareFree, flare);
+          continue;
+        }
         const k = clamp(flare.t / flare.duration, 0, 1);
         flare.mesh.material.opacity = 0.5 * (1 - k);
         flare.mesh.scale.set(1 + k * 0.45, 1 + k * 0.6, 1 + k * 0.45);
         flare.mesh.position.y = flare.baseY + k * 0.75;
+        this.flares[live] = flare;
+        live += 1;
       }
-      const dead = this.flares.filter((flare) => flare.t >= flare.duration);
-      for (const flare of dead) {
-        this.scene.remove(flare.mesh);
-        flare.mesh.geometry.dispose();
-        flare.mesh.material.dispose();
-      }
-      this.flares = this.flares.filter((flare) => flare.t < flare.duration);
+      this.flares.length = live;
     }
     if (this.shards.length) {
-      for (const shard of this.shards) {
+      let live = 0;
+      for (let i = 0; i < this.shards.length; i += 1) {
+        const shard = this.shards[i];
         shard.t += dt;
+        if (shard.t >= shard.duration) {
+          this.#release(this.shardFree, shard);
+          continue;
+        }
         shard.velocity.y -= 9.4 * dt;
         shard.mesh.position.addScaledVector(shard.velocity, dt);
         shard.mesh.rotation.x += shard.spin.x * dt;
         shard.mesh.rotation.y += shard.spin.y * dt;
         shard.mesh.rotation.z += shard.spin.z * dt;
         shard.mesh.material.opacity = clamp(1 - shard.t / shard.duration, 0, 1);
+        this.shards[live] = shard;
+        live += 1;
       }
-      const dead = this.shards.filter((shard) => shard.t >= shard.duration);
-      for (const shard of dead) {
-        this.scene.remove(shard.mesh);
-        shard.mesh.geometry.dispose();
-        shard.mesh.material.dispose();
-      }
-      this.shards = this.shards.filter((shard) => shard.t < shard.duration);
+      this.shards.length = live;
     }
-    if (this.flashLights.length) {
-      for (const flash of this.flashLights) {
-        flash.t += dt;
-        const k = clamp(flash.t / flash.duration, 0, 1);
-        flash.light.intensity = flash.peak * (1 - k) ** 2;
+    if (this.glows.length) {
+      let live = 0;
+      for (let i = 0; i < this.glows.length; i += 1) {
+        const glow = this.glows[i];
+        glow.t += dt;
+        if (glow.t >= glow.duration) {
+          this.#release(this.glowFree, glow);
+          continue;
+        }
+        const k = clamp(glow.t / glow.duration, 0, 1);
+        glow.mesh.material.opacity = 0.7 * (1 - k) ** 2;
+        glow.mesh.scale.setScalar(1.4 + k * 1.9);
+        this.glows[live] = glow;
+        live += 1;
       }
-      const dead = this.flashLights.filter((flash) => flash.t >= flash.duration);
-      for (const flash of dead) this.scene.remove(flash.light);
-      this.flashLights = this.flashLights.filter((flash) => flash.t < flash.duration);
+      this.glows.length = live;
     }
     if (this.pulses.length) {
-      for (const pulse of this.pulses) {
+      let live = 0;
+      for (let i = 0; i < this.pulses.length; i += 1) {
+        const pulse = this.pulses[i];
         pulse.t += dt;
+        if (pulse.t >= pulse.duration) {
+          pulse.mesh.scale.setScalar(1);
+          continue;
+        }
         const k = clamp(pulse.t / pulse.duration, 0, 1);
         pulse.mesh.scale.setScalar(1 + Math.sin(k * Math.PI) * 0.14);
+        this.pulses[live] = pulse;
+        live += 1;
       }
-      const dead = this.pulses.filter((pulse) => pulse.t >= pulse.duration);
-      for (const pulse of dead) pulse.mesh.scale.setScalar(1);
-      this.pulses = this.pulses.filter((pulse) => pulse.t < pulse.duration);
+      this.pulses.length = live;
     }
   }
 
@@ -1437,6 +1661,7 @@ export class ChessScene {
     this._raf = requestAnimationFrame(() => this.#loop());
     const dt = Math.min(this.clock.getDelta(), 0.05);
     this.time += dt;
+    this.#adaptQuality(dt);
 
     this.controls.update();
     this.#updateCamera(dt);
@@ -1473,6 +1698,7 @@ export class ChessScene {
   }
 
   #updatePieces(dt) {
+    if (!this.moveAnims.length && !this.spawnAnims.length) return;
     for (const anim of this.moveAnims) {
       if (anim.done) continue;
       anim.t += dt / anim.duration;
@@ -1516,7 +1742,13 @@ export class ChessScene {
         spawn.done = true;
       }
     }
-    this.spawnAnims = this.spawnAnims.filter((s) => !s.done);
+    let liveSpawns = 0;
+    for (let i = 0; i < this.spawnAnims.length; i += 1) {
+      if (this.spawnAnims[i].done) continue;
+      this.spawnAnims[liveSpawns] = this.spawnAnims[i];
+      liveSpawns += 1;
+    }
+    this.spawnAnims.length = liveSpawns;
 
     if (this.animating && this.moveAnims.length && this.moveAnims.every((anim) => anim.done)) {
       this.animating = false;
@@ -1557,6 +1789,8 @@ export class ChessScene {
 
   #updateDust(dt) {
     if (!this.dust) return;
+    this.dustClock = (this.dustClock + 1) % 2;
+    if (this.quality.mobile && this.dustClock) return;
     const attr = this.dust.geometry.attributes.position;
     for (let i = 0; i < attr.count; i += 1) {
       const baseY = this.dustBase[i * 3 + 1];
@@ -1569,40 +1803,77 @@ export class ChessScene {
 
   #updateParticles(dt) {
     if (!this.particles.length) return;
-    for (const p of this.particles) {
+    let live = 0;
+    for (let i = 0; i < this.particles.length; i += 1) {
+      const p = this.particles[i];
       p.life += dt;
+      if (p.life >= p.maxLife) {
+        this.scene.remove(p.mesh);
+        continue;
+      }
       p.velocity.y -= 1.5 * dt;
       p.mesh.position.addScaledVector(p.velocity, dt);
-      p.mesh.material.opacity = clamp(1 - p.life / p.maxLife, 0, 1);
       p.mesh.scale.setScalar(1 - p.life / p.maxLife);
+      this.particles[live] = p;
+      live += 1;
     }
-    const dead = this.particles.filter((p) => p.life >= p.maxLife);
-    for (const p of dead) {
-      this.scene.remove(p.mesh);
-      p.asset.count -= 1;
-    }
-    this.particles = this.particles.filter((p) => p.life < p.maxLife);
-    for (const asset of [...this.burstAssets]) {
-      if (asset.count > 0) continue;
-      asset.geometry.dispose();
-      asset.material.dispose();
-      this.burstAssets = this.burstAssets.filter((item) => item !== asset);
-    }
+    this.particles.length = live;
   }
 
   #updateTrails(dt) {
     if (!this.trails.length) return;
-    for (const trail of this.trails) {
+    let live = 0;
+    for (let i = 0; i < this.trails.length; i += 1) {
+      const trail = this.trails[i];
       trail.life += dt;
-      trail.line.material.opacity = clamp(0.55 * (1 - trail.life / trail.maxLife), 0, 1);
+      if (trail.life >= trail.maxLife) {
+        this.#release(this.trailFree, trail);
+        continue;
+      }
+      trail.mesh.material.opacity = 0.55 * (1 - trail.life / trail.maxLife);
+      this.trails[live] = trail;
+      live += 1;
     }
-    const dead = this.trails.filter((trail) => trail.life >= trail.maxLife);
-    for (const trail of dead) {
-      this.scene.remove(trail.line);
-      trail.line.geometry.dispose();
-      trail.line.material.dispose();
+    this.trails.length = live;
+  }
+
+  #applyPixelRatio() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    this.renderer.setPixelRatio(this.pixelRatio);
+    this.renderer.setSize(w, h);
+    this.composer?.setSize(w, h);
+  }
+
+  /**
+   * A phone that manages 60 fps at 1.25x is not the same as one that drops to
+   * 30; instead of guessing, the renderer walks its own resolution down while
+   * frames are slow and back up when there is headroom.
+   */
+  #adaptQuality(dt) {
+    this.frameTime += (dt - this.frameTime) * 0.06;
+    this.qualityClock += dt;
+    if (this.qualityClock < 1.4) return;
+    this.qualityClock = 0;
+    const max = this.quality.maxPixelRatio;
+    if (this.frameTime > 0.026 && this.pixelRatio > 1) {
+      this.pixelRatio = Math.max(1, this.pixelRatio - 0.15);
+      this.#applyPixelRatio();
+    } else if (this.frameTime < 0.0145 && this.pixelRatio < max) {
+      this.pixelRatio = Math.min(max, this.pixelRatio + 0.1);
+      this.#applyPixelRatio();
     }
-    this.trails = this.trails.filter((trail) => trail.life < trail.maxLife);
+  }
+
+  #onVisibility() {
+    if (document.hidden) {
+      cancelAnimationFrame(this._raf);
+      this._raf = 0;
+      return;
+    }
+    if (this._raf || this.disposed) return;
+    this.clock.getDelta();
+    this.#loop();
   }
 
   dispose() {
@@ -1610,6 +1881,7 @@ export class ChessScene {
     cancelAnimationFrame(this._raf);
     clearTimeout(this.hintTimer);
     window.removeEventListener('resize', this._onResize);
+    document.removeEventListener('visibilitychange', this._onVisibility);
     this.canvas.removeEventListener('pointermove', this._onMove);
     this.canvas.removeEventListener('pointerdown', this._onDown);
     this.canvas.removeEventListener('pointerup', this._onUp);
@@ -1617,6 +1889,26 @@ export class ChessScene {
     this.controls.dispose();
     this.renderer.dispose();
     this.composer?.dispose?.();
+    for (const asset of this.burstAssets.values()) {
+      asset.geometry.dispose();
+      asset.material.dispose();
+    }
+    for (const item of [...this.shardPool, ...this.ripplePool, ...this.flarePool, ...this.glowPool, ...this.trailPool]) {
+      item.mesh.geometry?.dispose?.();
+      item.mesh.material?.dispose?.();
+    }
+    if (this.markers) {
+      const done = new Set();
+      for (const asset of Object.values(this.markers)) {
+        for (const item of [asset.geometry, asset.material]) {
+          if (!item || done.has(item)) continue;
+          done.add(item);
+          item.dispose?.();
+        }
+      }
+    }
+    this.checkGlow?.mesh?.material?.dispose?.();
+    this.glowTexture?.dispose?.();
   }
 }
 

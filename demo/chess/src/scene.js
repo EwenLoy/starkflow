@@ -302,6 +302,7 @@ export class ChessScene {
     this.#buildRoom();
     this.#buildOverlays();
     this.#setupPost();
+    this.#warmEffects();
     this.#bindEvents();
     this.#loop();
   }
@@ -355,6 +356,8 @@ export class ChessScene {
     this.trailFree = [];
     this.glowPool = [];
     this.glowFree = [];
+    this.particleFree = [];
+    this.shardMaterial = null;
     this.glowTexture = radialTexture('rgba(255,236,196,.95)', 'rgba(255,176,86,0)');
   }
 
@@ -367,6 +370,47 @@ export class ChessScene {
   #release(free, item) {
     item.mesh.visible = false;
     free.push(item);
+  }
+
+  /**
+   * Everything a move throws at the screen - sparkle, ripple, flare, shards, the
+   * knight trail - is created and compiled here, while the lobby is still up.
+   * Leasing them lazily meant a new geometry, a new material and a shader build in
+   * the very frame a piece landed: that was the freeze on every first move.
+   */
+  #warmEffects() {
+    const warm = (free, make, count) => {
+      for (let i = 0; i < count; i += 1) {
+        const item = make();
+        item.mesh.visible = true;
+        free.push(item);
+      }
+    };
+    warm(this.rippleFree, () => this.#makeRipple(), 4);
+    warm(this.flareFree, () => this.#makeFlare(), 3);
+    warm(this.glowFree, () => this.#makeGlow(), 4);
+    warm(this.shardFree, () => this.#makeShard(), Math.max(8, this.quality.shards));
+    warm(this.trailFree, () => this.#makeTrail(), 2);
+
+    const spark = this.#burstAsset(0xe2c487);
+    for (const color of [0x9bd4b7, 0xf2d69a, 0xffe8b6, 0xffe9bd, 0xffd7a0, 0x8fd7b4, 0xf6dda2, 0xffe6b0, 0x8bd5b2, 0xf0cf8b]) {
+      this.#burstAsset(color);
+    }
+    const sparks = Math.max(30, Math.round(70 * this.quality.fx));
+    for (let i = 0; i < sparks; i += 1) {
+      const mesh = new THREE.Mesh(spark.geometry, spark.material);
+      mesh.position.set(0, 0.4, 0);
+      this.scene.add(mesh);
+      this.particleFree.push(mesh);
+    }
+
+    // One compile now, instead of one shader per effect on the player's first move.
+    this.renderer.compile(this.scene, this.camera);
+
+    for (const item of [...this.shardFree, ...this.rippleFree, ...this.flareFree, ...this.glowFree, ...this.trailFree]) {
+      item.mesh.visible = false;
+    }
+    for (const mesh of this.particleFree) mesh.visible = false;
   }
 
   /* ------------------------------------------------------------ build */
@@ -1743,11 +1787,15 @@ export class ChessScene {
     const total = Math.max(4, Math.round(count * this.quality.fx));
     const asset = this.#burstAsset(color);
     for (let i = 0; i < total; i += 1) {
-      const mesh = new THREE.Mesh(asset.geometry, asset.material);
+      const pooled = this.particleFree.pop();
+      const mesh = pooled || new THREE.Mesh(asset.geometry, asset.material);
+      if (mesh.material !== asset.material) mesh.material = asset.material;
+      if (!mesh.parent) this.scene.add(mesh);
+      mesh.visible = true;
+      mesh.scale.setScalar(1);
       mesh.position.copy(origin);
       const angle = Math.random() * TAU;
       const speed = 0.4 + Math.random() * 1.2;
-      this.scene.add(mesh);
       this.particles.push({
         mesh,
         asset,
@@ -1859,16 +1907,16 @@ export class ChessScene {
   }
 
   #makeShard() {
-    const mesh = new THREE.Mesh(
-      new THREE.TetrahedronGeometry(0.05),
-      new THREE.MeshStandardMaterial({
+    if (!this.shardMaterial) {
+      this.shardMaterial = new THREE.MeshStandardMaterial({
         color: 0xe9d9b8,
         roughness: 0.32,
         metalness: 0.3,
         transparent: true,
         opacity: 1,
-      }),
-    );
+      });
+    }
+    const mesh = new THREE.Mesh(new THREE.TetrahedronGeometry(0.05), this.shardMaterial);
     mesh.visible = false;
     this.scene.add(mesh);
     return { mesh, velocity: new THREE.Vector3(), spin: new THREE.Vector3(), t: 0, duration: 1 };
@@ -2211,7 +2259,8 @@ export class ChessScene {
       const p = this.particles[i];
       p.life += dt;
       if (p.life >= p.maxLife) {
-        this.scene.remove(p.mesh);
+        p.mesh.visible = false;
+        this.particleFree.push(p.mesh);
         continue;
       }
       p.velocity.y -= 1.5 * dt;

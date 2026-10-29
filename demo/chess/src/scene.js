@@ -615,22 +615,25 @@ export class ChessScene {
     const lightMat = new THREE.MeshPhysicalMaterial({
       map: lightTex,
       bumpMap: lightTex,
-      bumpScale: 0.012,
-      roughness: 0.5,
-      metalness: 0.02,
-      clearcoat: 0.08,
-      clearcoatRoughness: 0.7,
-      envMapIntensity: 0.3,
+      bumpScale: 0.01,
+      // Matte marble: a polished clearcoat turned the whole near half of the
+      // board into a mirror of the key light whenever the camera sat on the
+      // black side, so both the coat and the grazing sheen are toned down.
+      roughness: 0.7,
+      metalness: 0,
+      clearcoat: 0,
+      envMapIntensity: 0.16,
+      specularIntensity: 0.32,
     });
     const darkMat = new THREE.MeshPhysicalMaterial({
       map: darkTex,
       bumpMap: darkTex,
-      bumpScale: 0.015,
-      roughness: 0.46,
-      metalness: 0.08,
-      clearcoat: 0.12,
-      clearcoatRoughness: 0.62,
-      envMapIntensity: 0.3,
+      bumpScale: 0.012,
+      roughness: 0.68,
+      metalness: 0.02,
+      clearcoat: 0,
+      envMapIntensity: 0.16,
+      specularIntensity: 0.32,
     });
     this.squareMaterials = { light: lightMat, dark: darkMat };
 

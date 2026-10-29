@@ -560,6 +560,7 @@ export class ChessScene {
     shaft.position.set(0.4, 15.6, 1.2);
     shaft.target.position.set(0, 0, 0);
     this.scene.add(shaft, shaft.target);
+    this.shaftLight = shaft;
 
     // The cool rim that used to stand behind the black side is gone: its wide
     // cone flooded the far throne, the columns and the floor, so a camera on
@@ -1196,8 +1197,9 @@ export class ChessScene {
       }
     }
 
-    // Sconces on every fourth column, and candlesticks on the table.
-    for (let i = 0; i < bays; i += 4) {
+    // Sconces on every fifth column: four of them, so the ring mirrors onto
+    // itself when the camera flips to the other side.
+    for (let i = 0; i < bays; i += 5) {
       const a = (i / bays) * Math.PI * 2;
       const x = Math.cos(a) * (R - 1.35);
       const z = Math.sin(a) * (R - 1.35);
@@ -1456,10 +1458,22 @@ export class ChessScene {
   setViewSide(side, animate = true) {
     this.viewSide = side === 'b' ? 'b' : 'w';
     this.topViewActive = false;
+    this.#mirrorSideLights();
     if (this.mode !== 'game') return;
     this.controls.autoRotate = false;
     if (animate) this.#animateCamera(this.#sidePosition(this.viewSide), this.#boardTarget(this.viewSide), 1.35);
     else this.#placeCamera(this.#sidePosition(this.viewSide), this.#boardTarget(this.viewSide));
+  }
+
+  /**
+   * The light rig turns with the player: the key and the overhead shaft stay in
+   * front of the side that is looking at the board, so playing Black looks like
+   * the mirror of playing White instead of lighting the opponent's pieces.
+   */
+  #mirrorSideLights() {
+    const s = this.viewSide === 'b' ? -1 : 1;
+    if (this.keyLight) this.keyLight.position.set(-2.2 * s, 11.8, 5.4 * s);
+    if (this.shaftLight) this.shaftLight.position.set(0.4 * s, 15.6, 1.2 * s);
   }
 
   flipView() {

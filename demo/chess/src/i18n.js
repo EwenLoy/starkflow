@@ -310,6 +310,9 @@ const ru = {
   'Choose a table in the lounge or open your own. The first guest plays White, the second plays Black, everyone else watches.':
     'Выберите стол в гостиной или откройте свой. Первый гость играет белыми, второй — чёрными, остальные наблюдают.',
   'Move': 'Ход',
+  'Opponent moves': 'Ходы соперника',
+  'Click an opponent’s piece to see where it could go. Those dots are red.':
+    'Нажмите на фигуру соперника — увидите, куда она может пойти. Эти точки красные.',
   'Click your piece, then a highlighted square. Dots are empty squares, rings are captures.':
     'Нажмите на свою фигуру, затем на подсвеченное поле. Точки — свободные поля, кольца — взятия.',
   'Camera': 'Камера',

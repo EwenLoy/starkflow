@@ -1,4 +1,4 @@
-import { START_FEN } from './session.js?v=20261029-1';
+import { START_FEN } from './session.js?v=20261029-2';
 
 /**
  * A tiny in-memory stand-in for StarkFlowClient. ChessSession speaks the same

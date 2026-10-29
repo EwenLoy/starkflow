@@ -1,5 +1,5 @@
 import { Chess, validateFen } from '../vendor/chess.js/chess.js';
-import { t } from './i18n.js?v=20261029-1';
+import { t } from './i18n.js?v=20261029-2';
 
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const MAX_STORED_MOVES = 360;
@@ -140,6 +140,27 @@ export class ChessSession {
     if (!this.chess || !square) return [];
     try {
       return this.chess.moves({ square, verbose: true });
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Moves of any piece, including the side that is not on the clock: the same
+   * position is read with the piece's own colour to move, so an opponent's
+   * piece can be inspected without touching the live game.
+   */
+  movesFor(square) {
+    if (!this.chess || !square) return [];
+    const piece = this.chess.get(square);
+    if (!piece) return [];
+    if (piece.color === this.chess.turn()) return this.legalMoves(square);
+    const fields = this.chess.fen().split(' ');
+    fields[1] = piece.color;
+    // En passant belongs to the side that actually has the move.
+    fields[3] = '-';
+    try {
+      return new Chess(fields.join(' ')).moves({ square, verbose: true });
     } catch {
       return [];
     }

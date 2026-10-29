@@ -1728,6 +1728,10 @@ export class ChessScene {
       });
     const border = (color) =>
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false });
+    // Enemy markers blend normally: an additive red would wash out on the cream
+    // squares exactly where the warning has to read.
+    const solid = (color, opacity) =>
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false });
     const glowGeometry = new THREE.PlaneGeometry(0.88, 0.88);
     const borderGeometry = new THREE.RingGeometry(0.4, 0.42, 4, 1);
     this.markers = {
@@ -1735,6 +1739,10 @@ export class ChessScene {
       ring: { geometry: new THREE.TorusGeometry(0.4, 0.026, 10, 52), material: additive(0xf5d692, 0.95) },
       capture: { geometry: new THREE.TorusGeometry(0.36, 0.026, 8, 40), material: additive(0xe7ad74, 0.72) },
       dot: { geometry: new THREE.CircleGeometry(0.11, 24), material: additive(0xcfe3c2, 0.58) },
+      foeTile: { geometry: new THREE.PlaneGeometry(0.98, 0.98), material: solid(0xc44734, 0.13) },
+      foeRing: { geometry: new THREE.TorusGeometry(0.4, 0.026, 10, 52), material: solid(0xd4563f, 0.95) },
+      foeCapture: { geometry: new THREE.TorusGeometry(0.36, 0.026, 8, 40), material: solid(0xd4563f, 0.9) },
+      foeDot: { geometry: new THREE.CircleGeometry(0.11, 24), material: solid(0xd4563f, 0.82) },
       lastGlowW: { geometry: glowGeometry, material: additive(0xd6b371, 0.13) },
       lastGlowB: { geometry: glowGeometry, material: additive(0x72b596, 0.13) },
       lastBorderW: { geometry: borderGeometry, material: border(0xefd196) },
@@ -1742,11 +1750,11 @@ export class ChessScene {
       // Shared marker assets. Creating a material inside setCheck/setHint meant
       // a shader release and rebuild on every check and every hint.
       checkRing: { geometry: new THREE.TorusGeometry(0.41, 0.03, 8, 40), material: additive(0xff6b57, 0.9) },
-      hintFrom: { geometry: new THREE.TorusGeometry(0.4, 0.022, 8, 36), material: additive(0x8cd9b2, 0.9) },
-      hintTo: { geometry: new THREE.TorusGeometry(0.4, 0.022, 8, 36), material: additive(0xf1cd84, 0.9) },
+      hintFrom: { geometry: new THREE.TorusGeometry(0.4, 0.022, 8, 36), material: solid(0xc94b39, 0.95) },
+      hintTo: { geometry: new THREE.TorusGeometry(0.4, 0.022, 8, 36), material: solid(0xe0775f, 0.92) },
       hintShaft: {
         geometry: new THREE.CylinderGeometry(0.018, 0.018, 1, 8),
-        material: additive(0xe7c98d, 0.6),
+        material: solid(0xc94b39, 0.62),
       },
       peek: { geometry: new THREE.TorusGeometry(0.43, 0.026, 8, 40), material: additive(0xe6d2a4, 0.85) },
     };
@@ -1762,15 +1770,17 @@ export class ChessScene {
     this.#clearGroup(this.legalGroup, false);
   }
 
-  selectSquare(square, moves = []) {
+  selectSquare(square, moves = [], { foe = false } = {}) {
     this.#clearSelection();
     const assets = this.#markerAssets();
     const pos = squarePos(square, 0.09);
-    const tile = new THREE.Mesh(assets.tile.geometry, assets.tile.material);
+    const tileAsset = foe ? assets.foeTile : assets.tile;
+    const ringAsset = foe ? assets.foeRing : assets.ring;
+    const tile = new THREE.Mesh(tileAsset.geometry, tileAsset.material);
     tile.rotation.x = -Math.PI / 2;
     tile.position.copy(pos);
     this.selectionGroup.add(tile);
-    const ring = new THREE.Mesh(assets.ring.geometry, assets.ring.material);
+    const ring = new THREE.Mesh(ringAsset.geometry, ringAsset.material);
     ring.rotation.x = -Math.PI / 2;
     ring.position.copy(pos);
     this.selectionGroup.add(ring);
@@ -1778,7 +1788,9 @@ export class ChessScene {
     for (const [i, move] of moves.entries()) {
       const target = squarePos(move.to, 0.092);
       const capture = !!move.captured;
-      const asset = capture ? assets.capture : assets.dot;
+      const asset = capture
+        ? (foe ? assets.foeCapture : assets.capture)
+        : (foe ? assets.foeDot : assets.dot);
       const marker = new THREE.Mesh(asset.geometry, asset.material);
       marker.rotation.x = -Math.PI / 2;
       marker.position.copy(target);

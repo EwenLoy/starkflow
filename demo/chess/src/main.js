@@ -1,6 +1,6 @@
-import { ChessScene } from './scene.js?v=20261029-2';
+import { ChessScene } from './scene.js?v=20261029-3';
 import { StarkFlowClient } from './net.js?v=20261029-1';
-import { ChessSession, START_FEN } from './session.js?v=20261029-1';
+import { ChessSession, START_FEN } from './session.js?v=20261029-2';
 import { ChessAudio } from './audio.js?v=20261029-1';
 import { chooseBotMove, findHint, openingName } from './engine.js?v=20261029-1';
 import { pieceGlyph, setSculpt } from './pieces.js?v=20261029-2';
@@ -13,7 +13,7 @@ import {
   pluralRu,
   setLocale,
   t,
-} from './i18n.js?v=20261029-1';
+} from './i18n.js?v=20261029-2';
 
 import { WS_URL } from './env.js?v=20261029-1';
 
@@ -208,6 +208,7 @@ class SalonApp {
     this.lastFen = '';
     this.lastViewColor = null;
     this.selected = null;
+    this.enemyPreview = null;
     this.legal = [];
     this.promotion = null;
     this.roomList = [];
@@ -1101,6 +1102,7 @@ class SalonApp {
     this.legal = [];
     this.closeResult();
     $('inviteStrip').hidden = false;
+    this.enemyPreview = null;
     this.scene.setMode('lobby');
     this.scene.clearSelection();
     this.scene.setCheck(null);
@@ -1169,6 +1171,7 @@ class SalonApp {
 
   renderGame() {
     if ($('game').hidden) return;
+    this.clearEnemyPreview();
     const game = this.session.game;
     const room = this.gnet.room;
     if (!room) return;
@@ -1544,7 +1547,8 @@ class SalonApp {
         box.hidden = true;
       }, 320);
     }, 2400);
-    this.scene.pulseSquare(square);
+    // The enemy preview draws its own red ring; a second gold one would fight it.
+    if (!this.session.myColor || piece.color === this.session.myColor) this.scene.pulseSquare(square);
   }
 
   togglePanel(force) {
@@ -1563,6 +1567,7 @@ class SalonApp {
 
   syncSelectionVisual() {
     if (!this.selected) {
+      if (this.enemyPreview) return;
       this.scene.clearSelection();
       return;
     }
@@ -1660,10 +1665,36 @@ class SalonApp {
       this.scene.clearSelection();
       return;
     }
+
+    const piece = this.session.chess?.get(square);
+    if (piece && piece.color !== this.session.myColor) {
+      this.previewEnemyMoves(square);
+      return;
+    }
+    this.clearEnemyPreview();
     this.selectSquare(square);
   }
 
+  /** Red dots: the reach of an opponent's piece, without making a move. */
+  previewEnemyMoves(square) {
+    if (this.enemyPreview === square) {
+      this.clearEnemyPreview();
+      return;
+    }
+    this.enemyPreview = square;
+    this.selected = null;
+    this.legal = [];
+    this.scene.selectSquare(square, this.session.movesFor(square), { foe: true });
+  }
+
+  clearEnemyPreview() {
+    if (!this.enemyPreview) return;
+    this.enemyPreview = null;
+    if (!this.selected) this.scene.clearSelection();
+  }
+
   selectSquare(square) {
+    this.enemyPreview = null;
     const piece = this.session.chess?.get(square);
     if (!piece || piece.color !== this.session.myColor) {
       this.scene.clearSelection();
@@ -1878,6 +1909,7 @@ class SalonApp {
         this.legal = [];
         this.scene.clearSelection();
       }
+      if (this.enemyPreview) this.clearEnemyPreview();
       return;
     }
     const target = e.target;
@@ -1980,6 +2012,7 @@ class SalonApp {
       <p>${t('Choose a table in the lounge or open your own. The first guest plays White, the second plays Black, everyone else watches.')}</p>
       <div class="help-grid">
         <div class="help-item"><span class="help-item__icon">♟</span><div><strong>${t('Move')}</strong><p>${t('Click your piece, then a highlighted square. Dots are empty squares, rings are captures.')}</p></div></div>
+        <div class="help-item"><span class="help-item__icon">♝</span><div><strong>${t('Opponent moves')}</strong><p>${t('Click an opponent’s piece to see where it could go. Those dots are red.')}</p></div></div>
         <div class="help-item"><span class="help-item__icon">♜</span><div><strong>${t('Camera')}</strong><p>${t('Drag the board with the mouse or a finger to spin the camera, the wheel or a pinch zooms, and “Top view” lays the board flat for a clean plan.')}</p></div></div>
         <div class="help-item"><span class="help-item__icon">♞</span><div><strong>${t('Opponent')}</strong><p>${t('Send a friend the table link. They will land straight in the game. For two players on one computer, a private window or a second browser profile is best.')}</p></div></div>
         <div class="help-item"><span class="help-item__icon">♛</span><div><strong>${t('Fair play')}</strong><p>${t('The server relays the position and moves, while the rules are checked on the client. This is a friendly salon, not an anti-cheat tournament.')}</p></div></div>

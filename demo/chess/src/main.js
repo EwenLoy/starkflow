@@ -3,7 +3,7 @@ import { StarkFlowClient } from './net.js?v=20261028-14';
 import { ChessSession, START_FEN } from './session.js?v=20261028-14';
 import { ChessAudio } from './audio.js?v=20261028-14';
 import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-14';
-import { pieceGlyph } from './pieces.js?v=20261028-22';
+import { pieceGlyph } from './pieces.js?v=20261028-24';
 import { LocalNet } from './offline.js?v=20261028-14';
 import {
   applyTranslations,

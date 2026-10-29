@@ -540,27 +540,21 @@ export class ChessScene {
     // *some* diffuse term or the pieces read as holes in the board.
     this.scene.add(new THREE.HemisphereLight(0x7c93a6, 0x0a1410, 0.34));
 
-    const key = new THREE.SpotLight(0xffd7ab, 96, 26, 0.5, 0.9, 2);
-    key.position.set(-2.2, 11.8, 5.4);
-    key.target.position.set(0, 0, 0);
-    key.castShadow = true;
-    key.shadow.mapSize.set(this.quality.shadowMap, this.quality.shadowMap);
-    key.shadow.camera.near = 1;
-    key.shadow.camera.far = 24;
-    key.shadow.bias = -0.00035;
-    key.shadow.normalBias = 0.018;
-    this.scene.add(key, key.target);
-    this.keyLight = key;
-    this.keyLightBase = key.intensity;
-
-    // A broad overhead shaft straight down on the table: the pool that makes the
-    // board readable from a low camera. No cone mesh - it read as a curtain - and
-    // no shadow map: the key already casts the only shadow in the room.
-    const shaft = new THREE.SpotLight(0xfff0d2, 72, 28, 0.44, 0.95, 2);
-    shaft.position.set(0.4, 15.6, 1.2);
+    // The angled key light is gone: it lit the opponent's half of the hall from
+    // one side, so Black and White saw different pictures. What is left is the
+    // overhead shaft, the candles and the hemisphere - no side spotlight.
+    const shaft = new THREE.SpotLight(0xfff0d2, 100, 28, 0.46, 0.95, 2);
+    shaft.position.set(0, 15.6, 0);
     shaft.target.position.set(0, 0, 0);
+    shaft.castShadow = true;
+    shaft.shadow.mapSize.set(this.quality.shadowMap, this.quality.shadowMap);
+    shaft.shadow.camera.near = 1;
+    shaft.shadow.camera.far = 30;
+    shaft.shadow.bias = -0.0005;
+    shaft.shadow.normalBias = 0.02;
     this.scene.add(shaft, shaft.target);
     this.shaftLight = shaft;
+    this.shaftLightBase = shaft.intensity;
 
     // The cool rim that used to stand behind the black side is gone: its wide
     // cone flooded the far throne, the columns and the floor, so a camera on
@@ -1458,22 +1452,10 @@ export class ChessScene {
   setViewSide(side, animate = true) {
     this.viewSide = side === 'b' ? 'b' : 'w';
     this.topViewActive = false;
-    this.#mirrorSideLights();
     if (this.mode !== 'game') return;
     this.controls.autoRotate = false;
     if (animate) this.#animateCamera(this.#sidePosition(this.viewSide), this.#boardTarget(this.viewSide), 1.35);
     else this.#placeCamera(this.#sidePosition(this.viewSide), this.#boardTarget(this.viewSide));
-  }
-
-  /**
-   * The light rig turns with the player: the key and the overhead shaft stay in
-   * front of the side that is looking at the board, so playing Black looks like
-   * the mirror of playing White instead of lighting the opponent's pieces.
-   */
-  #mirrorSideLights() {
-    const s = this.viewSide === 'b' ? -1 : 1;
-    if (this.keyLight) this.keyLight.position.set(-2.2 * s, 11.8, 5.4 * s);
-    if (this.shaftLight) this.shaftLight.position.set(0.4 * s, 15.6, 1.2 * s);
   }
 
   flipView() {
@@ -2265,13 +2247,13 @@ export class ChessScene {
         this.#ripple(spot.clone().setY(0), winner === 'b' ? 'b' : 'w');
       }, 180 + i * 170);
     }
-    if (this.keyLight) {
-      this.keyLight.color.set(winner === 'b' ? 0x9fe3c0 : 0xffd995);
-      this.keyLight.intensity = this.keyLightBase * 1.55;
+    if (this.shaftLight) {
+      this.shaftLight.color.set(winner === 'b' ? 0x9fe3c0 : 0xffd995);
+      this.shaftLight.intensity = this.shaftLightBase * 1.35;
       setTimeout(() => {
-        if (!this.keyLight) return;
-        this.keyLight.color.set(0xffd9a3);
-        this.keyLight.intensity = this.keyLightBase;
+        if (!this.shaftLight) return;
+        this.shaftLight.color.set(0xfff0d2);
+        this.shaftLight.intensity = this.shaftLightBase;
       }, 1900);
     }
   }

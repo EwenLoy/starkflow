@@ -561,12 +561,9 @@ export class ChessScene {
     shaft.target.position.set(0, 0, 0);
     this.scene.add(shaft, shaft.target);
 
-    // A cool rim from behind and the side: this is what actually separates the
-    // graphite pieces from the dark squares on a phone screen.
-    const rim = new THREE.SpotLight(0x86a8bd, 34, 28, 0.86, 0.9, 2);
-    rim.position.set(8.5, 7.6, -7);
-    rim.target.position.set(0, 0.2, 0);
-    this.scene.add(rim, rim.target);
+    // The cool rim that used to stand behind the black side is gone: its wide
+    // cone flooded the far throne, the columns and the floor, so a camera on
+    // the black side saw a light the mirrored white view did not.
 
     // One warm pool per candlestick on the table - four candles, four lights, so
     // no candle is left standing there dark.

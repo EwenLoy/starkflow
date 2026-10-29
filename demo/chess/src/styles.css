@@ -647,6 +647,11 @@ svg {
   color: var(--danger);
 }
 
+/* Fullscreen is a phone affordance only; the desktop browser has F11. */
+.fullscreen-btn {
+  display: none;
+}
+
 /* --- game menu in the top-right corner -------------------------------- */
 .exit-menu {
   position: relative;
@@ -2701,7 +2706,7 @@ draw-offer .mini-btn {
     display: none;
   }
 
-  .topbar__tools .icon-btn:not(#soundBtn):not(#exitBtn) {
+  .topbar__tools .icon-btn:not(#soundBtn):not(#exitBtn):not(#fullscreenBtn) {
     display: none;
   }
 
@@ -3604,6 +3609,10 @@ draw-offer .mini-btn {
   .in-game .icon-btn {
     width: 44px;
     height: 44px;
+  }
+
+  .fullscreen-btn {
+    display: grid;
   }
 
   /* The top line stops being a second header: it becomes the back button,

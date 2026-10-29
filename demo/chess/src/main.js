@@ -1,4 +1,4 @@
-import { ChessScene } from './scene.js?v=20261029-9';
+import { ChessScene } from './scene.js?v=20261029-10';
 import { StarkFlowClient } from './net.js?v=20261029-1';
 import { ChessSession, START_FEN } from './session.js?v=20261029-2';
 import { ChessAudio } from './audio.js?v=20261029-1';
@@ -1104,6 +1104,7 @@ class SalonApp {
     $('inviteStrip').hidden = false;
     this.enemyPreview = null;
     this.scene.setMode('lobby');
+    this.scene.setSpectatorGhost(false);
     this.scene.clearSelection();
     this.scene.setCheck(null);
     this.scene.clearBoard();
@@ -1172,6 +1173,7 @@ class SalonApp {
   renderGame() {
     if ($('game').hidden) return;
     this.clearEnemyPreview();
+    this.scene.setSpectatorGhost(this.session.isSpectator);
     const game = this.session.game;
     const room = this.gnet.room;
     if (!room) return;

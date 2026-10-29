@@ -274,6 +274,9 @@ export class ChessScene {
     this.controls.maxPolarAngle = 1.45;
     this.controls.autoRotateSpeed = 0.55;
     this.controls.update();
+    // Wheel zoom is eased towards this distance instead of snapping a step
+    // per notch; touch pinch keeps using the controls directly.
+    this.zoomTarget = null;
 
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -317,6 +320,7 @@ export class ChessScene {
     this.#buildBoard();
     this.#buildRoom();
     this.#buildOverlays();
+    this.#buildGhost();
     this.#setupPost();
     this.#warmEffects();
     this.#bindEvents();
@@ -434,6 +438,7 @@ export class ChessScene {
     this.controls.target.copy(target).add(shift);
     this.camera.position.copy(position).add(shift);
     this.controls.update();
+    this.zoomTarget = null;
   }
 
   #applyFraming() {
@@ -1333,6 +1338,123 @@ export class ChessScene {
     this.scene.add(this.hoverRing);
   }
 
+  /* ------------------------------------------------------- spectator ghost */
+  /**
+   * The little salon ghost: a soft bell, a wavy hem and two big eyes. It only
+   * shows for a client that is watching a table instead of playing, floats by
+   * the board and keeps an eye on the game.
+   */
+  #buildGhost() {
+    const group = new THREE.Group();
+    const bodyMat = new THREE.MeshPhysicalMaterial({
+      color: 0xf4f8ff,
+      roughness: 0.42,
+      metalness: 0,
+      clearcoat: 0.3,
+      clearcoatRoughness: 0.5,
+      emissive: 0x94b9de,
+      emissiveIntensity: 0.3,
+      transparent: true,
+      opacity: 0.94,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const inkMat = new THREE.MeshStandardMaterial({ color: 0x161b24, roughness: 0.35, metalness: 0.1 });
+    const blushMat = new THREE.MeshBasicMaterial({ color: 0xef9ca6, transparent: true, opacity: 0.5, depthWrite: false });
+
+    const profile = [
+      [0.001, 1.18], [0.13, 1.16], [0.25, 1.1], [0.35, 1.01], [0.43, 0.9],
+      [0.49, 0.78], [0.53, 0.62], [0.55, 0.45], [0.55, 0.28], [0.535, 0.12],
+    ].map(([r, y]) => new THREE.Vector2(r, y));
+    group.add(new THREE.Mesh(new THREE.LatheGeometry(profile, 40), bodyMat));
+
+    // Wavy hem: the one line that says "ghost" more than "egg".
+    const seg = 40;
+    const positions = [];
+    const indices = [];
+    for (let i = 0; i <= seg; i += 1) {
+      const a = (i / seg) * TAU;
+      const wave = Math.sin(a * 5) * 0.06;
+      const r = 0.552 + Math.cos(a * 5) * 0.012;
+      positions.push(Math.cos(a) * r, 0.3, Math.sin(a) * r);
+      positions.push(Math.cos(a) * r * 1.01, 0.07 + wave, Math.sin(a) * r * 1.01);
+    }
+    for (let i = 0; i < seg; i += 1) {
+      const a = i * 2;
+      indices.push(a, a + 2, a + 1, a + 2, a + 3, a + 1);
+    }
+    const hemGeo = new THREE.BufferGeometry();
+    hemGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    hemGeo.setIndex(indices);
+    hemGeo.computeVertexNormals();
+    group.add(new THREE.Mesh(hemGeo, bodyMat));
+
+    const eyes = [];
+    const eyeGeo = new THREE.SphereGeometry(0.088, 16, 12);
+    for (const x of [-0.165, 0.165]) {
+      const eye = new THREE.Mesh(eyeGeo, inkMat);
+      eye.position.set(x, 0.84, 0.43);
+      eye.scale.set(0.88, 1.45, 0.4);
+      group.add(eye);
+      eyes.push(eye);
+    }
+    const mouth = new THREE.Mesh(new THREE.SphereGeometry(0.042, 12, 10), inkMat);
+    mouth.position.set(0, 0.7, 0.49);
+    mouth.scale.set(1, 0.55, 0.4);
+    group.add(mouth);
+    for (const x of [-0.33, 0.33]) {
+      const blush = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 8), blushMat);
+      blush.position.set(x, 0.74, 0.39);
+      blush.scale.set(1.2, 0.7, 0.3);
+      group.add(blush);
+    }
+
+    const armGeo = new THREE.CapsuleGeometry(0.07, 0.16, 4, 10);
+    for (const s of [-1, 1]) {
+      const arm = new THREE.Mesh(armGeo, bodyMat);
+      arm.position.set(s * 0.55, 0.55, 0);
+      arm.rotation.z = s * 0.95;
+      group.add(arm);
+    }
+
+    const halo = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: radialTexture('rgba(170,205,245,.4)', 'rgba(120,170,230,0)'),
+        transparent: true,
+        opacity: 0.5,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    halo.scale.set(2.4, 2.4, 1);
+    halo.position.set(0, 0.65, -0.15);
+    group.add(halo);
+
+    group.position.set(6.15, 1.62, 1.9);
+    group.scale.setScalar(0.95);
+    group.visible = false;
+    this.scene.add(group);
+    group.lookAt(new THREE.Vector3(0, 0.6, 0));
+    this.ghost = group;
+    this.ghostBaseY = group.position.y;
+    this.ghostYaw = group.rotation.y;
+    this.ghostEyes = eyes;
+  }
+
+  setSpectatorGhost(on) {
+    if (this.ghost) this.ghost.visible = !!on;
+  }
+
+  #updateGhost() {
+    if (!this.ghost || !this.ghost.visible) return;
+    const t = this.time;
+    this.ghost.position.y = this.ghostBaseY + Math.sin(t * 1.25) * 0.07;
+    this.ghost.rotation.y = this.ghostYaw + Math.sin(t * 0.6) * 0.1;
+    this.ghost.rotation.z = Math.sin(t * 0.9) * 0.03;
+    const blink = (t % 4.6) > 4.44 ? 0.12 : 1;
+    for (const eye of this.ghostEyes) eye.scale.y = 1.45 * blink;
+  }
+
   #setupPost() {
     this.usePost = this.quality.bloom;
     if (!this.usePost) return;
@@ -1381,7 +1503,27 @@ export class ChessScene {
     this.controls.addEventListener('start', () => {
       this.cameraTween = null;
       this.controls.autoRotate = false;
+      // A drag or a pinch owns the camera for the moment; drop the eased wheel
+      // target so the gesture is not fought by it.
+      this.zoomTarget = null;
     });
+
+    this._onWheel = (event) => {
+      if (event.target !== this.canvas) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (this.cameraTween || !this.controls.enabled) return;
+      const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+      if (!delta) return;
+      const step = clamp(Math.abs(delta), 1, 180);
+      const scale = Math.pow(0.95, this.controls.zoomSpeed * step * 0.01);
+      const current = this.zoomTarget ?? this.camera.position.distanceTo(this.controls.target);
+      const next = delta < 0 ? current * scale : current / scale;
+      this.zoomTarget = clamp(next, this.controls.minDistance, this.controls.maxDistance);
+    };
+    // Capture on window: the wheel must be eased here before OrbitControls'
+    // own canvas listener applies a whole notch at once.
+    window.addEventListener('wheel', this._onWheel, { passive: false, capture: true });
   }
 
   resize() {
@@ -1483,13 +1625,9 @@ export class ChessScene {
   zoomBy(factor) {
     this.cameraTween = null;
     this.controls.enabled = true;
-    const target = this.controls.target.clone();
-    const offset = this.camera.position.clone().sub(target);
-    const distance = clamp(offset.length() * factor, this.controls.minDistance, this.controls.maxDistance);
-    offset.setLength(distance);
-    this.camera.position.copy(target).add(offset);
-    this.camera.lookAt(target);
-    this.controls.update();
+    const target = this.controls.target;
+    const current = this.zoomTarget ?? this.camera.position.distanceTo(target);
+    this.zoomTarget = clamp(current * factor, this.controls.minDistance, this.controls.maxDistance);
   }
 
   #animateCamera(toPos, toTarget, duration) {
@@ -2311,9 +2449,11 @@ export class ChessScene {
     this.#adaptQuality(dt);
 
     this.controls.update();
+    this.#updateZoom(dt);
     this.#updateCamera(dt);
     this.#updatePieces(dt);
     this.#updateMarkers(dt);
+    this.#updateGhost();
     this.#updateDust(dt);
     this.#updateParticles(dt);
     this.#updateTrails(dt);
@@ -2345,7 +2485,29 @@ export class ChessScene {
     if (raw >= 1) {
       this.cameraTween = null;
       this.controls.enabled = true;
+      this.zoomTarget = null;
     }
+  }
+
+  #updateZoom(dt) {
+    if (this.cameraTween) {
+      this.zoomTarget = null;
+      return;
+    }
+    const target = this.controls.target;
+    const current = this.camera.position.distanceTo(target);
+    if (this.zoomTarget == null) {
+      this.zoomTarget = current;
+      return;
+    }
+    const diff = this.zoomTarget - current;
+    if (Math.abs(diff) < 0.003) {
+      this.zoomTarget = current;
+      return;
+    }
+    const next = current + diff * (1 - Math.exp(-dt * 9));
+    const offset = this.camera.position.clone().sub(target).setLength(next);
+    this.camera.position.copy(target).add(offset);
   }
 
   #updatePieces(dt) {
@@ -2542,6 +2704,7 @@ export class ChessScene {
     cancelAnimationFrame(this._raf);
     clearTimeout(this.hintTimer);
     window.removeEventListener('resize', this._onResize);
+    window.removeEventListener('wheel', this._onWheel, true);
     document.removeEventListener('visibilitychange', this._onVisibility);
     this.canvas.removeEventListener('pointermove', this._onMove);
     this.canvas.removeEventListener('pointerdown', this._onDown);

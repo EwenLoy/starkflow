@@ -150,7 +150,6 @@ class SalonApp {
     this.nameInput.value = this.name;
     this.roomInput.value = randomRoomName();
     this.roomAuto = true;
-    this.updateSeal();
     this.updateLangButton();
 
     this.audio = new ChessAudio();
@@ -221,6 +220,7 @@ class SalonApp {
     this.resultKey = '';
     this.suppressTurnToast = true;
     this.modalOpen = false;
+    this.exitMenuOpen = false;
     this.lastFocus = null;
     this.hintBusy = false;
     this.latency = null;
@@ -307,7 +307,6 @@ class SalonApp {
     this.net.on('welcome', () => {
       this.name = this.net.welcomeInfo.name || this.name;
       this.nameInput.value = this.name;
-      this.updateSeal();
       this.renderRooms();
       if (this.directRoom && !this.triedDirect && !this.offline) {
         this.triedDirect = true;
@@ -461,7 +460,6 @@ class SalonApp {
         this.applyName();
       }
     });
-    this.nameInput.addEventListener('input', () => this.updateSeal());
     this.roomInput.addEventListener('input', () => {
       this.roomAuto = false;
     });
@@ -482,7 +480,11 @@ class SalonApp {
     $('netPill').addEventListener('click', () => {
       if (!this.net.connected) this.net.manualRetry();
     });
-    $('leaveBtn').addEventListener('click', () => this.confirmLeave());
+    $('exitBtn').addEventListener('click', () => this.toggleExitMenu());
+    $('exitScrim').addEventListener('click', () => this.closeExitMenu());
+    $('exitLeaveBtn').addEventListener('click', () => this.runExitAction('leave'));
+    $('exitResignBtn').addEventListener('click', () => this.runExitAction('resign'));
+    $('exitDrawBtn').addEventListener('click', () => this.runExitAction('draw'));
     $('brandBtn').addEventListener('click', () => {
       if (this.gnet.room) this.confirmLeave();
     });
@@ -493,8 +495,6 @@ class SalonApp {
     $('historyBtn')?.addEventListener('click', () => this.togglePanel());
     $('panelClose')?.addEventListener('click', () => this.togglePanel(false));
     $('panelScrim')?.addEventListener('click', () => this.togglePanel(false));
-    $('drawQuickBtn')?.addEventListener('click', () => this.askDraw());
-    $('resignQuickBtn')?.addEventListener('click', () => this.confirmResign());
     $('acceptDrawBtn').addEventListener('click', () => {
       this.session.acceptDraw();
       this.showToast(t('Draw accepted.'), 'ok');
@@ -607,12 +607,6 @@ class SalonApp {
   }
 
   /* ------------------------------------------------------------- identity */
-  updateSeal() {
-    const fallback = isRussian() ? 'Г' : 'G';
-    const raw = this.nameInput.value.trim() || fallback;
-    $('playerInitial').textContent = [...raw][0]?.toUpperCase() || fallback;
-  }
-
   updateLangButton() {
     const next = isRussian() ? 'EN' : 'RU';
     const key = isRussian() ? 'Switch to English' : 'Switch to Russian';
@@ -626,7 +620,6 @@ class SalonApp {
     const next = isRussian() ? 'en' : 'ru';
     setLocale(next);
     this.updateLangButton();
-    this.updateSeal();
     if (this.roomAuto) this.roomInput.value = randomRoomName();
     this.refreshSoundButton();
     if (this.offline) {
@@ -651,7 +644,6 @@ class SalonApp {
     this.name = value;
     this.nameInput.value = value;
     store('ornate-chess:name', value);
-    this.updateSeal();
     if (this.gnet.room) return;
     if (!this.net.connected) {
       if (this.net.active) await this.net.connect(value).catch(() => {});
@@ -671,7 +663,6 @@ class SalonApp {
     this.name = value;
     this.nameInput.value = value;
     store('ornate-chess:name', value);
-    this.updateSeal();
     if (!this.net.connected) {
       await this.net.connect(value);
     } else if (this.net.welcomeInfo?.name !== value && !this.net.room) {
@@ -910,7 +901,6 @@ class SalonApp {
     this.name = cleanName(this.nameInput.value);
     this.nameInput.value = this.name;
     store('ornate-chess:name', this.name);
-    this.updateSeal();
     const chosen = color === 'r' ? (Math.random() < 0.5 ? 'w' : 'b') : color;
     this.offline = true;
     this.offlineLevel = level;
@@ -1090,6 +1080,7 @@ class SalonApp {
   }
 
   enterLobby() {
+    this.closeExitMenu();
     if (this.offline) this.stopOfflineSession();
     this.session = this.onlineSession;
     this.clearRoomQuery();
@@ -1188,6 +1179,8 @@ class SalonApp {
       $('phaseLabel').textContent = t('Table');
       $('turnPill').textContent = '—';
       $('turnPill').className = 'turn-pill';
+      $('exitDrawBtn').disabled = true;
+      $('exitResignBtn').disabled = true;
       this.syncInteraction();
       return;
     }
@@ -1215,11 +1208,8 @@ class SalonApp {
     this.syncPresence(game, myColor);
     this.saveResume(game, room);
 
-    const drawQuick = $('drawQuickBtn');
-    if (drawQuick) {
-      drawQuick.disabled = this.offline || !this.session.isPlaying || !!game.drawOffer || this.session.pending;
-    }
-    if ($('resignQuickBtn')) $('resignQuickBtn').disabled = !this.session.isPlaying;
+    $('exitDrawBtn').disabled = this.offline || !this.session.isPlaying || !!game.drawOffer || this.session.pending;
+    $('exitResignBtn').disabled = !this.session.isPlaying;
     $('hintBtn').disabled = !this.session.isPlaying || this.session.pending;
     $('rematchBtn').hidden = game.status === 'playing' || game.status === 'waiting';
     $('rematchBtn').disabled = !this.session.isHost;
@@ -1817,6 +1807,27 @@ class SalonApp {
     }
   }
 
+  toggleExitMenu(force) {
+    const open = force === undefined ? !this.exitMenuOpen : !!force;
+    if (open === this.exitMenuOpen) return;
+    this.exitMenuOpen = open;
+    $('exitMenu').classList.toggle('is-open', open);
+    $('exitBtn').setAttribute('aria-expanded', String(open));
+    $('exitScrim').hidden = !open;
+    if (!open && $('exitPanel').contains(document.activeElement)) $('exitBtn').focus();
+  }
+
+  closeExitMenu() {
+    this.toggleExitMenu(false);
+  }
+
+  runExitAction(action) {
+    this.closeExitMenu();
+    if (action === 'leave') this.confirmLeave();
+    else if (action === 'resign') this.confirmResign();
+    else if (action === 'draw') this.askDraw();
+  }
+
   giveHint() {
     if (!this.session.isPlaying || this.hintBusy) return;
     this.hintBusy = true;
@@ -1854,6 +1865,10 @@ class SalonApp {
 
   onKeyDown(e) {
     if (e.key === 'Escape') {
+      if (this.exitMenuOpen) {
+        this.closeExitMenu();
+        return;
+      }
       if (this.modalOpen) {
         this.closeModal();
         return;
@@ -1899,6 +1914,7 @@ class SalonApp {
   openModal(content, { focus } = {}) {
     const root = $('modalRoot');
     if (this.modalOpen) this.closeModal(true);
+    this.closeExitMenu();
     this.lastFocus = document.activeElement;
     root.innerHTML = '';
     const backdrop = document.createElement('div');
@@ -2116,6 +2132,7 @@ class SalonApp {
   onResult(snapshot) {
     const game = snapshot.game;
     if (!game) return;
+    this.closeExitMenu();
     saveResumeHint(null);
     this.scene.setCheck(null);
     this.scene.celebrate(game.winner);

@@ -647,6 +647,112 @@ svg {
   color: var(--danger);
 }
 
+/* --- game menu in the top-right corner -------------------------------- */
+.exit-menu {
+  position: relative;
+  display: flex;
+}
+
+body:not(.in-game) .exit-menu {
+  display: none;
+}
+
+.exit-menu > .icon-btn {
+  position: relative;
+  z-index: 2;
+}
+
+.exit-menu.is-open > .icon-btn {
+  border-color: var(--line-strong);
+  color: var(--gold-bright);
+  background: rgba(201, 161, 93, 0.12);
+}
+
+.exit-menu__panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 224px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: rgba(4, 12, 9, 0.94);
+  box-shadow: 0 26px 60px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition: opacity 0.2s, transform 0.2s, visibility 0.2s;
+}
+
+.exit-menu.is-open .exit-menu__panel {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.exit-menu__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+
+.exit-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+
+.exit-menu__item svg {
+  flex: 0 0 15px;
+  width: 15px;
+  height: 15px;
+}
+
+.exit-menu__item:hover {
+  color: var(--gold-bright);
+  background: rgba(201, 161, 93, 0.1);
+}
+
+.exit-menu__item--danger {
+  color: #d9968a;
+}
+
+.exit-menu__item--danger:hover {
+  color: #ffb9ab;
+  background: rgba(214, 106, 88, 0.12);
+}
+
+.exit-menu__item:disabled {
+  opacity: 0.35;
+  color: var(--muted);
+  background: transparent;
+  cursor: default;
+}
+
 :focus-visible {
   outline: 1px solid var(--gold-bright);
   outline-offset: 3px;
@@ -1054,19 +1160,10 @@ svg {
   box-shadow: 0 0 0 3px rgba(201, 161, 93, 0.06);
 }
 
-.identity__seal {
-  display: grid;
-  flex: 0 0 42px;
-  place-items: center;
+.identity__refresh {
+  flex: 0 0 auto;
   width: 42px;
   height: 42px;
-  border: 1px solid var(--line-strong);
-  border-radius: 50%;
-  color: var(--gold-bright);
-  font-family: var(--font-display);
-  font-size: 19px;
-  line-height: 1;
-  background: rgba(201, 161, 93, 0.07);
 }
 
 .rooms {
@@ -1310,6 +1407,7 @@ svg {
 }
 
 .match-title {
+  grid-column: 2;
   text-align: center;
   /* Sits above the second header row: the room name is the title of the game,
      not a caption under the logo. */
@@ -2603,7 +2701,7 @@ draw-offer .mini-btn {
     display: none;
   }
 
-  .topbar__tools .icon-btn:not(#soundBtn) {
+  .topbar__tools .icon-btn:not(#soundBtn):not(#exitBtn) {
     display: none;
   }
 
@@ -3479,6 +3577,7 @@ draw-offer .mini-btn {
   .in-game .topbar {
     height: var(--hud-top);
     align-items: flex-end;
+    justify-content: flex-end;
     padding: 0 10px 6px;
     pointer-events: none;
   }

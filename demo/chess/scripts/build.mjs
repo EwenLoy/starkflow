@@ -30,7 +30,7 @@ if (wsUrl && !/^wss?:\/\/\S+$/.test(wsUrl)) {
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 
-for (const entry of ['index.html', 'favicon.svg', '.nojekyll', 'src', 'vendor']) {
+for (const entry of ['index.html', 'favicon.svg', '.nojekyll', 'src', 'vendor', 'assets']) {
   await cp(join(root, entry), join(dist, entry), { recursive: true });
 }
 

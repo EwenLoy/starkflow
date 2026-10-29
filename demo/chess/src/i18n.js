@@ -262,6 +262,33 @@ const ru = {
   'Knight': 'Конь',
   'Close': 'Закрыть',
 
+  // Pieces — the badge you get by tapping one
+  'White pawn': 'Белая пешка',
+  'Black pawn': 'Чёрная пешка',
+  'White rook': 'Белая ладья',
+  'Black rook': 'Чёрная ладья',
+  'White bishop': 'Белый слон',
+  'Black bishop': 'Чёрный слон',
+  'White knight': 'Белый конь',
+  'Black knight': 'Чёрный конь',
+  'White queen': 'Белый ферзь',
+  'Black queen': 'Чёрный ферзь',
+  'White king': 'Белый король',
+  'Black king': 'Чёрный король',
+  'walks forward, captures diagonally': 'ходит вперёд, бьёт по диагонали',
+  'moves along files and ranks': 'ходит по вертикалям и горизонталям',
+  'moves along diagonals': 'ходит по диагоналям',
+  'rides an L: two squares, then one to the side': 'ходит буквой Г: две клетки прямо и одна вбок',
+  'moves any distance on lines and diagonals': 'ходит на любое расстояние по прямым и диагоналям',
+  'one square in any direction': 'ходит на одну клетку в любую сторону',
+
+  // HUD
+  'Players': 'Игроки',
+  'Move history': 'История ходов',
+  'Name the pieces': 'Подписать фигуры',
+  'Pieces': 'Фигуры',
+  'Moves and actions': 'Ходы и действия',
+
   // Confirm
   'Confirmation': 'Подтверждение',
   'Confirm': 'Подтвердить',

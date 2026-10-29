@@ -1311,14 +1311,18 @@ svg {
 
 .match-title {
   text-align: center;
+  /* Sits above the second header row: the room name is the title of the game,
+     not a caption under the logo. */
+  transform: translateY(-38px);
 }
 
 .match-title h2 {
   margin: 1px 0 0;
   font-family: var(--font-display);
-  font-size: clamp(20px, 2.3vw, 30px);
-  font-weight: 500;
-  line-height: 1;
+  font-size: clamp(26px, 3.1vw, 42px);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.05;
 }
 
 .match-tools {
@@ -1754,10 +1758,10 @@ svg {
 .board-controls {
   position: absolute;
   bottom: 24px;
-  left: 50%;
+  /* Bottom-left, not centred: the board is the hero, the buttons are tools. */
+  left: clamp(18px, 3vw, 46px);
   display: flex;
   gap: 7px;
-  transform: translateX(-50%);
   padding: 4px;
   border: 1px solid rgba(201, 161, 93, 0.14);
   border-radius: 99px;
@@ -2051,6 +2055,10 @@ draw-offer .mini-btn {
 }
 
 /* --------------------------------------------------------------- toasts */
+#toasts {
+  display: none;
+}
+
 .toasts {
   position: fixed;
   left: 50%;
@@ -3297,4 +3305,897 @@ draw-offer .mini-btn {
   .boot__rays {
     animation: none;
   }
+}
+
+/* =====================================================================
+   GAME HUD — round two
+   ---------------------------------------------------------------------
+   Three things were wrong on a phone: the brand bar and the "back to
+   lobby" row were painted on top of each other, the player cards floated
+   over the board, and five controls lived in a bar that sat in the middle
+   of the picture. This block turns the game screen into bands: a strip
+   above the board, a strip below it, and everything else folded into a
+   sheet that slides in from the right.
+   ===================================================================== */
+
+/* --- the piece badge: what is this thing I just tapped? --------------- */
+.piece-peek {
+  position: absolute;
+  left: 50%;
+  bottom: calc(126px + env(safe-area-inset-bottom, 0px));
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(340px, 84vw);
+  padding: 8px 15px 8px 10px;
+  border: 1px solid rgba(201, 161, 93, 0.36);
+  border-radius: 15px;
+  background: rgba(6, 16, 12, 0.94);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 10px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.piece-peek[hidden] {
+  display: none;
+}
+
+.piece-peek.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.piece-peek__glyph {
+  font-size: 27px;
+  line-height: 1;
+  color: var(--gold-bright);
+}
+
+.piece-peek[data-color='b'] .piece-peek__glyph {
+  color: #cfd8de;
+}
+
+.piece-peek__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.piece-peek__body strong {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ivory);
+  white-space: nowrap;
+}
+
+.piece-peek__body small {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+/* --- glyph badges pinned over the pieces (beginner mode) -------------- */
+.piece-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.piece-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 1px 2px;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 5px;
+  opacity: 0;
+  will-change: transform;
+  transform: translate3d(-120px, -120px, 0);
+}
+
+.piece-label.is-w {
+  color: #fbf3e0;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95);
+}
+
+.piece-label.is-b {
+  color: #a9bcc7;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95);
+}
+
+/* --- panel close button and the scrim behind it ----------------------- */
+.game-panel__close {
+  display: none;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+}
+
+.game-panel__scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 38;
+  display: none;
+  background: rgba(2, 7, 5, 0.58);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.24s ease;
+}
+
+/* --- buttons that carry an icon plus a word --------------------------- */
+.pill-btn.is-on {
+  border-color: rgba(201, 161, 93, 0.62);
+  color: var(--gold-bright);
+  background: rgba(201, 161, 93, 0.14);
+}
+
+/* The move sheet only exists on a phone; on a wide screen the panel is always
+   on screen, so the toggle would be a dead button. */
+#panelBtn {
+  display: none;
+}
+
+/* --- desktop windows that are shorter than the brand bar ------------- */
+@media (max-height: 700px) and (min-width: 921px) {
+  .game__topline {
+    top: 100px;
+  }
+
+  .player-card--black {
+    top: 150px;
+  }
+
+  .game-panel {
+    top: 150px;
+  }
+}
+
+/* =====================================================================
+   Phones: real bands, 44 px targets, nothing over the board
+   ===================================================================== */
+/* The two bands the phone HUD docks to. Declared once so the camera can be
+   told about the same numbers the CSS uses. */
+:root {
+  --hud-top: calc(56px + env(safe-area-inset-top, 0px));
+  --hud-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (pointer: coarse), (max-width: 780px) {
+  .game {
+    padding: 0;
+  }
+
+  /* One row at the top: the way back on the left, status and sound on the
+     right. The brand is not information a player needs mid-game. */
+  .in-game .topbar {
+    height: var(--hud-top);
+    align-items: flex-end;
+    padding: 0 10px 6px;
+    pointer-events: none;
+  }
+
+  .in-game .topbar > * {
+    pointer-events: auto;
+  }
+
+  .in-game .brand {
+    display: none;
+  }
+
+  .in-game .net-pill {
+    min-height: 34px;
+    padding: 0 11px;
+    font-size: 8.5px;
+  }
+
+  .in-game .net-pill #netText,
+  .in-game .net-pill__ping {
+    display: none;
+  }
+
+  .in-game .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* The top line stops being a second header: it becomes the back button,
+     parked in the first row next to the tools. */
+  .game__topline {
+    top: env(safe-area-inset-top, 0px);
+    left: 10px;
+    right: 10px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 0;
+    pointer-events: none;
+  }
+
+  .game__topline > * {
+    pointer-events: auto;
+  }
+
+  .game .match-title,
+  .game .match-tools {
+    display: none;
+  }
+
+  .game .text-btn {
+    min-height: 44px;
+    padding: 0 8px 0 2px;
+    font-size: 10px;
+  }
+
+  /* Player strips instead of floating cards. */
+  .game .player-card {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    min-width: 0;
+    gap: 9px;
+    padding: 7px 11px;
+    border-radius: 13px;
+    background: rgba(4, 12, 9, 0.74);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .game .player-card--black {
+    top: var(--hud-top);
+  }
+
+  .game .player-card--white {
+    bottom: var(--hud-bottom);
+  }
+
+  .game.view-black .player-card--black {
+    top: auto;
+    bottom: var(--hud-bottom);
+  }
+
+  .game.view-black .player-card--white {
+    top: var(--hud-top);
+    bottom: auto;
+  }
+
+  .game .player-card__avatar {
+    flex-basis: 30px;
+    width: 30px;
+    height: 30px;
+    font-size: 17px;
+  }
+
+  .game .player-card__name {
+    font-size: 13px;
+  }
+
+  .game .player-card__meta {
+    font-size: 8px;
+  }
+
+  .game .player-card__role,
+  .game .player-card__turn {
+    font-size: 7.5px;
+  }
+
+  /* The bottom strip: who you are, and the controls. */
+  .game .board-controls {
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    transform: none;
+    justify-content: center;
+    gap: 6px;
+    padding: 5px;
+    border-radius: 16px;
+    background: rgba(4, 12, 9, 0.78);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    z-index: 26;
+  }
+
+  .game .board-controls__divider {
+    display: none;
+  }
+
+  .game .pill-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 46px;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .game .pill-btn__text {
+    display: none;
+  }
+
+  .game .pill-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  #panelBtn {
+    display: inline-flex;
+  }
+
+  /* The move log, the clock, draw and resign: a sheet that slides in and
+     never covers the board while it is closed. */
+  .game .game-panel__scrim {
+    display: block;
+  }
+
+  .game .game-panel {
+    position: absolute;
+    top: var(--hud-top);
+    right: 0;
+    bottom: var(--hud-bottom);
+    width: min(340px, 88vw);
+    min-width: 0;
+    padding: 22px 16px 14px;
+    border-radius: 18px 0 0 18px;
+    overflow-y: auto;
+    z-index: 40;
+    transform: translateX(calc(100% + 20px));
+    transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .game.is-panel-open .game-panel {
+    transform: none;
+  }
+
+  .game.is-panel-open .game-panel__scrim {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .game .game-panel__close {
+    display: grid;
+    place-items: center;
+  }
+
+  /* The status block stops repeating what the strip already says. */
+  .game .status-head {
+    padding-right: 40px;
+  }
+
+  .game .game-panel__status p {
+    font-size: 11px;
+  }
+
+  .game .status-meta {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .game .status-meta span:last-child {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Overlays that used to float over the board follow the bands. */
+  .game .turn-toast {
+    top: auto;
+    bottom: calc(var(--hud-bottom) + 60px);
+  }
+
+  .game .presence-bar,
+  .game .draw-offer {
+    top: calc(var(--hud-top) + 48px);
+    bottom: auto;
+    left: 8px;
+    right: 8px;
+    max-width: none;
+    transform: none;
+  }
+
+  .game .spectator-hint {
+    bottom: calc(var(--hud-bottom) + 60px);
+  }
+
+  .game .piece-peek {
+    bottom: calc(var(--hud-bottom) + 60px);
+  }
+}
+
+/* Landscape phones: the strips stay, the cards go back to the corners so
+   the board keeps every vertical pixel. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 560px) {
+  .game .player-card {
+    left: 8px;
+    right: auto;
+    width: 210px;
+    padding: 5px 9px;
+  }
+
+  .game .player-card--black {
+    top: var(--hud-top);
+  }
+
+  .game .player-card--white {
+    bottom: var(--hud-bottom);
+  }
+
+  .game.view-black .player-card--black {
+    top: auto;
+    bottom: var(--hud-bottom);
+  }
+
+  .game.view-black .player-card--white {
+    top: var(--hud-top);
+    bottom: auto;
+  }
+
+  .game .player-card__meta,
+  .game .player-card__captures {
+    display: none;
+  }
+
+  .game .board-controls {
+    left: auto;
+    right: 8px;
+    width: auto;
+    padding: 5px 6px;
+  }
+
+  .game .pill-btn {
+    flex: 0 0 auto;
+    width: 46px;
+    padding: 0;
+  }
+}
+
+
+/* =====================================================================
+   GAME HUD, round three
+   ---------------------------------------------------------------------
+   The right column was a wall: status, invite code, move log, draw and
+   resign, all permanent. It is a sheet now, opened from a tab on the right
+   edge. The two corner cards became one "Players" module, the clock moved
+   next to the room name, and the flip button is gone.
+   ===================================================================== */
+
+.game .players {
+  position: absolute;
+  /* Below the second header row: at 104px the panel sat on top of "back to
+     lobby" and the two lines read as one pile. */
+  top: 156px;
+  left: clamp(18px, 3vw, 46px);
+  width: min(268px, 26vw);
+  min-width: 224px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px 15px 12px;
+  border: 1px solid rgba(201, 161, 93, 0.16);
+  border-radius: 14px;
+  background: rgba(4, 12, 9, 0.6);
+  pointer-events: auto;
+  z-index: 12;
+}
+
+.players__title {
+  margin: 0 0 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Cards are rows inside the module, not floating panels over the board. */
+.game .players .player-card {
+  position: static;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  width: auto;
+  min-width: 0;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.game .players .player-card.is-turn {
+  border-color: rgba(201, 161, 93, 0.34);
+  background: rgba(201, 161, 93, 0.08);
+}
+
+.game .players .player-card__avatar {
+  flex-basis: 32px;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+}
+
+.game .players .player-card__name {
+  font-size: 14.5px;
+  line-height: 1.25;
+}
+
+.game .players .player-card__meta {
+  margin-top: 2px;
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.game .players .player-card__role {
+  display: none;
+}
+
+.game .players .player-card__turn {
+  font-size: 7.5px;
+  padding: 2px 7px;
+}
+
+/* "you" reads as a badge, not a suffix glued to the name. */
+.game .players .player-card.is-you .player-card__name::after {
+  content: attr(data-you-label);
+  margin-left: 6px;
+  padding: 1px 6px 2px;
+  border: 1px solid rgba(201, 161, 93, 0.5);
+  border-radius: 99px;
+  font-family: var(--font-ui);
+  font-size: 7.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+.players__note {
+  margin: 3px 1px 0;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Room name and clock sit together at the top centre. */
+.match-title__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 14px;
+}
+
+.match-clock {
+  font-family: var(--font-ui);
+  font-size: clamp(16px, 1.5vw, 21px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--gold-bright);
+}
+
+.game .status-meta i {
+  display: none;
+}
+
+/* The move log lives behind this tab. */
+.history-tab {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 11px 12px 10px;
+  border: 1px solid rgba(201, 161, 93, 0.26);
+  border-right: 0;
+  border-radius: 12px 0 0 12px;
+  background: rgba(6, 16, 12, 0.92);
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+
+.history-tab:hover {
+  color: var(--gold-bright);
+  background: rgba(12, 26, 20, 0.95);
+}
+
+.history-tab svg {
+  width: 16px;
+  height: 16px;
+}
+
+.game .history-sheet {
+  position: absolute;
+  top: 156px;
+  right: 0;
+  bottom: 24px;
+  width: min(330px, 30vw);
+  min-width: 286px;
+  padding: 20px 18px 16px;
+  border-radius: 16px 0 0 16px;
+  overflow-y: auto;
+  z-index: 40;
+  transform: translateX(calc(100% + 18px));
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.game.is-history-open .history-sheet {
+  transform: none;
+}
+
+/* No scrim: reading the move list must not stop you from moving a piece. */
+.game .game-panel__scrim {
+  display: none;
+}
+
+.game .game-panel__close {
+  display: grid;
+  place-items: center;
+}
+
+@media (pointer: coarse), (max-width: 780px) {
+  .game .players {
+    top: var(--hud-top);
+    left: 8px;
+    right: 8px;
+    width: auto;
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 7px;
+    border-radius: 12px;
+  }
+
+  .game .players .players__title,
+  .game .players__note {
+    display: none;
+  }
+
+  .game .players .player-card {
+    flex: 1 1 0;
+    padding: 4px 7px;
+  }
+
+  .game .history-tab {
+    top: auto;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    transform: none;
+    padding: 10px 9px;
+    border-radius: 12px 0 0 12px;
+  }
+
+  .game .history-tab span {
+    display: none;
+  }
+
+  .game .history-sheet {
+    top: calc(var(--hud-top) + 48px);
+    bottom: var(--hud-bottom);
+    width: min(340px, 88vw);
+    min-width: 0;
+  }
+}
+
+/* --- bigger HUD type -------------------------------------------------- */
+/* Read at arm's length on a laptop, not at 30 cm: everything in the game HUD
+   goes up one step. */
+.game .panel-kicker {
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+}
+
+.game .match-clock {
+  font-size: clamp(19px, 1.8vw, 26px);
+}
+
+.game .game-panel__status h3 {
+  font-size: 25px;
+  line-height: 1.15;
+}
+
+.game .game-panel__status p {
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.game .status-meta {
+  font-size: 11px;
+}
+
+.game .move-pair__san {
+  font-size: 13px;
+}
+
+.game .move-pair__no {
+  font-size: 11px;
+}
+
+.game .move-log__head {
+  font-size: 10px;
+}
+
+.game .pill-btn {
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+}
+
+.game .history-tab {
+  font-size: 10.5px;
+}
+
+.game .text-btn {
+  font-size: 10.5px;
+}
+
+.game .turn-pill {
+  font-size: 9.5px;
+}
+
+.game .action-btn {
+  font-size: 10.5px;
+}
+
+.game .players__title {
+  font-size: 10px;
+}
+
+.game .players .player-card__name {
+  font-size: 15.5px;
+}
+
+.game .players .player-card__meta {
+  font-size: 9.5px;
+}
+
+.game .players__note {
+  font-size: 9.5px;
+}
+/* --- round four: neutral history, wider players, right-hand controls --- */
+.game .history-sheet {
+  width: min(360px, 32vw);
+  /* Neutral smoked glass instead of the green wash the panel used to have. */
+  background: rgba(13, 15, 17, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.game .players {
+  width: min(296px, 28vw);
+  min-width: 248px;
+}
+
+.game .players .player-card__clock {
+  margin-left: auto;
+  padding-left: 8px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--ivory);
+}
+
+.game .players .player-card.is-turn .player-card__clock {
+  color: var(--gold-bright);
+}
+
+/* Controls moved to the right and grew a step. */
+.game .board-controls {
+  left: auto;
+  right: clamp(18px, 3vw, 46px);
+  gap: 8px;
+  padding: 6px;
+}
+
+.game .pill-btn {
+  min-height: 42px;
+  padding: 0 16px;
+  font-size: 11.5px;
+}
+
+.game .pill-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.pill-btn--danger {
+  border-color: rgba(214, 106, 88, 0.32);
+  color: #e0a196;
+}
+
+.pill-btn--danger:hover {
+  border-color: rgba(214, 106, 88, 0.6);
+  color: #ffb9ab;
+  background: rgba(214, 106, 88, 0.1);
+}
+
+.pill-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* The piece badge sits at the very bottom, under the board, not across it. */
+.piece-peek {
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  max-width: min(320px, 70vw);
+}
+/* --- the players module, readable at last ----------------------------- */
+.game .players {
+  width: min(344px, 30vw);
+  min-width: 296px;
+  gap: 10px;
+  padding: 16px 17px 14px;
+  border-radius: 16px;
+}
+
+.game .players__title {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+}
+
+.game .players .player-card {
+  gap: 12px;
+  padding: 11px 12px;
+  border-radius: 12px;
+}
+
+.game .players .player-card__avatar {
+  flex-basis: 38px;
+  width: 38px;
+  height: 38px;
+  font-size: 21px;
+}
+
+.game .players .player-card__name {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.game .players .player-card__meta {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.game .players .player-card__clock {
+  font-size: 15px;
+}
+
+.game .players .player-card__turn {
+  font-size: 8.5px;
+  padding: 2px 8px;
+}
+
+.game .players__note {
+  font-size: 10.5px;
+}
+
+/* The lobby already has "how to play"; the question mark stays only in a game. */
+body:not(.in-game) #helpBtn {
+  display: none;
 }

@@ -6,10 +6,12 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { createPiece, pieceGlyph } from './pieces.js?v=20261028-24';
+import { createPiece, pieceGlyph } from './pieces.js?v=20261029-2';
 
 const FILES = 'abcdefgh';
-const PIECE_Y = 0.105;
+// The board tiles finish at y = 0.0795. Pieces used to stand at 0.105 — a
+// visible float once the contact shadow was added, so they sit on the wood now.
+const PIECE_Y = 0.085;
 const TAU = Math.PI * 2;
 const TRAIL_POINTS = 25;
 
@@ -143,21 +145,35 @@ function marbleTexture({ base, vein, fleck, seed = 7, dark = false }) {
   return texture;
 }
 
-function labelTexture(text) {
+/**
+ * One atlas for all sixteen board marks. The old code built a 128×128 canvas,
+ * a texture and a material *per label*: 32 textures, 32 programs, 32 draw calls
+ * and ~2 MB of VRAM for eight letters and eight digits.
+ */
+function labelAtlas() {
+  const cell = 128;
+  const cols = 8;
+  const rows = 2;
   const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 128;
+  canvas.width = cell * cols;
+  canvas.height = cell * rows;
   const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, 128, 128);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = 'rgba(218,184,119,.82)';
   ctx.font = '500 62px Georgia, serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, 64, 67);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  return tex;
+  for (let i = 0; i < 8; i += 1) {
+    ctx.fillText(FILES[i], i * cell + cell / 2, cell / 2 + 3);
+    ctx.fillText(String(i + 1), i * cell + cell / 2, cell + cell / 2 + 3);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  // No mipmaps: at 26 px a mip level would smear one glyph into its neighbour.
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
+  return texture;
 }
 
 function radialTexture(inner = 'rgba(230,196,124,.34)', outer = 'rgba(0,0,0,0)') {
@@ -237,7 +253,7 @@ export class ChessScene {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.74;
+    this.renderer.toneMappingExposure = 0.8;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setClearColor(0x050c09, 0);
@@ -321,23 +337,115 @@ export class ChessScene {
   }
 
   #fitDistance() {
+    const { w, h, freeW, freeH } = this.#freeBox();
+    const fov = this.camera.fov || 36;
     const aspect = this.camera.aspect || 1;
+    const tanHalf = Math.tan((fov * Math.PI) / 360);
+    // How much of the frame the HUD leaves free, in normalised device units.
+    const xLimit = clamp(freeW / w, 0.4, 1);
+    const yLimit = clamp(freeH / h, 0.4, 1);
+
+    // Flat estimate first, then measure the real corners. A tilted board is not
+    // a flat billboard: its near edge is a few units closer to the lens, so it
+    // projects wider than the distance-to-target maths suggests — that is how a
+    // portrait phone ended up with the board hanging over both edges.
+    let distance = clamp(
+      Math.max(5.05 / (tanHalf * aspect * xLimit), 5.05 / (tanHalf * yLimit)),
+      7.8,
+      46,
+    );
+
+    const probe = new THREE.PerspectiveCamera(fov, aspect, 0.1, 200);
+    const dir =
+      this.viewSide === 'b'
+        ? new THREE.Vector3(-0.02, 0.92, -0.72).normalize()
+        : new THREE.Vector3(0.02, 0.92, 0.72).normalize();
+    const target = this.#boardTarget(this.viewSide);
+    const corners = [];
+    for (const x of [-4.92, 4.92]) {
+      for (const z of [-4.92, 4.92]) {
+        for (const y of [-0.3, 2.05]) corners.push(new THREE.Vector3(x, y, z));
+      }
+    }
+
+    for (let pass = 0; pass < 3; pass += 1) {
+      probe.position.copy(dir).multiplyScalar(distance);
+      probe.lookAt(target);
+      probe.updateMatrixWorld(true);
+      probe.updateProjectionMatrix();
+      let worst = 1;
+      for (const corner of corners) {
+        const projected = corner.clone().project(probe);
+        worst = Math.max(worst, Math.abs(projected.x) / xLimit, Math.abs(projected.y) / yLimit);
+      }
+      distance *= worst * 1.02;
+    }
+    return clamp(distance, 7.8, 60);
+  }
+
+  /**
+   * The HUD tells the camera how much room it has left. Two ideas keep this
+   * honest: the distance grows so the board fits between the strips, and the
+   * camera slides along its own up vector (target included) so the board sits in
+   * the middle of that gap without changing the perspective by a degree.
+   */
+  setHudInsets({ top = 0, bottom = 0, left = 0, right = 0 } = {}) {
+    const next = { top, bottom, left, right };
+    const prev = this.hudInsets || { top: 0, bottom: 0, left: 0, right: 0 };
+    const changed = ['top', 'bottom', 'left', 'right'].some((key) => Math.abs(next[key] - prev[key]) > 1.5);
+    this.hudInsets = next;
+    if (!changed) return;
+    this.#applyFraming();
+    if (this.cameraTween) return;
+    if (this.mode === 'game' && !this.topViewActive) {
+      this.#placeCamera(this.#sidePosition(this.viewSide), this.#boardTarget(this.viewSide));
+    }
+  }
+
+  #freeBox() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const insets = this.hudInsets || { top: 0, bottom: 0, left: 0, right: 0 };
+    return {
+      w,
+      h,
+      freeW: Math.max(w * 0.5, w - insets.left - insets.right),
+      freeH: Math.max(h * 0.4, h - insets.top - insets.bottom),
+    };
+  }
+
+  #hudShift(toPos, toTarget) {
+    const insets = this.hudInsets || { top: 0, bottom: 0 };
+    const h = window.innerHeight || 1;
+    const freeTop = clamp(insets.top, 0, h);
+    const freeBottom = h - clamp(insets.bottom, 0, h);
+    const ndc = 1 - (2 * ((freeTop + freeBottom) * 0.5)) / h;
+    if (Math.abs(ndc) < 1e-3) return new THREE.Vector3();
+    const distance = toPos.distanceTo(toTarget);
     const halfFov = ((this.camera.fov || 36) * Math.PI) / 360;
-    const byWidth = 6.7 / (Math.tan(halfFov) * Math.min(aspect, 2.2));
-    const span = window.innerHeight <= 520 ? 10.2 : 9.2;
-    const byDepth = span / (2 * Math.tan(halfFov));
-    return clamp(Math.max(byWidth, byDepth), 7.8, 42);
+    const shift = -ndc * distance * Math.tan(halfFov);
+    const look = new THREE.Matrix4().lookAt(toPos, toTarget, new THREE.Vector3(0, 1, 0));
+    const up = new THREE.Vector3(0, 1, 0).applyMatrix4(new THREE.Matrix4().extractRotation(look));
+    return up.multiplyScalar(shift);
+  }
+
+  #placeCamera(position, target) {
+    const shift = this.#hudShift(position, target);
+    this.controls.target.copy(target).add(shift);
+    this.camera.position.copy(position).add(shift);
+    this.controls.update();
   }
 
   #applyFraming() {
     this.fitDistance = this.#fitDistance();
-    this.controls.minDistance = Math.max(6, this.fitDistance * 0.62);
-    // Free to pull back a long way: the camera rides high above the thrones, so a
-    // wide shot shows the whole hall without a chair in the way.
-    this.controls.maxDistance = Math.min(this.fitDistance * 2.4, 24);
+    // The limits have to contain the fit distance itself, otherwise OrbitControls
+    // clamps the camera on its very first update and the board is cropped — a
+    // portrait phone needs a distance of ~27 units, which the old cap of 24 cut.
+    this.controls.minDistance = Math.max(5, this.fitDistance * 0.55);
+    this.controls.maxDistance = Math.max(this.fitDistance * 1.6, 24);
     // The haze is a look, not a ruler: a phone pulls the camera back, so the
     // density follows, otherwise the board would drown in fog.
-    if (this.scene.fog) this.scene.fog.density = 0.019 * clamp(13.4 / this.fitDistance, 0.42, 1);
+    if (this.scene.fog) this.scene.fog.density = 0.0155 * clamp(13.4 / this.fitDistance, 0.42, 1);
   }
 
   #lobbyPosition() {
@@ -404,8 +512,9 @@ export class ChessScene {
       this.particleFree.push(mesh);
     }
 
-    // One compile now, instead of one shader per effect on the player's first move.
-    this.renderer.compile(this.scene, this.camera);
+    // The programs are warmed by precompile(), which the app calls after the
+    // starting position exists: compiling here meant the pieces (built a moment
+    // later) still paid for their programs on the first visible frame.
 
     for (const item of [...this.shardFree, ...this.rippleFree, ...this.flareFree, ...this.glowFree, ...this.trailFree]) {
       item.mesh.visible = false;
@@ -427,9 +536,11 @@ export class ChessScene {
   #setupLights() {
     // The hall is lit by candles: a low cold wash so shapes exist, warm pools
     // on the table, and only as much key light as the board needs to be read.
-    this.scene.add(new THREE.HemisphereLight(0x6d8494, 0x040806, 0.2));
+    // The wash carries a little more weight than before: the black set needs
+    // *some* diffuse term or the pieces read as holes in the board.
+    this.scene.add(new THREE.HemisphereLight(0x7c93a6, 0x0a1410, 0.34));
 
-    const key = new THREE.SpotLight(0xffd2a0, 120, 30, 0.62, 0.88, 2);
+    const key = new THREE.SpotLight(0xffd7ab, 96, 30, 0.66, 0.88, 2);
     key.position.set(-2.2, 11.8, 5.4);
     key.target.position.set(0, 0, 0);
     key.castShadow = true;
@@ -445,17 +556,19 @@ export class ChessScene {
     // A broad overhead shaft straight down on the table: the pool that makes the
     // board readable from a low camera. No cone mesh - it read as a curtain - and
     // no shadow map: the key already casts the only shadow in the room.
-    const shaft = new THREE.SpotLight(0xfff0d2, 85, 34, 0.56, 0.95, 2);
+    const shaft = new THREE.SpotLight(0xfff0d2, 72, 34, 0.56, 0.95, 2);
     shaft.position.set(0.4, 15.6, 1.2);
     shaft.target.position.set(0, 0, 0);
     this.scene.add(shaft, shaft.target);
 
-    const rim = new THREE.SpotLight(0x6f94a6, 18, 28, 0.82, 0.9, 2);
+    // A cool rim from behind and the side: this is what actually separates the
+    // graphite pieces from the dark squares on a phone screen.
+    const rim = new THREE.SpotLight(0x86a8bd, 34, 28, 0.86, 0.9, 2);
     rim.position.set(8.5, 7.6, -7);
     rim.target.position.set(0, 0.2, 0);
     this.scene.add(rim, rim.target);
 
-    const fill = new THREE.PointLight(0xffa860, 3.5, 18, 2);
+    const fill = new THREE.PointLight(0xffb37a, 7, 18, 2);
     fill.position.set(-8.6, 1.8, 3.4);
     this.scene.add(fill);
 
@@ -464,7 +577,7 @@ export class ChessScene {
     this.candleLights = [];
     for (const cx of [-6.9, 6.9]) {
       for (const cz of [-6.5, 6.5]) {
-        const pool = new THREE.PointLight(0xffab5c, 16, 13, 2);
+        const pool = new THREE.PointLight(0xffab5c, 12, 13, 2);
         pool.position.set(cx, 1.15, cz);
         this.scene.add(pool);
         this.candleLights.push(pool);
@@ -474,7 +587,7 @@ export class ChessScene {
     // table, but low enough that the hall stays a dark cathedral.
     this.libraryLights = [];
     for (const [lx, lz] of [[16, 16], [-16, -16]]) {
-      const wash = new THREE.PointLight(0xffb066, 50, 34, 2);
+      const wash = new THREE.PointLight(0xffb066, 40, 34, 2);
       wash.position.set(lx, 10.5, lz);
       this.scene.add(wash);
       this.libraryLights.push(wash);
@@ -482,14 +595,17 @@ export class ChessScene {
   }
 
   #buildBoard() {
+    // Slightly deeper than before on both sides: ivory pieces were landing on
+    // cream squares with almost no value difference, and the black set needed
+    // the dark squares lifted so it stops merging with them.
     const lightTex = marbleTexture({
-      base: '#e9dfc7',
-      vein: '#988a70',
+      base: '#e2d7bd',
+      vein: '#94866c',
       fleck: 'rgba(255,248,223,.7)',
       seed: 11,
     });
     const darkTex = marbleTexture({
-      base: '#103c2e',
+      base: '#15463a',
       vein: '#04130e',
       fleck: 'rgba(174,218,187,.35)',
       seed: 31,
@@ -572,42 +688,51 @@ export class ChessScene {
     innerFrame.receiveShadow = true;
     this.boardGroup.add(innerFrame);
 
-    const squareGeometry = new RoundedBoxGeometry(0.965, 0.065, 0.965, 3, 0.018);
+    // 64 tiles were 64 draw calls for two materials. They never move, so they
+    // bake into two meshes; the rounded bevel survives the merge.
+    const lightTiles = [];
+    const darkTiles = [];
     for (let rank = 1; rank <= 8; rank += 1) {
       for (let file = 0; file < 8; file += 1) {
-        const light = (file + rank) % 2 === 0;
-        const tile = new THREE.Mesh(squareGeometry, light ? lightMat : darkMat);
-        tile.position.set(file - 3.5, 0.047, 3.5 - (rank - 1));
-        tile.receiveShadow = true;
-        this.boardGroup.add(tile);
+        const tile = dressed(new RoundedBoxGeometry(0.965, 0.065, 0.965, 3, 0.018), [
+          file - 3.5,
+          0.047,
+          3.5 - (rank - 1),
+        ]);
+        ((file + rank) % 2 === 0 ? lightTiles : darkTiles).push(tile);
       }
     }
-
-    // Thin brass separators around the playing field.
-    for (const offset of [-4.08, 4.08]) {
-      const h = new THREE.Mesh(new THREE.BoxGeometry(8.18, 0.018, 0.028), brass);
-      h.position.set(0, 0.084, offset);
-      this.boardGroup.add(h);
-      const v = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.018, 8.18), brass);
-      v.position.set(offset, 0.084, 0);
-      this.boardGroup.add(v);
+    for (const [tiles, material] of [
+      [lightTiles, lightMat],
+      [darkTiles, darkMat],
+    ]) {
+      const mesh = new THREE.Mesh(mergeAll(tiles), material);
+      mesh.receiveShadow = true;
+      this.boardGroup.add(mesh);
     }
 
-    // Engraved corner ornaments.
+    // Thin brass separators around the playing field, plus the engraved corner
+    // ornaments: one brass mesh for all four sides and all four arcs.
+    const brassTrim = [];
+    const brassDots = [];
+    for (const offset of [-4.08, 4.08]) {
+      brassTrim.push(dressed(new THREE.BoxGeometry(8.18, 0.018, 0.028), [0, 0.084, offset]));
+      brassTrim.push(dressed(new THREE.BoxGeometry(0.028, 0.018, 8.18), [offset, 0.084, 0]));
+    }
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        const ornament = new THREE.Group();
-        const arc = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.012, 6, 24, Math.PI / 2), brass);
-        arc.rotation.x = Math.PI / 2;
-        arc.rotation.z = sx * sz > 0 ? Math.PI : Math.PI / 2;
-        arc.position.set(sx * 4.22, 0.083, sz * 4.22);
-        ornament.add(arc);
-        const dot = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8), brassDim);
-        dot.position.set(sx * 4.39, 0.087, sz * 4.39);
-        ornament.add(dot);
-        this.boardGroup.add(ornament);
+        brassTrim.push(
+          dressed(
+            new THREE.TorusGeometry(0.27, 0.012, 6, 24, Math.PI / 2),
+            [sx * 4.22, 0.083, sz * 4.22],
+            [Math.PI / 2, 0, sx * sz > 0 ? Math.PI : Math.PI / 2],
+          ),
+        );
+        brassDots.push(dressed(new THREE.SphereGeometry(0.035, 12, 8), [sx * 4.39, 0.087, sz * 4.39]));
       }
     }
+    this.boardGroup.add(new THREE.Mesh(mergeAll(brassTrim), brass));
+    this.boardGroup.add(new THREE.Mesh(mergeAll(brassDots), brassDim));
 
     this.#buildLabels();
     this.#buildTable();
@@ -623,43 +748,38 @@ export class ChessScene {
   }
 
   #buildLabels() {
-    const labelGroup = new THREE.Group();
-    const mat = (text) =>
-      new THREE.MeshBasicMaterial({
-        map: labelTexture(text),
-        transparent: true,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        toneMapped: false,
-      });
-    const geom = new THREE.PlaneGeometry(0.45, 0.45);
+    const material = new THREE.MeshBasicMaterial({
+      map: labelAtlas(),
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+    const quad = new THREE.PlaneGeometry(0.45, 0.45);
+    const parts = [];
+    // The atlas holds letters on the top row and digits on the bottom one.
+    const add = (col, row, position, rotation) => {
+      const geometry = quad.clone();
+      const uv = geometry.attributes.uv;
+      for (let i = 0; i < uv.count; i += 1) {
+        uv.setXY(i, (col + uv.getX(i)) / 8, 1 - (row + 1) / 2 + uv.getY(i) / 2);
+      }
+      parts.push(dressed(geometry, position, rotation));
+    };
 
     for (let i = 0; i < 8; i += 1) {
-      const letter = FILES[i];
       const x = i - 3.5;
-      for (const [z, rot] of [
-        [4.47, 0],
-        [-4.47, Math.PI],
-      ]) {
-        const m = new THREE.Mesh(geom, mat(letter));
-        m.rotation.set(-Math.PI / 2, 0, rot);
-        m.position.set(x, 0.086, z);
-        labelGroup.add(m);
-      }
+      add(i, 0, [x, 0.086, 4.47], [-Math.PI / 2, 0, 0]);
+      add(i, 0, [x, 0.086, -4.47], [-Math.PI / 2, 0, Math.PI]);
     }
     for (let rank = 1; rank <= 8; rank += 1) {
       const z = 3.5 - (rank - 1);
-      for (const [x, rot] of [
-        [-4.47, -Math.PI / 2],
-        [4.47, Math.PI / 2],
-      ]) {
-        const m = new THREE.Mesh(geom, mat(String(rank)));
-        m.rotation.set(-Math.PI / 2, 0, rot);
-        m.position.set(x, 0.086, z);
-        labelGroup.add(m);
-      }
+      add(rank - 1, 1, [-4.47, 0.086, z], [-Math.PI / 2, 0, -Math.PI / 2]);
+      add(rank - 1, 1, [4.47, 0.086, z], [-Math.PI / 2, 0, Math.PI / 2]);
     }
-    this.boardGroup.add(labelGroup);
+
+    const mesh = new THREE.Mesh(mergeAll(parts), material);
+    this.boardGroup.add(mesh);
   }
 
   #buildTable() {
@@ -1184,7 +1304,15 @@ export class ChessScene {
     this.lastMoveGroup = new THREE.Group();
     this.checkGroup = new THREE.Group();
     this.hintGroup = new THREE.Group();
-    this.scene.add(this.selectionGroup, this.legalGroup, this.lastMoveGroup, this.checkGroup, this.hintGroup);
+    this.peekGroup = new THREE.Group();
+    this.scene.add(
+      this.selectionGroup,
+      this.legalGroup,
+      this.lastMoveGroup,
+      this.checkGroup,
+      this.hintGroup,
+      this.peekGroup,
+    );
 
     this.hoverRing = new THREE.Mesh(
       new THREE.RingGeometry(0.38, 0.43, 48),
@@ -1266,9 +1394,7 @@ export class ChessScene {
     this.renderer.setSize(w, h);
     this.composer?.setSize(w, h);
     if (changed && this.mode === 'game' && !this.topViewActive && !this.cameraTween) {
-      this.camera.position.copy(this.#sidePosition(this.viewSide));
-      this.controls.target.set(0, 0.42, 0);
-      this.controls.update();
+      this.#placeCamera(this.#sidePosition(this.viewSide), this.#boardTarget(this.viewSide));
     }
   }
 
@@ -1282,12 +1408,26 @@ export class ChessScene {
       this.#animateCamera(this.#lobbyPosition(), new THREE.Vector3(0, 0.55, 0), 1.8);
     } else {
       this.controls.autoRotate = false;
-      this.#animateCamera(this.#sidePosition(this.viewSide), new THREE.Vector3(0, 0.42, 0), 1.4);
+      this.#animateCamera(this.#sidePosition(this.viewSide), this.#boardTarget(this.viewSide), 1.4);
     }
   }
 
+  /**
+   * What the camera aims at. The old target sat 0.42 above the surface and dead
+   * centre, so bringing the camera in cropped the near ranks first while the far
+   * end stayed in frame. Aiming lower and slightly towards the player keeps both
+   * of your own rows visible at every zoom level.
+   */
+  #boardTarget(side) {
+    const z = side === 'b' ? -0.45 : 0.45;
+    return new THREE.Vector3(0, 0.24, z);
+  }
+
   #sidePosition(side) {
-    const dir = side === 'b' ? new THREE.Vector3(-0.03, 0.58, -0.81) : new THREE.Vector3(0.03, 0.58, 0.81);
+    // 52 degrees above the horizon. The old 36 was a "cinematic" angle that
+    // stacked the far pieces on top of each other and made every silhouette a
+    // smudge; chess is read from above, so the camera has to sit higher.
+    const dir = side === 'b' ? new THREE.Vector3(-0.02, 0.92, -0.72) : new THREE.Vector3(0.02, 0.92, 0.72);
     return dir.normalize().multiplyScalar(this.fitDistance || this.#fitDistance());
   }
 
@@ -1312,12 +1452,8 @@ export class ChessScene {
     this.topViewActive = false;
     if (this.mode !== 'game') return;
     this.controls.autoRotate = false;
-    if (animate) this.#animateCamera(this.#sidePosition(this.viewSide), new THREE.Vector3(0, 0.42, 0), 1.35);
-    else {
-      this.camera.position.copy(this.#sidePosition(this.viewSide));
-      this.controls.target.set(0, 0.42, 0);
-      this.controls.update();
-    }
+    if (animate) this.#animateCamera(this.#sidePosition(this.viewSide), this.#boardTarget(this.viewSide), 1.35);
+    else this.#placeCamera(this.#sidePosition(this.viewSide), this.#boardTarget(this.viewSide));
   }
 
   flipView() {
@@ -1355,13 +1491,15 @@ export class ChessScene {
   }
 
   #animateCamera(toPos, toTarget, duration) {
+    const target = toTarget.clone();
+    const shift = this.#hudShift(toPos.clone(), target);
     this.cameraTween = {
       t: 0,
       duration,
       fromPos: this.camera.position.clone(),
-      toPos: toPos.clone(),
+      toPos: toPos.clone().add(shift),
       fromTarget: this.controls.target.clone(),
-      toTarget: toTarget.clone(),
+      toTarget: target.add(shift),
     };
     this.controls.enabled = false;
   }
@@ -1377,6 +1515,7 @@ export class ChessScene {
 
   /* ---------------------------------------------------------- position */
   setPosition(fen, { animate = false, lastMove = null, initial = false, duration = 0.42 } = {}) {
+    this.lastFen = fen;
     const nextBoard = parseFen(fen);
     if (!this.pieces.size || initial) {
       this.#rebuild(nextBoard, { drop: true });
@@ -1522,6 +1661,8 @@ export class ChessScene {
       if (this.pieces.has(square)) continue;
       const group = createPiece(piece.type, piece.color);
       group.position.copy(squarePos(square));
+      // Knights face the opponent, straight down the board: a yaw offset made
+      // the sculpt look like it had been put down in the wrong direction.
       group.rotation.y = piece.type === 'n' ? (piece.color === 'w' ? Math.PI : 0) : 0;
       group.userData.square = square;
       this.boardGroup.add(group);
@@ -1544,6 +1685,16 @@ export class ChessScene {
     for (const group of this.pieces.values()) this.boardGroup.remove(group);
     this.pieces.clear();
     this.#clearSelection();
+  }
+
+  /**
+   * Rebuild the pieces from the current position. Used when an asset that shapes
+   * a piece finishes loading after the board is already on screen.
+   */
+  refreshPieces() {
+    if (!this.lastFen) return;
+    this.clearBoard();
+    this.setPosition(this.lastFen, { initial: true });
   }
 
   /* ------------------------------------------------------------ markers */
@@ -1588,6 +1739,16 @@ export class ChessScene {
       lastGlowB: { geometry: glowGeometry, material: additive(0x72b596, 0.13) },
       lastBorderW: { geometry: borderGeometry, material: border(0xefd196) },
       lastBorderB: { geometry: borderGeometry, material: border(0x8bd0ac) },
+      // Shared marker assets. Creating a material inside setCheck/setHint meant
+      // a shader release and rebuild on every check and every hint.
+      checkRing: { geometry: new THREE.TorusGeometry(0.41, 0.03, 8, 40), material: additive(0xff6b57, 0.9) },
+      hintFrom: { geometry: new THREE.TorusGeometry(0.4, 0.022, 8, 36), material: additive(0x8cd9b2, 0.9) },
+      hintTo: { geometry: new THREE.TorusGeometry(0.4, 0.022, 8, 36), material: additive(0xf1cd84, 0.9) },
+      hintShaft: {
+        geometry: new THREE.CylinderGeometry(0.018, 0.018, 1, 8),
+        material: additive(0xe7c98d, 0.6),
+      },
+      peek: { geometry: new THREE.TorusGeometry(0.43, 0.026, 8, 40), material: additive(0xe6d2a4, 0.85) },
     };
     return this.markers;
   }
@@ -1647,22 +1808,15 @@ export class ChessScene {
   }
 
   setCheck(square) {
-    this.#clearGroup(this.checkGroup);
+    // Cached assets: the group is emptied, never disposed.
+    this.#clearGroup(this.checkGroup, false);
     if (!this.checkGlow) this.checkGlow = this.#makeGlow();
     if (!square) {
       this.checkGlow.mesh.visible = false;
       return;
     }
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.41, 0.03, 10, 48),
-      new THREE.MeshBasicMaterial({
-        color: 0xff6b57,
-        transparent: true,
-        opacity: 0.9,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
-    );
+    const assets = this.#markerAssets();
+    const ring = new THREE.Mesh(assets.checkRing.geometry, assets.checkRing.material);
     ring.rotation.x = -Math.PI / 2;
     ring.position.copy(squarePos(square, 0.094));
     this.checkGroup.add(ring);
@@ -1673,24 +1827,64 @@ export class ChessScene {
     this.checkGlow.mesh.visible = true;
   }
 
+  /**
+   * A ring that says "this is the piece you just asked about". Used by the HUD
+   * piece badge, so a beginner can connect the name to the piece on the board.
+   */
+  pulseSquare(square, duration = 1800) {
+    this.#clearGroup(this.peekGroup, false);
+    if (!square) return;
+    const assets = this.#markerAssets();
+    const ring = new THREE.Mesh(assets.peek.geometry, assets.peek.material);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.copy(squarePos(square, 0.094));
+    ring.userData.bornAt = this.time;
+    this.peekGroup.add(ring);
+    this.peekUntil = this.time + duration / 1000;
+  }
+
+  /** Screen position of the top of a piece, for HUD labels pinned to the board. */
+  projectSquare(square, lift = 0.16) {
+    const piece = this.pieces.get(square);
+    const height = piece?.userData.height || 0.9;
+    const point = squarePos(square, PIECE_Y + height + lift).project(this.camera);
+    return {
+      x: (point.x * 0.5 + 0.5) * window.innerWidth,
+      y: (-point.y * 0.5 + 0.5) * window.innerHeight,
+      visible: point.z < 1 && Math.abs(point.x) < 1.15 && Math.abs(point.y) < 1.15,
+    };
+  }
+
+  /**
+   * Warm every program in the scene. This must run *after* the pieces exist:
+   * the old call sat in #warmEffects, before the board was built, so the six
+   * piece programs still compiled on the first real frame.
+   */
+  precompile() {
+    const done = () => {
+      this.precompiled = true;
+    };
+    if (this.renderer.compileAsync) {
+      this.renderer
+        .compileAsync(this.scene, this.camera)
+        .then(done)
+        .catch(done);
+      return;
+    }
+    this.renderer.compile(this.scene, this.camera);
+    done();
+  }
+
   setHint(move, duration = 4200) {
     clearTimeout(this.hintTimer);
-    this.#clearGroup(this.hintGroup);
+    this.#clearGroup(this.hintGroup, false);
     if (!move?.from || !move?.to) return;
-    for (const [square, color] of [
-      [move.from, 0x8cd9b2],
-      [move.to, 0xf1cd84],
+    const assets = this.#markerAssets();
+    for (const [square, asset] of [
+      [move.from, assets.hintFrom],
+      [move.to, assets.hintTo],
     ]) {
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.4, 0.022, 8, 48),
-        new THREE.MeshBasicMaterial({
-          color,
-          transparent: true,
-          opacity: 0.9,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-        }),
-      );
+      const ring = new THREE.Mesh(asset.geometry, asset.material);
       ring.rotation.x = -Math.PI / 2;
       ring.position.copy(squarePos(square, 0.096));
       ring.userData.baseOpacity = 0.9;
@@ -1701,21 +1895,13 @@ export class ChessScene {
     const dir = b.clone().sub(a);
     const len = dir.length();
     const mid = a.clone().add(b).multiplyScalar(0.5);
-    const shaft = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.018, 0.018, len, 8),
-      new THREE.MeshBasicMaterial({
-        color: 0xe7c98d,
-        transparent: true,
-        opacity: 0.6,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
-    );
+    const shaft = new THREE.Mesh(assets.hintShaft.geometry, assets.hintShaft.material);
     shaft.position.copy(mid);
-    shaft.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+    shaft.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+    shaft.scale.set(1, Math.max(len, 0.001), 1);
     shaft.userData.baseOpacity = 0.6;
     this.hintGroup.add(shaft);
-    this.hintTimer = setTimeout(() => this.#clearGroup(this.hintGroup), duration);
+    this.hintTimer = setTimeout(() => this.#clearGroup(this.hintGroup, false), duration);
   }
 
   #makeTrail() {
@@ -2235,6 +2421,15 @@ export class ChessScene {
       const ring = this.checkGroup.children[0];
       const pulse = 1 + Math.sin(this.time * 4.4) * 0.06;
       ring.scale.setScalar(pulse);
+    }
+    if (this.peekGroup.children.length) {
+      const ring = this.peekGroup.children[0];
+      const born = ring.userData.bornAt || 0;
+      const grow = clamp((this.time - born) / 0.3, 0, 1);
+      const fade = clamp((this.peekUntil - this.time) / 0.45, 0, 1);
+      ring.scale.setScalar(0.86 + grow * 0.22 + Math.sin(this.time * 5) * 0.03);
+      ring.material.opacity = 0.85 * fade;
+      if (this.time > this.peekUntil) this.#clearGroup(this.peekGroup, false);
     }
   }
 

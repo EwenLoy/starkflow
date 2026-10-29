@@ -1,4 +1,4 @@
-import { chooseBotMove } from './engine.js?v=20261028-14';
+import { chooseBotMove } from './engine.js?v=20261029-1';
 
 self.onmessage = (event) => {
   const { id, fen, level } = event.data || {};

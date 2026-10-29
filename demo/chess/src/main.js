@@ -1,10 +1,11 @@
-import { ChessScene } from './scene.js?v=20261028-24';
-import { StarkFlowClient } from './net.js?v=20261028-14';
-import { ChessSession, START_FEN } from './session.js?v=20261028-14';
-import { ChessAudio } from './audio.js?v=20261028-14';
-import { chooseBotMove, findHint, openingName } from './engine.js?v=20261028-14';
-import { pieceGlyph } from './pieces.js?v=20261028-24';
-import { LocalNet } from './offline.js?v=20261028-14';
+import { ChessScene } from './scene.js?v=20261029-2';
+import { StarkFlowClient } from './net.js?v=20261029-1';
+import { ChessSession, START_FEN } from './session.js?v=20261029-1';
+import { ChessAudio } from './audio.js?v=20261029-1';
+import { chooseBotMove, findHint, openingName } from './engine.js?v=20261029-1';
+import { pieceGlyph, setSculpt } from './pieces.js?v=20261029-2';
+import { loadGlb } from './glb.js?v=20261029-2';
+import { LocalNet } from './offline.js?v=20261029-1';
 import {
   applyTranslations,
   getLocale,
@@ -12,9 +13,9 @@ import {
   pluralRu,
   setLocale,
   t,
-} from './i18n.js?v=20261028-14';
+} from './i18n.js?v=20261029-1';
 
-import { WS_URL } from './env.js?v=20261028-16';
+import { WS_URL } from './env.js?v=20261029-1';
 
 const CONFIG = {
   // The working node is never in the repository: `env.js` is rewritten during
@@ -159,6 +160,34 @@ class SalonApp {
     this.scene = new ChessScene($('scene'));
     this.scene.setPosition(START_FEN, { initial: true });
     this.scene.setMode('lobby');
+    // Warm the programs once every piece exists, off the critical path.
+    this.scene.precompile();
+    // Sculpts arrive after the first frame: the board stays playable and swaps
+    // the pieces it has models for, keeping the turned version for the rest.
+    const sculpts = [
+      ['./assets/pawn.glb', 'p'],
+      ['./assets/knight.glb', 'n'],
+      ['./assets/bishop.glb', 'b'],
+      ['./assets/rook.glb', 'r'],
+      ['./assets/queen.glb', 'q'],
+      ['./assets/king.glb', 'k'],
+    ];
+    Promise.allSettled(
+      sculpts.map(([url, type]) =>
+        loadGlb(url, { textures: false }).then((model) => {
+          setSculpt(type, model);
+          return type;
+        }),
+      ),
+    ).then((results) => {
+      const loaded = results.filter((result) => result.status === 'fulfilled');
+      for (const result of results) {
+        if (result.status === 'rejected') console.warn('[ornate] sculpt skipped:', result.reason?.message);
+      }
+      if (!loaded.length) return;
+      this.scene.refreshPieces();
+      this.scene.precompile();
+    });
 
     this.directRoom = new URLSearchParams(location.search).get('room') || '';
     this.triedDirect = false;
@@ -211,6 +240,10 @@ class SalonApp {
     this.offlineSession = null;
     this.botSetupLevel = 'medium';
     this.botSetupColor = 'w';
+    this.peekTimer = null;
+    this.labelNodes = new Map();
+    this.labelFrame = 0;
+    this.insets = null;
 
     this.bindUi();
     this.bindNet();
@@ -445,7 +478,7 @@ class SalonApp {
     });
     $('helpBtn').addEventListener('click', () => this.openHelp());
     $('howBtn').addEventListener('click', () => this.openHelp());
-    $('fullscreenBtn').addEventListener('click', () => this.toggleFullscreen());
+    $('fullscreenBtn')?.addEventListener('click', () => this.toggleFullscreen());
     $('netPill').addEventListener('click', () => {
       if (!this.net.connected) this.net.manualRetry();
     });
@@ -453,13 +486,15 @@ class SalonApp {
     $('brandBtn').addEventListener('click', () => {
       if (this.gnet.room) this.confirmLeave();
     });
-    $('copyBtn').addEventListener('click', () => this.copyInvite());
     $('inviteBtn').addEventListener('click', () => this.copyInvite());
     $('topViewBtn').addEventListener('click', () => this.scene.topView());
-    $('flipBtn').addEventListener('click', () => this.scene.flipView());
+    $('flipBtn')?.addEventListener('click', () => this.scene.flipView());
     $('hintBtn').addEventListener('click', () => this.giveHint());
-    $('drawBtn').addEventListener('click', () => this.askDraw());
-    $('resignBtn').addEventListener('click', () => this.confirmResign());
+    $('historyBtn')?.addEventListener('click', () => this.togglePanel());
+    $('panelClose')?.addEventListener('click', () => this.togglePanel(false));
+    $('panelScrim')?.addEventListener('click', () => this.togglePanel(false));
+    $('drawQuickBtn')?.addEventListener('click', () => this.askDraw());
+    $('resignQuickBtn')?.addEventListener('click', () => this.confirmResign());
     $('acceptDrawBtn').addEventListener('click', () => {
       this.session.acceptDraw();
       this.showToast(t('Draw accepted.'), 'ok');
@@ -484,6 +519,11 @@ class SalonApp {
     window.addEventListener('online', () => {
       if (!this.net.connected) this.net.manualRetry();
     });
+    // The board is framed against the HUD, so every layout change has to report
+    // its new free area — rotation included.
+    window.addEventListener('resize', () => this.syncInsets());
+    window.addEventListener('orientationchange', () => setTimeout(() => this.syncInsets(), 120));
+    window.visualViewport?.addEventListener('resize', () => this.syncInsets());
   }
 
   /* --------------------------------------------------------- connection */
@@ -601,6 +641,8 @@ class SalonApp {
     this.renderRooms();
     this.renderGame();
     this.updateStatus(this.lastNetStatus || { state: 'connecting' });
+    // Localised text changes the height of the strips; the board has to re-fit.
+    this.syncInsets();
     this.showToast(t(next === 'ru' ? 'Language switched to Russian' : 'Language switched to English'), 'ok');
   }
 
@@ -779,11 +821,12 @@ class SalonApp {
     this.resumeRetried = false;
     this.suspendedSeat = 0;
     this.holdUntil = 0;
+    this.resetSideClocks();
     $('game').classList.remove('offline');
-    $('copyBtn').hidden = false;
     $('lobby').hidden = true;
     $('game').hidden = false;
     document.body.classList.add('in-game');
+    this.syncInsets();
     const room = detail.room;
     $('roomTitle').textContent = room.name;
     $('roomKicker').textContent = `${t('Table')} #${room.id}`;
@@ -894,11 +937,12 @@ class SalonApp {
     this.legal = [];
     this.resultKey = '';
     this.closeResult();
+    this.resetSideClocks();
     $('game').classList.add('offline');
-    $('copyBtn').hidden = true;
     $('lobby').hidden = true;
     $('game').hidden = false;
     document.body.classList.add('in-game');
+    this.syncInsets();
     $('roomTitle').textContent = this.botName;
     $('roomKicker').textContent = `${t('Offline salon')} · ${this.botLevelName(this.offlineLevel)}`;
     $('inviteCode').textContent = '————————';
@@ -924,8 +968,8 @@ class SalonApp {
     this.offlineNet = null;
     this.offline = false;
     this.session = this.onlineSession;
+    this.resetSideClocks();
     $('game').classList.remove('offline');
-    $('copyBtn').hidden = false;
   }
 
   clearBotWatchdog() {
@@ -936,7 +980,7 @@ class SalonApp {
   ensureBotWorker() {
     if (this.botWorker || this.botWorkerBroken || typeof Worker === 'undefined') return;
     try {
-      this.botWorker = new Worker(new URL('./bot-worker.js?v=20261028-14', import.meta.url), { type: 'module' });
+      this.botWorker = new Worker(new URL('./bot-worker.js?v=20261029-1', import.meta.url), { type: 'module' });
       this.botWorker.onmessage = (event) => {
         const { id, move } = event.data || {};
         if (id !== this.botRequestId) return;
@@ -1057,7 +1101,9 @@ class SalonApp {
     $('game').hidden = true;
     $('lobby').hidden = false;
     $('game').classList.remove('view-black');
+    $('game').classList.remove('is-history-open');
     document.body.classList.remove('in-game');
+    this.syncInsets();
     this.hasRenderedBoard = false;
     this.lastFen = '';
     this.selected = null;
@@ -1161,7 +1207,6 @@ class SalonApp {
 
     $('inviteCode').textContent = room.id || '————————';
     $('inviteStrip').hidden = this.offline || (!!game.blackId && game.status === 'playing');
-    $('copyBtn').hidden = this.offline;
     $('spectatorBadge').hidden = !this.session.isSpectator;
     $('spectatorHint').hidden = !(this.session.isSpectator && game.blackId && game.whiteId && !this.offline);
     $('moveCount').textContent = this.moveCountLabel(Math.ceil(game.moves.length / 2));
@@ -1170,9 +1215,11 @@ class SalonApp {
     this.syncPresence(game, myColor);
     this.saveResume(game, room);
 
-    $('drawBtn').hidden = this.offline;
-    $('drawBtn').disabled = this.offline || !this.session.isPlaying || !!game.drawOffer || this.session.pending;
-    $('resignBtn').disabled = !this.session.isPlaying;
+    const drawQuick = $('drawQuickBtn');
+    if (drawQuick) {
+      drawQuick.disabled = this.offline || !this.session.isPlaying || !!game.drawOffer || this.session.pending;
+    }
+    if ($('resignQuickBtn')) $('resignQuickBtn').disabled = !this.session.isPlaying;
     $('hintBtn').disabled = !this.session.isPlaying || this.session.pending;
     $('rematchBtn').hidden = game.status === 'playing' || game.status === 'waiting';
     $('rematchBtn').disabled = !this.session.isHost;
@@ -1181,6 +1228,7 @@ class SalonApp {
     $('resultRematchBtn').title = this.session.isHost ? t('Start a new game') : t('The host starts the next game');
 
     this.syncInteraction();
+    // piece labels were removed on request
   }
 
   renderPlayerCard(side, player, color, turn) {
@@ -1286,17 +1334,18 @@ class SalonApp {
 
     if (game.status === 'playing') {
       phase.textContent = t('Game in progress');
-      const turnLabel = t(turn === 'w' ? 'White to move' : 'Black to move');
       const opponent = turn === myColor ? null : this.playerName(turn === 'w' ? game.whiteId : game.blackId);
       if (myColor && turn === myColor) {
         title.textContent = this.session.inCheck ? t('Check — your move') : t('Your move');
         text.textContent = t('Choose a piece on the board, then a square. Highlighted dots are legal moves.');
-        pill.textContent = t('your move');
+        // The pill names the side; the heading carries the action. Printing
+        // "your move" in both places was the duplicate on every screenshot.
+        pill.textContent = t(turn === 'w' ? 'White' : 'Black');
         pill.className = 'turn-pill is-mine';
       } else if (myColor) {
         title.textContent = t('{name} is thinking', { name: opponent || t('Opponent') });
         text.textContent = this.session.inCheck ? t('Opponent is in check. Watch their reply.') : t("Opponent's turn. Study the position or offer a draw.");
-        pill.textContent = turnLabel;
+        pill.textContent = t(turn === 'w' ? 'White' : 'Black');
         pill.className = 'turn-pill';
       } else {
         title.textContent = t('Game in progress');
@@ -1304,7 +1353,7 @@ class SalonApp {
           white: this.playerName(game.whiteId),
           black: this.playerName(game.blackId),
         });
-        pill.textContent = turnLabel;
+        pill.textContent = t(turn === 'w' ? 'White' : 'Black');
         pill.className = 'turn-pill';
       }
       return;
@@ -1402,7 +1451,23 @@ class SalonApp {
     }
     const from = game.startedAt || game.createdAt || Date.now();
     $('gameClock').textContent = formatClock(Date.now() - from);
+    this.tickSideClocks(game);
     this.renderPresence();
+  }
+
+  /** One second of thinking time goes to the side whose move it is. */
+  tickSideClocks(game) {
+    if (!this.sideClock) this.sideClock = { w: 0, b: 0 };
+    if (game.status === 'playing' && this.session.turn) this.sideClock[this.session.turn] += 1000;
+    const { w, b } = this.sideClock;
+    const white = $('whiteClock');
+    const black = $('blackClock');
+    if (white) white.textContent = formatClock(w);
+    if (black) black.textContent = formatClock(b);
+  }
+
+  resetSideClocks() {
+    this.sideClock = { w: 0, b: 0 };
   }
 
   playerName(id) {
@@ -1418,6 +1483,86 @@ class SalonApp {
     el.classList.add('is-visible');
     clearTimeout(this.turnTimer);
     this.turnTimer = setTimeout(() => el.classList.remove('is-visible'), 2200);
+  }
+
+  /* ---------------------------------------- HUD geometry, badge, labels */
+  /**
+   * The camera asks the HUD how much room it has left. Only boxes that actually
+   * cross the middle of the screen count: a card parked in the left corner must
+   * not shrink the board, while a full-width strip must.
+   */
+  syncInsets() {
+    const game = $('game');
+    if (!game || game.hidden) {
+      this.insets = null;
+      this.scene.setHudInsets();
+      return;
+    }
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const topBoxes = [document.querySelector('.topbar'), $('blackCard'), $('gameTopline')];
+    const bottomBoxes = [$('whiteCard'), $('boardControls')];
+    const crosses = (rect) => rect && rect.width > 0 && rect.left < w * 0.72 && rect.right > w * 0.28;
+    const visible = (el) => el && !el.hidden && getComputedStyle(el).display !== 'none';
+    let top = 0;
+    let bottom = 0;
+    for (const el of topBoxes) {
+      if (!visible(el)) continue;
+      const rect = el.getBoundingClientRect();
+      if (crosses(rect) && rect.top < h * 0.5) top = Math.max(top, rect.bottom);
+    }
+    for (const el of bottomBoxes) {
+      if (!visible(el)) continue;
+      const rect = el.getBoundingClientRect();
+      // The controls sit in the middle on a phone and in the corner in
+      // landscape; either way they own the bottom edge, so they always count.
+      const force = el.id === 'boardControls';
+      if (!force && !crosses(rect)) continue;
+      if (rect.top >= h * 0.4) bottom = Math.max(bottom, h - rect.top);
+    }
+    this.insets = { top: Math.round(top), bottom: Math.round(bottom) };
+    this.scene.setHudInsets(this.insets);
+  }
+
+  /**
+   * "What is this piece?" — the answer a beginner actually needs. Tapping any
+   * piece, friend or foe, names it and rings it on the board.
+   */
+  showPiecePeek(square) {
+    const piece = this.session.chess?.get(square);
+    const box = $('piecePeek');
+    if (!piece || !box) return;
+    const names = { p: 'pawn', r: 'rook', b: 'bishop', n: 'knight', q: 'queen', k: 'king' };
+    const hints = {
+      p: 'walks forward, captures diagonally',
+      r: 'moves along files and ranks',
+      b: 'moves along diagonals',
+      n: 'rides an L: two squares, then one to the side',
+      q: 'moves any distance on lines and diagonals',
+      k: 'one square in any direction',
+    };
+    $('peekGlyph').textContent = pieceGlyph(piece.type, piece.color);
+    $('peekName').textContent = t(`${piece.color === 'w' ? 'White' : 'Black'} ${names[piece.type]}`);
+    $('peekHint').textContent = t(hints[piece.type]);
+    box.dataset.color = piece.color;
+    box.hidden = false;
+    requestAnimationFrame(() => box.classList.add('is-visible'));
+    clearTimeout(this.peekTimer);
+    this.peekTimer = setTimeout(() => {
+      box.classList.remove('is-visible');
+      this.peekTimer = setTimeout(() => {
+        box.hidden = true;
+      }, 320);
+    }, 2400);
+    this.scene.pulseSquare(square);
+  }
+
+  togglePanel(force) {
+    const game = $('game');
+    if (!game) return;
+    const open = force === undefined ? !game.classList.contains('is-history-open') : !!force;
+    game.classList.toggle('is-history-open', open);
+    if (open) this.syncInsets();
   }
 
   syncInteraction() {
@@ -1470,6 +1615,15 @@ class SalonApp {
     const game = this.session.game;
     if (!game) return;
     if (this.session.pending) return;
+
+    // The move list is a side note, not a modal: touching the board closes it
+    // and makes the move in the same gesture.
+    if ($('game').classList.contains('is-history-open')) this.togglePanel(false);
+
+    // Name whatever was tapped — including the opponent's pieces, which is
+    // exactly where "is that a bishop or a pawn?" gets asked. Not while the
+    // result card owns the screen.
+    if (this.session.chess?.get(square) && $('resultCard').hidden) this.showPiecePeek(square);
 
     if (game.status === 'waiting') {
       if (this.session.myColor && this.session.chess?.get(square)?.color === this.session.myColor) {
@@ -1617,6 +1771,7 @@ class SalonApp {
       return;
     }
     if (this.session.game?.status === 'playing') return;
+    this.resetSideClocks();
     if (this.session.newGame()) {
       this.closeResult();
       this.lastViewColor = null;
@@ -1812,7 +1967,7 @@ class SalonApp {
         <div class="help-item"><span class="help-item__icon">♜</span><div><strong>${t('Camera')}</strong><p>${t('Drag the board with the mouse or a finger to spin the camera, the wheel or a pinch zooms, and “Top view” lays the board flat for a clean plan.')}</p></div></div>
         <div class="help-item"><span class="help-item__icon">♞</span><div><strong>${t('Opponent')}</strong><p>${t('Send a friend the table link. They will land straight in the game. For two players on one computer, a private window or a second browser profile is best.')}</p></div></div>
         <div class="help-item"><span class="help-item__icon">♛</span><div><strong>${t('Fair play')}</strong><p>${t('The server relays the position and moves, while the rules are checked on the client. This is a friendly salon, not an anti-cheat tournament.')}</p></div></div>
-        <div class="help-item"><span class="help-item__icon">✦</span><div><strong>${t('Keys')}</strong><p>${t('<b>R</b> — camera, <b>F</b> — flip, <b>M</b> — sound, <b>Esc</b> — close a window.')}</p></div></div>
+        <div class="help-item"><span class="help-item__icon">✦</span><div><strong>${t('Keys')}</strong><p>${t('<b>R</b> — camera, <b>F</b> — flip, <b>T</b> — top view, <b>Esc</b> — close a window.')}</p></div></div>
       </div>
       <div class="modal__actions">
         <button class="btn btn--gold btn--compact" id="helpOk" type="button">${t('Got it')}</button>

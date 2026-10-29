@@ -13,7 +13,7 @@
     />
     <title>Ornate · 3D Chess Salon</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src/styles.css?v=20261028-20" />
+    <link rel="stylesheet" href="./src/styles.css?v=20261029-2" />
     <script type="importmap">
       {
         "imports": {
@@ -81,6 +81,13 @@
       <symbol id="i-chevron" viewBox="0 0 24 24">
         <path d="m8 10 4 4 4-4" />
       </symbol>
+      <symbol id="i-list" viewBox="0 0 24 24">
+        <path d="M4 7h16M4 12h16M4 17h11" />
+      </symbol>
+      <symbol id="i-label" viewBox="0 0 24 24">
+        <path d="M3 12V6a2 2 0 0 1 2-2h6l9 9-8 8-9-9Z" />
+        <circle cx="7.5" cy="7.5" r="1.1" />
+      </symbol>
       <symbol id="i-github" viewBox="0 0 16 16">
         <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
       </symbol>
@@ -124,9 +131,7 @@
           <button class="icon-btn" id="helpBtn" type="button" aria-label="Rules and tips" data-i18n-aria="Rules and tips" title="Help" data-i18n-title="Help">
             <svg><use href="#i-help"></use></svg>
           </button>
-          <button class="icon-btn" id="fullscreenBtn" type="button" aria-label="Fullscreen" data-i18n-aria="Fullscreen" title="Fullscreen" data-i18n-title="Fullscreen">
-            <svg><use href="#i-expand"></use></svg>
-          </button>
+
         </div>
       </header>
 
@@ -217,43 +222,57 @@
         </section>
 
         <section class="screen game" id="game" aria-labelledby="roomTitle" hidden>
-          <div class="game__topline">
+          <div class="game__topline" id="gameTopline">
             <button class="text-btn" id="leaveBtn" type="button">
               <svg class="text-btn__arrow"><use href="#i-arrow"></use></svg>
               <span data-i18n="Back to lobby">Back to lobby</span>
             </button>
+
             <div class="match-title">
               <p class="panel-kicker" id="roomKicker" data-i18n="Table">Table</p>
-              <h2 id="roomTitle" data-i18n="Chess salon">Chess salon</h2>
-            </div>
-            <div class="match-tools">
-              <button class="icon-btn icon-btn--small" id="copyBtn" type="button" aria-label="Copy table link" data-i18n-aria="Copy table link" title="Invite a friend" data-i18n-title="Invite a friend">
-                <svg><use href="#i-link"></use></svg>
-              </button>
+              <div class="match-title__row">
+                <h2 id="roomTitle" data-i18n="Chess salon">Chess salon</h2>
+                <span class="match-clock" id="gameClock">00:00</span>
+              </div>
             </div>
           </div>
 
-          <aside class="player-card player-card--black" id="blackCard" aria-label="Black" data-i18n-aria="Black">
-            <div class="player-card__avatar" id="blackAvatar">♚</div>
-            <div class="player-card__body">
-              <span class="player-card__role" data-i18n="Black">Black</span>
-              <strong class="player-card__name" id="blackName" data-i18n="Waiting for opponent">Waiting for opponent</strong>
-              <span class="player-card__meta" id="blackMeta" data-i18n="seat available">seat available</span>
+          <aside class="players" aria-label="Players" data-i18n-aria="Players">
+            <p class="players__title" data-i18n="Players">Players</p>
+
+            <div class="player-card player-card--black" id="blackCard" aria-label="Black" data-i18n-aria="Black">
+              <div class="player-card__avatar" id="blackAvatar">♚</div>
+              <div class="player-card__body">
+                <strong class="player-card__name" id="blackName" data-i18n="Waiting for opponent">Waiting for opponent</strong>
+                <span class="player-card__meta" id="blackMeta" data-i18n="seat available">seat available</span>
+              </div>
+              <span class="player-card__clock" id="blackClock">0:00</span>
+              <span class="player-card__turn" id="blackTurn" data-i18n="move">move</span>
             </div>
-            <span class="player-card__turn" id="blackTurn" data-i18n="move">move</span>
+
+            <div class="player-card player-card--white" id="whiteCard" aria-label="White" data-i18n-aria="White">
+              <div class="player-card__avatar" id="whiteAvatar">♔</div>
+              <div class="player-card__body">
+                <strong class="player-card__name" id="whiteName" data-i18n="Table host">Table host</strong>
+                <span class="player-card__meta" id="whiteMeta" data-i18n="opening the game">opening the game</span>
+              </div>
+              <span class="player-card__clock" id="whiteClock">0:00</span>
+              <span class="player-card__turn" id="whiteTurn" data-i18n="move">move</span>
+            </div>
+
+            <p class="players__note" id="openingName" data-i18n="Opening ahead">Opening ahead</p>
           </aside>
 
-          <aside class="player-card player-card--white" id="whiteCard" aria-label="White" data-i18n-aria="White">
-            <div class="player-card__avatar" id="whiteAvatar">♔</div>
-            <div class="player-card__body">
-              <span class="player-card__role" data-i18n="White">White</span>
-              <strong class="player-card__name" id="whiteName" data-i18n="Table host">Table host</strong>
-              <span class="player-card__meta" id="whiteMeta" data-i18n="opening the game">opening the game</span>
-            </div>
-            <span class="player-card__turn" id="whiteTurn" data-i18n="move">move</span>
-          </aside>
+          <button class="history-tab" id="historyBtn" type="button" aria-label="Move history" data-i18n-aria="Move history" title="Move history" data-i18n-title="Move history">
+            <svg><use href="#i-list"></use></svg>
+            <span data-i18n="Moves">Moves</span>
+          </button>
 
-          <aside class="game-panel glass" aria-label="Game moves" data-i18n-aria="Game moves">
+          <aside class="game-panel history-sheet glass" id="gamePanel" aria-label="Game moves" data-i18n-aria="Game moves">
+            <button class="icon-btn icon-btn--small game-panel__close" id="panelClose" type="button" aria-label="Close" data-i18n-aria="Close">
+              <svg><use href="#i-close"></use></svg>
+            </button>
+
             <div class="game-panel__status">
               <div class="status-head">
                 <p class="panel-kicker" id="phaseLabel" data-i18n="Match">Match</p>
@@ -263,10 +282,6 @@
               <p id="statusText" data-i18n="The table is ready. Invite a friend by link.">The table is ready. Invite a friend by link.</p>
               <div class="status-meta">
                 <span id="moveCount" data-i18n="0 moves">0 moves</span>
-                <i></i>
-                <span id="gameClock">00:00</span>
-                <i></i>
-                <span id="openingName" data-i18n="Opening ahead">Opening ahead</span>
               </div>
             </div>
 
@@ -292,14 +307,6 @@
             </div>
 
             <div class="game-panel__actions">
-              <button class="action-btn" id="drawBtn" type="button">
-                <svg><use href="#i-handshake"></use></svg>
-                <span data-i18n="Draw">Draw</span>
-              </button>
-              <button class="action-btn action-btn--danger" id="resignBtn" type="button">
-                <svg><use href="#i-flag"></use></svg>
-                <span data-i18n="Resign">Resign</span>
-              </button>
               <button class="action-btn action-btn--wide" id="rematchBtn" type="button" hidden>
                 <svg><use href="#i-spark"></use></svg>
                 <span data-i18n="New game">New game</span>
@@ -307,20 +314,33 @@
             </div>
           </aside>
 
-          <div class="board-controls">
-            <button class="pill-btn" id="flipBtn" type="button">
-              <span data-i18n="Flip">Flip</span>
-              <svg><use href="#i-refresh"></use></svg>
-            </button>
+          <div class="game-panel__scrim" id="panelScrim" aria-hidden="true"></div>
+
+          <div class="board-controls" id="boardControls">
             <button class="pill-btn" id="hintBtn" type="button">
-              <span data-i18n="Hint">Hint</span>
+              <span class="pill-btn__text" data-i18n="Hint">Hint</span>
               <svg><use href="#i-spark"></use></svg>
             </button>
-            <span class="board-controls__divider"></span>
             <button class="pill-btn" id="topViewBtn" type="button">
-              <span data-i18n="Top view">Top view</span>
+              <span class="pill-btn__text" data-i18n="Top view">Top view</span>
               <svg><use href="#i-camera"></use></svg>
             </button>
+            <button class="pill-btn" id="drawQuickBtn" type="button">
+              <span class="pill-btn__text" data-i18n="Draw">Draw</span>
+              <svg><use href="#i-handshake"></use></svg>
+            </button>
+            <button class="pill-btn pill-btn--danger" id="resignQuickBtn" type="button">
+              <span class="pill-btn__text" data-i18n="Resign">Resign</span>
+              <svg><use href="#i-flag"></use></svg>
+            </button>
+          </div>
+
+          <div class="piece-peek" id="piecePeek" hidden aria-live="polite">
+            <span class="piece-peek__glyph" id="peekGlyph">♟</span>
+            <span class="piece-peek__body">
+              <strong id="peekName">—</strong>
+              <small id="peekHint"></small>
+            </span>
           </div>
 
           <div class="turn-toast" id="turnToast" aria-live="polite">
@@ -366,27 +386,10 @@
         </section>
       </main>
 
-      <footer class="footer">
-        <span>StarkFlow · WebSocket <i>wss://starkflow.orkestr.run/ws</i></span>
-        <span class="footer__right">
-          <a
-            class="footer__repo"
-            href="https://github.com/EwenLoy/starkflow"
-            target="_blank"
-            rel="noreferrer noopener"
-            aria-label="StarkFlow on GitHub"
-          >
-            <svg aria-hidden="true"><use href="#i-github"></use></svg>
-            <span>GitHub</span>
-          </a>
-          <span class="footer__made">Three.js · <span data-i18n="made with love for the game">made with love for the game</span></span>
-        </span>
-      </footer>
-
       <div class="toasts" id="toasts" aria-live="polite"></div>
       <div class="modal-root" id="modalRoot"></div>
     </div>
 
-    <script type="module" src="./src/main.js?v=20261028-24"></script>
+    <script type="module" src="./src/main.js?v=20261029-2"></script>
   </body>
 </html>

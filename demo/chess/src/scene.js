@@ -568,10 +568,6 @@ export class ChessScene {
     rim.target.position.set(0, 0.2, 0);
     this.scene.add(rim, rim.target);
 
-    const fill = new THREE.PointLight(0xffb37a, 7, 18, 2);
-    fill.position.set(-8.6, 1.8, 3.4);
-    this.scene.add(fill);
-
     // One warm pool per candlestick on the table - four candles, four lights, so
     // no candle is left standing there dark.
     this.candleLights = [];
@@ -639,18 +635,21 @@ export class ChessScene {
 
     const wood = new THREE.MeshPhysicalMaterial({
       color: 0x142720,
-      roughness: 0.29,
-      metalness: 0.24,
-      clearcoat: 0.45,
-      clearcoatRoughness: 0.3,
-      envMapIntensity: 0.6,
+      roughness: 0.46,
+      metalness: 0.1,
+      clearcoat: 0.12,
+      clearcoatRoughness: 0.75,
+      envMapIntensity: 0.32,
+      specularIntensity: 0.3,
     });
     const stone = new THREE.MeshPhysicalMaterial({
       color: 0x0a1511,
-      roughness: 0.35,
-      metalness: 0.16,
-      clearcoat: 0.35,
-      envMapIntensity: 0.42,
+      roughness: 0.52,
+      metalness: 0.05,
+      clearcoat: 0.06,
+      clearcoatRoughness: 0.85,
+      envMapIntensity: 0.24,
+      specularIntensity: 0.22,
     });
     const brass = new THREE.MeshStandardMaterial({
       color: 0xb78e4f,
@@ -791,11 +790,14 @@ export class ChessScene {
 
     const wood = new THREE.MeshPhysicalMaterial({
       color: 0x1c1109,
-      roughness: 0.42,
-      metalness: 0.14,
-      clearcoat: 0.34,
-      clearcoatRoughness: 0.45,
-      envMapIntensity: 0.24,
+      // The tabletop was a mirror at a low camera: a candle flame turned into
+      // a big oval pool next to the board. Matte it like the tiles.
+      roughness: 0.66,
+      metalness: 0.04,
+      clearcoat: 0.04,
+      clearcoatRoughness: 0.85,
+      envMapIntensity: 0.14,
+      specularIntensity: 0.18,
     });
     const stone = new THREE.MeshStandardMaterial({
       color: 0x09140f,

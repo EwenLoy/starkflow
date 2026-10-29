@@ -540,7 +540,7 @@ export class ChessScene {
     // *some* diffuse term or the pieces read as holes in the board.
     this.scene.add(new THREE.HemisphereLight(0x7c93a6, 0x0a1410, 0.34));
 
-    const key = new THREE.SpotLight(0xffd7ab, 96, 30, 0.66, 0.88, 2);
+    const key = new THREE.SpotLight(0xffd7ab, 96, 26, 0.5, 0.9, 2);
     key.position.set(-2.2, 11.8, 5.4);
     key.target.position.set(0, 0, 0);
     key.castShadow = true;
@@ -556,7 +556,7 @@ export class ChessScene {
     // A broad overhead shaft straight down on the table: the pool that makes the
     // board readable from a low camera. No cone mesh - it read as a curtain - and
     // no shadow map: the key already casts the only shadow in the room.
-    const shaft = new THREE.SpotLight(0xfff0d2, 72, 34, 0.56, 0.95, 2);
+    const shaft = new THREE.SpotLight(0xfff0d2, 72, 28, 0.44, 0.95, 2);
     shaft.position.set(0.4, 15.6, 1.2);
     shaft.target.position.set(0, 0, 0);
     this.scene.add(shaft, shaft.target);
@@ -798,9 +798,9 @@ export class ChessScene {
     });
     const stone = new THREE.MeshStandardMaterial({
       color: 0x09140f,
-      roughness: 0.5,
-      metalness: 0.26,
-      envMapIntensity: 0.3,
+      roughness: 0.6,
+      metalness: 0.08,
+      envMapIntensity: 0.12,
     });
     const velvet = new THREE.MeshPhysicalMaterial({
       color: 0x141110,
@@ -824,9 +824,11 @@ export class ChessScene {
       new THREE.PlaneGeometry(120, 120),
       new THREE.MeshStandardMaterial({
         color: 0x06100c,
-        roughness: 0.42,
-        metalness: 0.42,
-        envMapIntensity: 0.22,
+        // A metallic floor mirrored the bright studio environment whenever the
+        // camera grazed it from the black side, which read as a stray light.
+        roughness: 0.64,
+        metalness: 0.08,
+        envMapIntensity: 0.08,
       }),
     );
     floor.rotation.x = -Math.PI / 2;
@@ -954,9 +956,11 @@ export class ChessScene {
     const floorY = this.floorY ?? -2.35;
     const marbleCol = new THREE.MeshStandardMaterial({
       color: 0x1d2023,
-      roughness: 0.32,
-      metalness: 0.16,
-      envMapIntensity: 0.55,
+      // Fluted columns used to catch the environment at a grazing angle and
+      // turn silver from one camera side; keep the marble, lose the mirror.
+      roughness: 0.6,
+      metalness: 0.05,
+      envMapIntensity: 0.15,
     });
     const wax = new THREE.MeshStandardMaterial({
       color: 0xe6d8b6,

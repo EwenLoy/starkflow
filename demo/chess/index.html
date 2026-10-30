@@ -13,7 +13,7 @@
     />
     <title>Ornate · 3D Chess Salon</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src/styles.css?v=20261029-4" />
+    <link rel="stylesheet" href="./src/styles.css?v=20261029-5" />
     <script type="importmap">
       {
         "imports": {
@@ -53,6 +53,16 @@
         <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
         <path d="m16 17 5-5-5-5" />
         <path d="M21 12H9" />
+      </symbol>
+      <symbol id="i-eye" viewBox="0 0 24 24">
+        <path d="M2.2 12S5.8 5.6 12 5.6 21.8 12 21.8 12 18.2 18.4 12 18.4 2.2 12 2.2 12Z" />
+        <circle cx="12" cy="12" r="2.6" />
+      </symbol>
+      <symbol id="i-chat" viewBox="0 0 24 24">
+        <path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-5 3.6V17H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
+      </symbol>
+      <symbol id="i-send" viewBox="0 0 24 24">
+        <path d="m3 11 18-8-8 18-2.4-7.6L3 11Z" />
       </symbol>
       <symbol id="i-expand" viewBox="0 0 24 24">
         <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5" />
@@ -126,6 +136,10 @@
             <i class="net-pill__dot"></i>
             <span id="netText" data-i18n="Connecting…">Connecting…</span>
             <span class="net-pill__ping" id="pingText"></span>
+          </div>
+          <div class="watch-pill is-empty" id="watchPill" role="status" title="Spectators" data-i18n-title="Spectators" aria-live="polite">
+            <svg><use href="#i-eye"></use></svg>
+            <span id="watchCount">0</span>
           </div>
           <button class="lang-btn" id="langBtn" type="button" aria-label="Switch to Russian" data-i18n-aria="Switch to Russian" title="Switch to Russian" data-i18n-title="Switch to Russian">
             <span id="langLabel">RU</span>
@@ -351,6 +365,28 @@
             </button>
           </div>
 
+          <div class="chat" id="chat">
+            <button class="icon-btn chat__toggle" id="chatToggle" type="button" aria-label="Chat" data-i18n-aria="Chat" title="Chat" data-i18n-title="Chat" aria-expanded="false" aria-controls="chatPanel">
+              <svg><use href="#i-chat"></use></svg>
+              <span class="chat__badge" id="chatBadge" hidden>0</span>
+            </button>
+            <section class="chat__panel" id="chatPanel" hidden aria-label="Chat" data-i18n-aria="Chat">
+              <header class="chat__head">
+                <span data-i18n="Chat">Chat</span>
+                <button class="chat__close" id="chatClose" type="button" aria-label="Close" data-i18n-aria="Close">
+                  <svg><use href="#i-close"></use></svg>
+                </button>
+              </header>
+              <ol class="chat__list" id="chatList" aria-live="polite"></ol>
+              <form class="chat__form" id="chatForm">
+                <input class="chat__input" id="chatInput" maxlength="200" autocomplete="off" spellcheck="false" placeholder="To chat click here or press / key" data-i18n-placeholder="To chat click here or press / key" />
+                <button class="chat__send" id="chatSend" type="submit" aria-label="Send" data-i18n-aria="Send" title="Send" data-i18n-title="Send">
+                  <svg><use href="#i-send"></use></svg>
+                </button>
+              </form>
+            </section>
+          </div>
+
           <div class="piece-peek" id="piecePeek" hidden aria-live="polite">
             <span class="piece-peek__glyph" id="peekGlyph">♟</span>
             <span class="piece-peek__body">
@@ -406,6 +442,6 @@
       <div class="modal-root" id="modalRoot"></div>
     </div>
 
-    <script type="module" src="./src/main.js?v=20261029-11"></script>
+    <script type="module" src="./src/main.js?v=20261029-12"></script>
   </body>
 </html>

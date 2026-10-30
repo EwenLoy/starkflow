@@ -1,11 +1,11 @@
-import { ChessScene } from './scene.js?v=20261029-10';
+import { ChessScene } from './scene.js?v=20261029-11';
 import { StarkFlowClient } from './net.js?v=20261029-1';
-import { ChessSession, START_FEN } from './session.js?v=20261029-2';
+import { ChessSession, START_FEN } from './session.js?v=20261029-3';
 import { ChessAudio } from './audio.js?v=20261029-1';
 import { chooseBotMove, findHint, openingName } from './engine.js?v=20261029-1';
 import { pieceGlyph, setSculpt } from './pieces.js?v=20261029-2';
 import { loadGlb } from './glb.js?v=20261029-2';
-import { LocalNet } from './offline.js?v=20261029-1';
+import { LocalNet } from './offline.js?v=20261029-2';
 import {
   applyTranslations,
   getLocale,
@@ -13,7 +13,7 @@ import {
   pluralRu,
   setLocale,
   t,
-} from './i18n.js?v=20261029-2';
+} from './i18n.js?v=20261029-3';
 
 import { WS_URL } from './env.js?v=20261029-1';
 
@@ -222,6 +222,8 @@ class SalonApp {
     this.suppressTurnToast = true;
     this.modalOpen = false;
     this.exitMenuOpen = false;
+    this.chatOpen = false;
+    this.chatUnread = 0;
     this.lastFocus = null;
     this.hintBusy = false;
     this.latency = null;
@@ -385,7 +387,8 @@ class SalonApp {
     this.net.on('error', (err) => this.onNetError(err));
     this.net.on('game.event', (event) => {
       if (event.code === 90 && event.data?.text) {
-        this.showToast(`${this.playerName(event.from)}: ${String(event.data.text).slice(0, 80)}`);
+        const text = String(event.data.text).replace(/\s+/g, ' ').trim().slice(0, 200);
+        if (text) this.addChatMessage({ name: this.playerName(event.from), text, mine: false });
       }
     });
   }
@@ -486,6 +489,12 @@ class SalonApp {
     $('exitLeaveBtn').addEventListener('click', () => this.runExitAction('leave'));
     $('exitResignBtn').addEventListener('click', () => this.runExitAction('resign'));
     $('exitDrawBtn').addEventListener('click', () => this.runExitAction('draw'));
+    $('chatToggle').addEventListener('click', () => (this.chatOpen ? this.closeChat() : this.openChat()));
+    $('chatClose').addEventListener('click', () => this.closeChat());
+    $('chatForm').addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.sendChat();
+    });
     $('brandBtn').addEventListener('click', () => {
       if (this.gnet.room) this.confirmLeave();
     });
@@ -803,6 +812,7 @@ class SalonApp {
   enterGame(detail) {
     this.offline = false;
     this.session = this.onlineSession;
+    this.resetChat();
     this.suppressTurnToast = true;
     this.lastViewColor = null;
     this.hasRenderedBoard = false;
@@ -920,6 +930,7 @@ class SalonApp {
   }
 
   enterOfflineGame() {
+    this.resetChat();
     this.suppressTurnToast = true;
     this.lastViewColor = null;
     this.hasRenderedBoard = false;
@@ -1082,6 +1093,7 @@ class SalonApp {
 
   enterLobby() {
     this.closeExitMenu();
+    this.resetChat();
     if (this.offline) this.stopOfflineSession();
     this.session = this.onlineSession;
     this.clearRoomQuery();
@@ -1104,7 +1116,7 @@ class SalonApp {
     $('inviteStrip').hidden = false;
     this.enemyPreview = null;
     this.scene.setMode('lobby');
-    this.scene.setSpectatorGhost(false);
+    this.scene.setSpectators([]);
     this.scene.clearSelection();
     this.scene.setCheck(null);
     this.scene.clearBoard();
@@ -1170,10 +1182,24 @@ class SalonApp {
     return `${n} ${n === 1 ? 'move' : 'moves'}`;
   }
 
+  /** Everybody in the room who is not sitting at the board. */
+  spectatorsNow() {
+    if (this.offline || !this.gnet.room) return [];
+    const game = this.session.game;
+    if (!game) return [];
+    const seated = new Set([game.whiteId, game.blackId].filter(Boolean));
+    return this.gnet.playerList()
+      .filter((player) => player.status !== 'suspended' && !seated.has(player.id))
+      .map((player) => ({ id: player.id, name: player.name || t('Player #{id}', { id: player.id }) }));
+  }
+
   renderGame() {
     if ($('game').hidden) return;
     this.clearEnemyPreview();
-    this.scene.setSpectatorGhost(this.session.isSpectator);
+    const watchers = this.spectatorsNow();
+    $('watchCount').textContent = String(watchers.length);
+    $('watchPill').classList.toggle('is-empty', watchers.length === 0);
+    this.scene.setSpectators(watchers);
     const game = this.session.game;
     const room = this.gnet.room;
     if (!room) return;
@@ -1597,7 +1623,7 @@ class SalonApp {
 
     const target = event.target;
     if (!(target instanceof Element)) return;
-    if (target.closest('button, a, input, textarea, select, .topbar, .game-panel, .player-card, .board-controls, .result-card, .draw-offer, .turn-toast, .spectator-hint, .modal-root')) {
+    if (target.closest('button, a, input, textarea, select, .topbar, .game-panel, .player-card, .board-controls, .result-card, .draw-offer, .turn-toast, .spectator-hint, .modal-root, .chat')) {
       return;
     }
     const square = this.scene.squareFromPoint(event.clientX, event.clientY);
@@ -1906,6 +1932,10 @@ class SalonApp {
         this.closeModal();
         return;
       }
+      if (this.chatOpen) {
+        this.closeChat();
+        return;
+      }
       if (this.selected) {
         this.selected = null;
         this.legal = [];
@@ -1917,6 +1947,11 @@ class SalonApp {
     const target = e.target;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
     if (this.modalOpen) return;
+    if (e.key === '/' && !this.offline && this.gnet.room) {
+      e.preventDefault();
+      this.openChat();
+      return;
+    }
     if (e.key === 'r' || e.key === 'R') this.scene.resetCamera();
     if (e.key === 'f' || e.key === 'F') this.scene.flipView();
     if (e.key === 't' || e.key === 'T') this.scene.topView();
@@ -1935,6 +1970,72 @@ class SalonApp {
       this.showToast(t(on ? 'Sound on' : 'Sound off'));
     }
     if (e.key === '?') this.openHelp();
+  }
+
+  /* ----------------------------------------------------------------- chat */
+  resetChat() {
+    $('chatList').replaceChildren();
+    this.chatOpen = false;
+    $('chatPanel').hidden = true;
+    $('chatToggle').setAttribute('aria-expanded', 'false');
+    this.setChatUnread(0);
+  }
+
+  openChat() {
+    if (!this.gnet.room) return;
+    this.chatOpen = true;
+    $('chatPanel').hidden = false;
+    $('chatToggle').setAttribute('aria-expanded', 'true');
+    this.setChatUnread(0);
+    this.scrollChat();
+    $('chatInput').focus();
+  }
+
+  closeChat() {
+    this.chatOpen = false;
+    $('chatPanel').hidden = true;
+    $('chatToggle').setAttribute('aria-expanded', 'false');
+  }
+
+  sendChat() {
+    if (this.offline) {
+      this.showToast(t('Chat is available at online tables.'));
+      return;
+    }
+    if (!this.gnet.connected || !this.gnet.room) return;
+    const input = $('chatInput');
+    const text = input.value.replace(/\s+/g, ' ').trim().slice(0, 200);
+    if (!text) return;
+    input.value = '';
+    this.net.sendEvent(90, { text }, 'others');
+    this.addChatMessage({ name: this.gnet.welcomeInfo?.name || this.name, text, mine: true });
+  }
+
+  addChatMessage({ name, text, mine }) {
+    const list = $('chatList');
+    const item = document.createElement('li');
+    item.className = `chat__msg${mine ? ' is-mine' : ''}`;
+    const who = document.createElement('strong');
+    who.textContent = `${name}: `;
+    const body = document.createElement('span');
+    body.textContent = text;
+    item.append(who, body);
+    list.appendChild(item);
+    while (list.children.length > 80) list.firstElementChild.remove();
+    if (this.chatOpen || mine) this.scrollChat();
+    else this.setChatUnread(this.chatUnread + 1);
+  }
+
+  scrollChat() {
+    const list = $('chatList');
+    list.scrollTop = list.scrollHeight;
+  }
+
+  setChatUnread(n) {
+    this.chatUnread = Math.max(0, n);
+    const badge = $('chatBadge');
+    badge.textContent = this.chatUnread > 9 ? '9+' : String(this.chatUnread);
+    badge.hidden = this.chatUnread === 0 || this.chatOpen;
   }
 
   refreshSoundButton() {

@@ -1,5 +1,5 @@
 import { Chess, validateFen } from '../vendor/chess.js/chess.js';
-import { t } from './i18n.js?v=20261029-2';
+import { t } from './i18n.js?v=20261029-3';
 
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const MAX_STORED_MOVES = 360;

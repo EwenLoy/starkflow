@@ -1345,7 +1345,6 @@ export class ChessScene {
    * the board and keeps an eye on the game.
    */
   #buildGhost() {
-    const group = new THREE.Group();
     const bodyMat = new THREE.MeshPhysicalMaterial({
       color: 0xf4f8ff,
       roughness: 0.42,
@@ -1361,7 +1360,26 @@ export class ChessScene {
     });
     const inkMat = new THREE.MeshStandardMaterial({ color: 0x161b24, roughness: 0.35, metalness: 0.1 });
     const blushMat = new THREE.MeshBasicMaterial({ color: 0xef9ca6, transparent: true, opacity: 0.5, depthWrite: false });
+    const haloMat = new THREE.SpriteMaterial({
+      map: radialTexture('rgba(170,205,245,.4)', 'rgba(120,170,230,0)'),
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    // One ghost per spectator, parked around the table; four is enough for a
+    // salon, the eye pill carries the full count.
+    this.ghostSpots = [
+      [6.15, 1.55, 2.7],
+      [-6.15, 1.55, 2.7],
+      [6.15, 1.55, -2.7],
+      [-6.15, 1.55, -2.7],
+    ];
+    this.ghosts = this.ghostSpots.map((spot) => this.#makeGhost(spot, { bodyMat, inkMat, blushMat, haloMat }));
+  }
 
+  #makeGhost(spot, { bodyMat, inkMat, blushMat, haloMat }) {
+    const group = new THREE.Group();
     const profile = [
       [0.001, 1.18], [0.13, 1.16], [0.25, 1.1], [0.35, 1.01], [0.43, 0.9],
       [0.49, 0.78], [0.53, 0.62], [0.55, 0.45], [0.55, 0.28], [0.535, 0.12],
@@ -1417,42 +1435,100 @@ export class ChessScene {
       group.add(arm);
     }
 
-    const halo = new THREE.Sprite(
-      new THREE.SpriteMaterial({
-        map: radialTexture('rgba(170,205,245,.4)', 'rgba(120,170,230,0)'),
-        transparent: true,
-        opacity: 0.5,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      }),
-    );
+    const halo = new THREE.Sprite(haloMat);
     halo.scale.set(2.4, 2.4, 1);
     halo.position.set(0, 0.65, -0.15);
     group.add(halo);
 
-    group.position.set(6.15, 1.62, 1.9);
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false }));
+    label.position.set(0, 1.4, 0);
+    label.scale.set(1.8, 0.45, 1);
+    group.add(label);
+
+    group.position.set(spot[0], spot[1], spot[2]);
     group.scale.setScalar(0.95);
     group.visible = false;
     this.scene.add(group);
-    group.lookAt(new THREE.Vector3(0, 0.6, 0));
-    this.ghost = group;
-    this.ghostBaseY = group.position.y;
-    this.ghostYaw = group.rotation.y;
-    this.ghostEyes = eyes;
+    return { group, eyes, label, name: '', baseY: spot[1], yaw: 0 };
   }
 
-  setSpectatorGhost(on) {
-    if (this.ghost) this.ghost.visible = !!on;
+  /** One label texture per spectator name; sprites keep the nick readable. */
+  #ghostNameTexture(name) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    const text = String(name || '').trim().slice(0, 22) || 'Guest';
+    ctx.clearRect(0, 0, 512, 128);
+    ctx.fillStyle = 'rgba(3, 10, 8, 0.72)';
+    ctx.strokeStyle = 'rgba(201, 161, 93, 0.5)';
+    ctx.lineWidth = 3;
+    const x = 10;
+    const y = 20;
+    const w = 492;
+    const h = 88;
+    const r = 44;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#f0e6cf';
+    ctx.font = '600 44px Manrope, "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 256, 66);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    return texture;
+  }
+
+  /**
+   * Show one ghost per spectator, each with its nickname above the hem. Players
+   * call this too, so everybody sees who is watching the table.
+   */
+  setSpectators(list) {
+    if (!this.ghosts) return;
+    const shown = Array.isArray(list) ? list.slice(0, this.ghosts.length) : [];
+    for (let i = 0; i < this.ghosts.length; i += 1) {
+      const ghost = this.ghosts[i];
+      const watcher = shown[i];
+      if (!watcher) {
+        ghost.group.visible = false;
+        continue;
+      }
+      ghost.group.visible = true;
+      ghost.group.position.set(...this.ghostSpots[i]);
+      ghost.group.lookAt(new THREE.Vector3(0, 0.6, 0));
+      ghost.baseY = ghost.group.position.y;
+      ghost.yaw = ghost.group.rotation.y;
+      if (ghost.name !== watcher.name) {
+        ghost.name = watcher.name;
+        const map = this.#ghostNameTexture(watcher.name);
+        if (ghost.label.material.map) ghost.label.material.map.dispose();
+        ghost.label.material.map = map;
+        ghost.label.material.needsUpdate = true;
+      }
+    }
   }
 
   #updateGhost() {
-    if (!this.ghost || !this.ghost.visible) return;
+    if (!this.ghosts) return;
     const t = this.time;
-    this.ghost.position.y = this.ghostBaseY + Math.sin(t * 1.25) * 0.07;
-    this.ghost.rotation.y = this.ghostYaw + Math.sin(t * 0.6) * 0.1;
-    this.ghost.rotation.z = Math.sin(t * 0.9) * 0.03;
-    const blink = (t % 4.6) > 4.44 ? 0.12 : 1;
-    for (const eye of this.ghostEyes) eye.scale.y = 1.45 * blink;
+    for (let i = 0; i < this.ghosts.length; i += 1) {
+      const ghost = this.ghosts[i];
+      if (!ghost.group.visible) continue;
+      ghost.group.position.y = ghost.baseY + Math.sin(t * 1.25 + i * 1.7) * 0.07;
+      ghost.group.rotation.y = ghost.yaw + Math.sin(t * 0.6 + i) * 0.1;
+      ghost.group.rotation.z = Math.sin(t * 0.9 + i * 0.8) * 0.03;
+      const blink = (t + i * 1.3) % 4.6 > 4.44 ? 0.12 : 1;
+      for (const eye of ghost.eyes) eye.scale.y = 1.45 * blink;
+    }
   }
 
   #setupPost() {

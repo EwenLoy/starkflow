@@ -576,6 +576,43 @@ svg {
   text-transform: none;
 }
 
+/* Spectator count: an eye where the online status sits. */
+.watch-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 11px;
+  margin-right: 4px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: rgba(5, 14, 11, 0.55);
+  color: var(--ivory);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  backdrop-filter: blur(12px);
+}
+
+.watch-pill svg {
+  width: 15px;
+  height: 15px;
+  color: var(--gold-bright);
+}
+
+.watch-pill.is-empty {
+  color: var(--muted-2);
+}
+
+.watch-pill.is-empty svg {
+  color: var(--muted-2);
+}
+
+body:not(.in-game) .watch-pill {
+  display: none;
+}
+
 .icon-btn {
   display: grid;
   place-items: center;
@@ -1918,6 +1955,193 @@ body:not(.in-game) .exit-menu {
 .pill-btn:hover {
   background: rgba(201, 161, 93, 0.1);
   color: var(--gold-bright);
+}
+
+/* ---------------------------------------------------------------- chat */
+.chat {
+  position: absolute;
+  left: clamp(14px, 2.6vw, 40px);
+  bottom: 86px;
+  z-index: 7;
+}
+
+.chat__toggle {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid rgba(201, 161, 93, 0.3);
+  background: rgba(4, 12, 9, 0.72);
+  color: var(--muted);
+  cursor: pointer;
+  backdrop-filter: blur(14px);
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+
+.chat__toggle svg {
+  width: 19px;
+  height: 19px;
+}
+
+.chat__toggle:hover {
+  color: var(--gold-bright);
+  border-color: var(--line-strong);
+  background: rgba(201, 161, 93, 0.1);
+}
+
+.chat__badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  place-items: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: var(--gold-bright);
+  color: #1c150b;
+  font-size: 9px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px rgba(4, 12, 9, 0.8);
+}
+
+.chat__badge[hidden] {
+  display: none;
+}
+
+.chat__panel {
+  position: absolute;
+  left: 0;
+  bottom: 58px;
+  display: flex;
+  flex-direction: column;
+  width: min(320px, calc(100vw - 28px));
+  max-height: min(300px, 52vh);
+  padding: 10px 11px 11px;
+  border: 1px solid rgba(201, 161, 93, 0.24);
+  border-radius: 14px;
+  background: rgba(4, 12, 9, 0.84);
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(18px);
+}
+
+.chat__panel[hidden] {
+  display: none;
+}
+
+.chat__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 7px;
+  color: var(--gold);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.chat__close {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted-2);
+  cursor: pointer;
+}
+
+.chat__close svg {
+  width: 13px;
+  height: 13px;
+}
+
+.chat__close:hover {
+  color: var(--gold-bright);
+}
+
+.chat__list {
+  flex: 1;
+  min-height: 64px;
+  margin: 0;
+  padding: 2px 2px 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.chat__msg {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.chat__msg strong {
+  color: var(--gold-bright);
+  font-weight: 700;
+}
+
+.chat__msg.is-mine strong {
+  color: #a9d9c0;
+}
+
+.chat__form {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.chat__input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid rgba(201, 161, 93, 0.18);
+  border-radius: 8px;
+  outline: none;
+  background: rgba(3, 10, 8, 0.5);
+  color: var(--ivory);
+  font-family: var(--font-ui);
+  font-size: 11px;
+}
+
+.chat__input:focus {
+  border-color: rgba(201, 161, 93, 0.55);
+}
+
+.chat__input::placeholder {
+  color: rgba(168, 181, 170, 0.45);
+}
+
+.chat__send {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(201, 161, 93, 0.3);
+  border-radius: 8px;
+  background: rgba(201, 161, 93, 0.12);
+  color: var(--gold-bright);
+  cursor: pointer;
+}
+
+.chat__send svg {
+  width: 15px;
+  height: 15px;
+}
+
+.chat__send:hover {
+  background: rgba(201, 161, 93, 0.2);
 }
 
 .turn-toast {
@@ -3613,6 +3837,30 @@ draw-offer .mini-btn {
 
   .fullscreen-btn {
     display: grid;
+  }
+
+  .topbar__tools {
+    gap: 6px;
+  }
+
+  .watch-pill {
+    min-height: 34px;
+    padding: 0 8px;
+  }
+
+  .chat {
+    left: 10px;
+    bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .chat__panel {
+    width: calc(100vw - 20px);
+    max-height: 52vh;
+  }
+
+  /* 16px keeps iOS from zooming the whole board when the input is focused. */
+  .chat__input {
+    font-size: 16px;
   }
 
   /* The top line stops being a second header: it becomes the back button,
